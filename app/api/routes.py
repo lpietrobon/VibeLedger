@@ -1,8 +1,13 @@
-from datetime import date
+from datetime import date, datetime
+import logging
+import os
+import subprocess
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.plaid_client import PlaidClient
 from app.schemas.plaid import (
@@ -11,11 +16,41 @@ from app.schemas.plaid import (
     PublicTokenExchangeRequest,
     PublicTokenExchangeResponse,
 )
-from app.models.models import Item, Transaction, TransactionAnnotation
+from app.models.models import ConnectSession, Item, Transaction, TransactionAnnotation
 from app.services.security import encrypt_token
 from app.services.sync_service import SyncService
+from app.services.connect_service import ConnectService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _run_connect_tunnel(action: str) -> None:
+    """
+    Path-scoped Funnel helper.
+
+    If CONNECT_TUNNEL_STRICT=1 (default when automation is enabled), failures
+    raise and block the request. If strict is off, failures are logged only.
+    """
+    if os.getenv("CONNECT_TUNNEL_AUTOMATION", "0") != "1":
+        return
+
+    strict = os.getenv("CONNECT_TUNNEL_STRICT", "1") == "1"
+    script = os.getenv("CONNECT_TUNNEL_SCRIPT", "./scripts/connect_funnel.sh")
+    try:
+        proc = subprocess.run(
+            [script, action],
+            cwd=os.getenv("CONNECT_TUNNEL_CWD", os.getcwd()),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if proc.stdout.strip():
+            logger.info("connect tunnel %s: %s", action, proc.stdout.strip())
+    except Exception as e:
+        if strict:
+            raise RuntimeError(f"connect tunnel {action} failed: {e}") from e
+        logger.warning("connect tunnel %s failed: %s", action, e)
 
 
 def get_db():
@@ -57,6 +92,124 @@ def exchange_public_token(payload: PublicTokenExchangeRequest, db: Session = Dep
 
     db.commit()
     return PublicTokenExchangeResponse(item_id=resp["item_id"], status="linked")
+
+
+@router.post("/connect/sessions")
+def create_connect_session(payload: dict, db: Session = Depends(get_db)):
+    user_id = payload.get("user_id", "default-user")
+    session = ConnectService().create_session(db, user_id=user_id)
+
+    # Open short-lived public path for the connect flow.
+    try:
+        _run_connect_tunnel("open")
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    connect_url = f"{settings.app_base_url}/connect/start?session={session.session_token}"
+    return {
+        "session_token": session.session_token,
+        "expires_at": session.expires_at.isoformat(),
+        "connect_url": connect_url,
+    }
+
+
+@router.get("/connect/start", response_class=HTMLResponse)
+def connect_start(session: str, db: Session = Depends(get_db)):
+    svc = ConnectService()
+    active = svc.get_active_session(db, session)
+    if not active:
+        raise HTTPException(status_code=400, detail="invalid or expired session")
+
+    client = PlaidClient()
+    link_token = client.create_link_token(active.user_id)["link_token"]
+
+    html = f"""
+<!doctype html>
+<html>
+  <head><title>VibeLedger Connect</title></head>
+  <body>
+    <h3>Connect your account to VibeLedger</h3>
+    <button id='link-button'>Connect with Plaid</button>
+    <script src='https://cdn.plaid.com/link/v2/stable/link-initialize.js'></script>
+    <script>
+      const sessionToken = {session!r};
+      const handler = Plaid.create({{
+        token: {link_token!r},
+        onSuccess: async (public_token, metadata) => {{
+          const resp = await fetch('/connect/complete', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{ session_token: sessionToken, public_token }})
+          }});
+          if (resp.ok) {{
+            document.body.innerHTML = '<h3>✅ Account connected. You can return to Discord.</h3>';
+          }} else {{
+            document.body.innerHTML = '<h3>❌ Failed to connect. Please retry.</h3>';
+          }}
+        }}
+      }});
+      document.getElementById('link-button').onclick = () => handler.open();
+    </script>
+  </body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
+@router.post("/connect/complete")
+def connect_complete(payload: dict, db: Session = Depends(get_db)):
+    session_token = payload.get("session_token")
+    public_token = payload.get("public_token")
+    if not session_token or not public_token:
+        raise HTTPException(status_code=400, detail="missing session_token or public_token")
+
+    svc = ConnectService()
+    active = svc.get_active_session(db, session_token)
+    if not active:
+        raise HTTPException(status_code=400, detail="invalid or expired session")
+
+    client = PlaidClient()
+    resp = client.exchange_public_token(public_token)
+
+    existing = db.query(Item).filter(Item.plaid_item_id == resp["item_id"]).first()
+    if not existing:
+        existing = Item(
+            plaid_item_id=resp["item_id"],
+            access_token_encrypted=encrypt_token(resp["access_token"]),
+            status="active",
+        )
+        db.add(existing)
+    else:
+        existing.access_token_encrypted = encrypt_token(resp["access_token"])
+        existing.status = "active"
+
+    active.status = "completed"
+    active.plaid_item_id = resp["item_id"]
+    active.completed_at = datetime.utcnow()
+    db.commit()
+
+    # Close short-lived public path right after successful token exchange.
+    # This is path-scoped, so other Funnel handlers stay up.
+    try:
+        _run_connect_tunnel("close")
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    return {"status": "linked", "item_id": resp["item_id"]}
+
+
+@router.get("/connect/sessions/{session_token}")
+def connect_session_status(session_token: str, db: Session = Depends(get_db)):
+    session = db.query(ConnectSession).filter(ConnectSession.session_token == session_token).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {
+        "status": session.status,
+        "created_at": session.created_at.isoformat(),
+        "expires_at": session.expires_at.isoformat(),
+        "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+        "item_id": session.plaid_item_id,
+    }
 
 
 @router.post("/sync/item/{item_id}")

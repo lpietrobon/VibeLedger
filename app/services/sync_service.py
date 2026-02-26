@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy.orm import Session
 from app.models.models import Account, Item, SyncRun, SyncState, Transaction
 from app.services.plaid_client import PlaidClient
@@ -72,12 +72,16 @@ class SyncService:
                 existing.raw_json = json.dumps(t)
             else:
                 added_count += 1
+                tx_date = t.get("date")
+                if isinstance(tx_date, str):
+                    tx_date = date.fromisoformat(tx_date)
+
                 db.add(
                     Transaction(
                         plaid_transaction_id=t["transaction_id"],
                         account_id=account.id,
                         item_id=item_id,
-                        date=t["date"],
+                        date=tx_date,
                         amount=t["amount"],
                         name=t["name"],
                         merchant_name=t.get("merchant_name"),

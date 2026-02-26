@@ -62,3 +62,30 @@ VibeLedger is a single-user personal finance app that aggregates transactions fr
 - [x] Add `GET /analytics/category-spend`
 - [x] Add `GET /analytics/cashflow-trend`
 - [x] Add minimal tests for aggregation correctness
+
+### Phase 5 — Discord-triggered Connect URL Flow
+- [x] Add signed connect session creation endpoint (`POST /connect/sessions`)
+- [x] Add browser start page (`GET /connect/start?session=...`) to launch Plaid Link
+- [x] Add completion callback endpoint (`POST /connect/complete`) that exchanges `public_token`
+- [x] Add connect session status endpoint (`GET /connect/sessions/{session_token}`)
+- [x] Add minimal tests for session creation/status and invalid completion
+
+### Phase 6 — Real Plaid SDK Integration
+- [x] Wire Plaid SDK client init by environment (`sandbox|development|production`)
+- [x] Implement real `link_token/create` call (with products + country codes)
+- [x] Implement real `item/public_token/exchange` call
+- [x] Implement real `transactions/sync` loop with pagination handling
+- [x] Keep mock mode toggle (`PLAID_USE_MOCK`) for local tests
+
+### Phase 6 — Secret handling hardening
+- [x] Replace placeholder token encoding with authenticated encryption (Fernet)
+- [x] Add startup validation for required secret env vars
+- [x] Document env requirements and full connect->encrypt->sync flow in README
+- [x] Keep tests passing with explicit test-time secret env defaults
+
+### Phase 7 — Real Plaid SDK wiring
+- [x] Add Plaid Python SDK dependency and config flags
+- [x] Implement real `link_token_create` flow when `PLAID_USE_MOCK=false`
+- [x] Implement real `item_public_token_exchange` flow when `PLAID_USE_MOCK=false`
+- [x] Implement real `transactions_sync` loop with pagination + normalization
+- [x] Keep mock mode for local tests/dev and preserve passing test suite
