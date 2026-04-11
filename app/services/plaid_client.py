@@ -85,6 +85,46 @@ class PlaidClient:
             "item_id": response["item_id"],
         }
 
+    def get_accounts(self, access_token: str) -> list[dict[str, Any]]:
+        if self._mock:
+            return [
+                {
+                    "account_id": "acct-001",
+                    "name": "Mock Checking",
+                    "official_name": "Mock Checking Account",
+                    "mask": "0000",
+                    "type": "depository",
+                    "subtype": "checking",
+                    "current_balance": 1000.00,
+                    "available_balance": 1000.00,
+                    "iso_currency_code": "USD",
+                    "limit": None,
+                }
+            ]
+
+        from plaid.model.accounts_get_request import AccountsGetRequest
+
+        request = AccountsGetRequest(access_token=access_token)
+        response = self._client.accounts_get(request)
+        out: list[dict[str, Any]] = []
+        for a in response.get("accounts", []):
+            b = a.get("balances", {})
+            out.append(
+                {
+                    "account_id": a.get("account_id"),
+                    "name": a.get("name"),
+                    "official_name": a.get("official_name"),
+                    "mask": a.get("mask"),
+                    "type": str(a.get("type")) if a.get("type") is not None else None,
+                    "subtype": str(a.get("subtype")) if a.get("subtype") is not None else None,
+                    "current_balance": b.get("current"),
+                    "available_balance": b.get("available"),
+                    "iso_currency_code": b.get("iso_currency_code"),
+                    "limit": b.get("limit"),
+                }
+            )
+        return out
+
     def sync_transactions(self, access_token: str, cursor: str | None = None) -> dict:
         if self._mock:
             return {
@@ -96,6 +136,7 @@ class PlaidClient:
                         "amount": 12.34,
                         "name": "Coffee Shop",
                         "merchant_name": "Coffee Shop",
+                        "plaid_category_primary": "FOOD_AND_DRINK",
                         "pending": False,
                     }
                 ],
@@ -138,6 +179,7 @@ class PlaidClient:
     @staticmethod
     def _normalize_txn(t: dict[str, Any]) -> dict[str, Any]:
         d = t.get("date")
+        pfc = t.get("personal_finance_category") or {}
         return {
             "transaction_id": t["transaction_id"],
             "account_id": t["account_id"],
@@ -145,5 +187,6 @@ class PlaidClient:
             "amount": t["amount"],
             "name": t.get("name") or "",
             "merchant_name": t.get("merchant_name"),
+            "plaid_category_primary": pfc.get("primary"),
             "pending": t.get("pending", False),
         }

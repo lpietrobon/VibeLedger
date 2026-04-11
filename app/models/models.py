@@ -26,9 +26,14 @@ class Account(Base):
     plaid_account_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id"))
     name: Mapped[str] = mapped_column(String(255))
+    official_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mask: Mapped[str | None] = mapped_column(String(8), nullable=True)
     type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     subtype: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    current_balance: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    available_balance: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    credit_limit: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -46,6 +51,7 @@ class Transaction(Base):
     amount: Mapped[float] = mapped_column(Numeric(12, 2))
     name: Mapped[str] = mapped_column(String(255))
     merchant_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    plaid_category_primary: Mapped[str | None] = mapped_column(String(128), nullable=True)
     pending: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -100,3 +106,17 @@ class ConnectSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AccountBalanceSnapshot(Base):
+    __tablename__ = "account_balance_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    as_of_date: Mapped[date] = mapped_column(Date, index=True)
+    current_balance: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    available_balance: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    iso_currency_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    limit_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="accounts_get")
+    pulled_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
