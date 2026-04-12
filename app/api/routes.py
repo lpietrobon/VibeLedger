@@ -11,10 +11,13 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.plaid_client import PlaidClient
 from app.schemas.plaid import (
+    ConnectCompleteRequest,
+    ConnectSessionCreateRequest,
     LinkTokenRequest,
     LinkTokenResponse,
     PublicTokenExchangeRequest,
     PublicTokenExchangeResponse,
+    TransactionAnnotationPatchRequest,
 )
 from app.models.models import ConnectSession, Item, Transaction, TransactionAnnotation
 from app.services.security import encrypt_token
@@ -95,8 +98,8 @@ def exchange_public_token(payload: PublicTokenExchangeRequest, db: Session = Dep
 
 
 @router.post("/connect/sessions")
-def create_connect_session(payload: dict, db: Session = Depends(get_db)):
-    user_id = payload.get("user_id", "default-user")
+def create_connect_session(payload: ConnectSessionCreateRequest, db: Session = Depends(get_db)):
+    user_id = payload.user_id
     session = ConnectService().create_session(db, user_id=user_id)
 
     # Open short-lived public path for the connect flow.
@@ -136,7 +139,9 @@ def connect_start(session: str, db: Session = Depends(get_db)):
       const handler = Plaid.create({{
         token: {link_token!r},
         onSuccess: async (public_token, metadata) => {{
-          const completePath = window.location.pathname.replace(/\/start$/, '/complete');
+          const completePath = window.location.pathname.endsWith('/start')
+            ? window.location.pathname.slice(0, -6) + '/complete'
+            : '/connect/complete';
           const resp = await fetch(completePath, {{
             method: 'POST',
             headers: {{ 'Content-Type': 'application/json' }},
@@ -158,19 +163,14 @@ def connect_start(session: str, db: Session = Depends(get_db)):
 
 
 @router.post("/connect/complete")
-def connect_complete(payload: dict, db: Session = Depends(get_db)):
-    session_token = payload.get("session_token")
-    public_token = payload.get("public_token")
-    if not session_token or not public_token:
-        raise HTTPException(status_code=400, detail="missing session_token or public_token")
-
+def connect_complete(payload: ConnectCompleteRequest, db: Session = Depends(get_db)):
     svc = ConnectService()
-    active = svc.get_active_session(db, session_token)
+    active = svc.get_active_session(db, payload.session_token)
     if not active:
         raise HTTPException(status_code=400, detail="invalid or expired session")
 
     client = PlaidClient()
-    resp = client.exchange_public_token(public_token)
+    resp = client.exchange_public_token(payload.public_token)
 
     existing = db.query(Item).filter(Item.plaid_item_id == resp["item_id"]).first()
     if not existing:
@@ -261,7 +261,11 @@ def list_transactions(
 
 
 @router.patch("/transactions/{transaction_id}/annotation")
-def patch_annotation(transaction_id: int, payload: dict, db: Session = Depends(get_db)):
+def patch_annotation(
+    transaction_id: int,
+    payload: TransactionAnnotationPatchRequest,
+    db: Session = Depends(get_db),
+):
     tx = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if not tx:
         raise HTTPException(status_code=404, detail="transaction not found")
@@ -275,12 +279,12 @@ def patch_annotation(transaction_id: int, payload: dict, db: Session = Depends(g
         annotation = TransactionAnnotation(transaction_id=transaction_id)
         db.add(annotation)
 
-    if "user_category" in payload:
-        annotation.user_category = payload["user_category"]
-    if "notes" in payload:
-        annotation.notes = payload["notes"]
-    if "reviewed" in payload:
-        annotation.reviewed = bool(payload["reviewed"])
+    if payload.user_category is not None:
+        annotation.user_category = payload.user_category
+    if payload.notes is not None:
+        annotation.notes = payload.notes
+    if payload.reviewed is not None:
+        annotation.reviewed = payload.reviewed
 
     db.commit()
     return {"status": "ok", "transaction_id": transaction_id}
