@@ -2,7 +2,7 @@ from datetime import date, datetime
 import logging
 import os
 import subprocess
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -10,14 +10,16 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.plaid_client import PlaidClient
-from app.schemas.plaid import (
+from app.schemas.connect import (
     ConnectCompleteRequest,
     ConnectSessionCreateRequest,
+    TransactionAnnotationPatchRequest,
+)
+from app.schemas.plaid import (
     LinkTokenRequest,
     LinkTokenResponse,
     PublicTokenExchangeRequest,
     PublicTokenExchangeResponse,
-    TransactionAnnotationPatchRequest,
 )
 from app.models.models import ConnectSession, Item, Transaction, TransactionAnnotation
 from app.services.security import encrypt_token
@@ -98,7 +100,10 @@ def exchange_public_token(payload: PublicTokenExchangeRequest, db: Session = Dep
 
 
 @router.post("/connect/sessions")
-def create_connect_session(payload: ConnectSessionCreateRequest, db: Session = Depends(get_db)):
+def create_connect_session(
+    payload: ConnectSessionCreateRequest = Body(default_factory=ConnectSessionCreateRequest),
+    db: Session = Depends(get_db),
+):
     user_id = payload.user_id
     session = ConnectService().create_session(db, user_id=user_id)
 
@@ -279,11 +284,12 @@ def patch_annotation(
         annotation = TransactionAnnotation(transaction_id=transaction_id)
         db.add(annotation)
 
-    if payload.user_category is not None:
+    fields_set = payload.model_fields_set
+    if "user_category" in fields_set:
         annotation.user_category = payload.user_category
-    if payload.notes is not None:
+    if "notes" in fields_set:
         annotation.notes = payload.notes
-    if payload.reviewed is not None:
+    if "reviewed" in fields_set:
         annotation.reviewed = payload.reviewed
 
     db.commit()
