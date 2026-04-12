@@ -2,13 +2,25 @@
 
 Single-user personal finance ledger with Plaid ingestion.
 
+## Prerequisites
+
+- Python **3.11+** (required by `pyproject.toml`)
+- Plaid developer credentials (Sandbox or Production)
+- Optional: `tailscale` if you want automated connect tunnel open/close
+
 ## Quick start
 
 ```bash
-python -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
 uvicorn app.main:app --reload
+```
+
+In a separate shell, run tests:
+
+```bash
+source .venv/bin/activate
 pytest
 ```
 
@@ -17,7 +29,7 @@ pytest
 ```bash
 PLAID_CLIENT_ID=...
 PLAID_SECRET=...
-PLAID_ENV=sandbox   # switch to production for real accounts
+PLAID_ENV=sandbox          # switch to production for real accounts
 PLAID_PRODUCTS=transactions
 PLAID_COUNTRY_CODES=US
 PLAID_REDIRECT_URI=
@@ -29,16 +41,33 @@ CONNECT_SIGNING_KEY=<different-random-secret>
 
 - `TOKEN_ENCRYPTION_KEY`: encrypts/decrypts stored Plaid `access_token` values in DB (Fernet key).
 - `CONNECT_SIGNING_KEY`: signs temporary connect session tokens in URL callbacks.
-- `PLAID_USE_MOCK=false`: enables real Plaid API calls (set `true` only for local mock mode).
+- `PLAID_USE_MOCK=false`: enables real Plaid API calls (`true` is local mock mode only).
 
-Generate a Fernet key:
+Generate secure keys:
 
 ```bash
 python - <<'PY'
+import secrets
 from cryptography.fernet import Fernet
-print(Fernet.generate_key().decode())
+
+print("TOKEN_ENCRYPTION_KEY=", Fernet.generate_key().decode())
+print("CONNECT_SIGNING_KEY=", secrets.token_urlsafe(32))
 PY
 ```
+
+## Optional connect tunnel automation
+
+If you expose `/connect/start` through a short-lived tunnel (for example via Tailscale Funnel), you can let the app open/close it during the connect flow:
+
+```bash
+CONNECT_TUNNEL_AUTOMATION=1
+CONNECT_TUNNEL_STRICT=1
+CONNECT_TUNNEL_SCRIPT=./scripts/connect_funnel.sh
+CONNECT_TUNNEL_CWD=/absolute/path/to/repo
+```
+
+- With `CONNECT_TUNNEL_STRICT=1`, tunnel script failures return API errors.
+- With `CONNECT_TUNNEL_STRICT=0`, failures are logged and the flow continues.
 
 ## How connect + token storage works
 

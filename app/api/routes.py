@@ -136,7 +136,7 @@ def connect_start(session: str, db: Session = Depends(get_db)):
       const handler = Plaid.create({{
         token: {link_token!r},
         onSuccess: async (public_token, metadata) => {{
-          const completePath = window.location.pathname.replace(/\/start$/, '/complete');
+          const completePath = window.location.pathname.replace(/\\/start$/, '/complete');
           const resp = await fetch(completePath, {{
             method: 'POST',
             headers: {{ 'Content-Type': 'application/json' }},
