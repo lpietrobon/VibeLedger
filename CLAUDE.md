@@ -49,6 +49,27 @@ tests/                 # pytest suite (34 tests)
 analytics/             # Standalone Plotly/Streamlit scripts
 ```
 
+## Common operations
+
+All protected endpoints require `Authorization: Bearer <VIBELEDGER_API_TOKEN>`.
+
+**Link a new bank account:**
+1. `POST /connect/sessions` with `{"user_id": "..."}` — returns a `connect_url` and `session_token`
+2. Open `connect_url` in a browser to complete Plaid Link (if the app isn't publicly reachable, temporarily expose `/connect/*` via Tailscale Funnel)
+3. On success the browser posts back to `/connect/complete` automatically — the access token is encrypted and stored
+
+**Sync transactions:**
+- `POST /sync/item/{item_id}` — sync a single linked account
+- `POST /sync/all` — sync all active accounts
+- Set `SYNC_INTERVAL_HOURS` in `.env` to enable automatic background sync (disabled by default)
+
+**Query transactions:**
+- `GET /transactions` — list transactions. Supports query params: `start_date`, `end_date`, `category`, `limit`, `offset`
+- `PATCH /transactions/{id}/annotation` — add user category, notes, or mark reviewed
+
+**Analytics:**
+- `GET /analytics/monthly-spend`, `/analytics/category-spend`, `/analytics/cashflow-trend` — all support `start_date`/`end_date` filters
+
 ## Key design decisions
 
 - **Single-user, no user accounts.** Auth is a single bearer token (`VIBELEDGER_API_TOKEN`).
