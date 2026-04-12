@@ -1,5 +1,5 @@
 from app.db.session import SessionLocal
-from app.models.models import Item, SyncRun, SyncState, Transaction
+from app.models.models import AccountBalanceSnapshot, Item, SyncRun, SyncState, Transaction
 from app.services.security import encrypt_token
 from app.services.sync_service import SyncService
 
@@ -109,3 +109,80 @@ def test_sync_item_missing_item_errors():
             assert str(e) == "item not found"
         else:
             raise AssertionError("Expected ValueError for missing item")
+
+
+def test_sync_replay_idempotent_for_repeated_added():
+    class ReplayClient:
+        def __init__(self):
+            self.call = 0
+
+        def get_accounts(self, _at):
+            return [
+                {
+                    "account_id": "acct-replay",
+                    "name": "Checking",
+                    "official_name": None,
+                    "mask": None,
+                    "type": "depository",
+                    "subtype": "checking",
+                    "current_balance": 100.0,
+                    "available_balance": 100.0,
+                    "iso_currency_code": "USD",
+                    "limit": None,
+                }
+            ]
+
+        def sync_transactions(self, _at, cursor):
+            self.call += 1
+            return {
+                "added": [
+                    {
+                        "transaction_id": "txn-replay",
+                        "account_id": "acct-replay",
+                        "date": "2026-04-05",
+                        "amount": 10.0,
+                        "name": "Same",
+                        "merchant_name": None,
+                        "plaid_category_primary": None,
+                        "pending": False,
+                    }
+                ],
+                "modified": [],
+                "removed": [],
+                "next_cursor": f"cursor-{self.call}",
+            }
+
+    service = SyncService(client=ReplayClient())
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-replay", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        first = service.sync_item(db, item.id)
+        assert first["added"] == 1
+        assert first["modified"] == 0
+
+        second = service.sync_item(db, item.id)
+        assert second["added"] == 0
+        assert second["modified"] == 0
+
+        txn_count = db.query(Transaction).filter(Transaction.plaid_transaction_id == "txn-replay").count()
+        assert txn_count == 1
+
+
+def test_balance_snapshots_dedup_within_same_day():
+    client = FakePlaidClient()
+    service = SyncService(client=client)
+
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-snap", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        service.sync_item(db, item.id)
+        service.sync_item(db, item.id)
+
+        snap_count = db.query(AccountBalanceSnapshot).count()
+        assert snap_count == 1

@@ -180,7 +180,7 @@ class PlaidClient:
     def _normalize_txn(t: dict[str, Any]) -> dict[str, Any]:
         d = t.get("date")
         pfc = t.get("personal_finance_category") or {}
-        return {
+        normalized: dict[str, Any] = {
             "transaction_id": t["transaction_id"],
             "account_id": t["account_id"],
             "date": d.isoformat() if hasattr(d, "isoformat") else d,
@@ -190,3 +190,11 @@ class PlaidClient:
             "plaid_category_primary": pfc.get("primary"),
             "pending": t.get("pending", False),
         }
+        try:
+            if hasattr(t, "to_dict"):
+                normalized["_source"] = t.to_dict()
+            else:
+                normalized["_source"] = dict(t)
+        except Exception:
+            pass
+        return normalized

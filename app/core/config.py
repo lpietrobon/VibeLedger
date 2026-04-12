@@ -1,10 +1,15 @@
+from pathlib import Path
+
 from pydantic import BaseModel
 import os
+
+_default_db_dir = Path.home() / ".vibeledger"
+_default_db_url = f"sqlite:///{_default_db_dir / 'vibeledger.db'}"
 
 
 class Settings(BaseModel):
     app_name: str = "VibeLedger"
-    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./vibeledger.db")
+    database_url: str = os.getenv("DATABASE_URL", _default_db_url)
 
     plaid_client_id: str | None = os.getenv("PLAID_CLIENT_ID")
     plaid_secret: str | None = os.getenv("PLAID_SECRET")
@@ -12,23 +17,25 @@ class Settings(BaseModel):
     plaid_products: str = os.getenv("PLAID_PRODUCTS", "transactions")
     plaid_country_codes: str = os.getenv("PLAID_COUNTRY_CODES", "US")
     plaid_redirect_uri: str | None = os.getenv("PLAID_REDIRECT_URI")
-    plaid_use_mock: bool = os.getenv("PLAID_USE_MOCK", "true").lower() == "true"
+    plaid_use_mock: bool = os.getenv("PLAID_USE_MOCK", "false").lower() == "true"
 
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000")
     token_encryption_key: str | None = os.getenv("TOKEN_ENCRYPTION_KEY")
-    connect_signing_key: str | None = os.getenv("CONNECT_SIGNING_KEY")
 
 
 settings = Settings()
 
 
 def validate_security_settings() -> None:
-    # Skip strict key checks during unit tests.
     if os.getenv("PYTEST_CURRENT_TEST"):
         return
 
-    # Enforce key presence/quality at runtime boot.
-    if not settings.token_encryption_key or len(settings.token_encryption_key) < 32:
-        raise ValueError("TOKEN_ENCRYPTION_KEY must be set to a strong random key")
-    if not settings.connect_signing_key or len(settings.connect_signing_key) < 32:
-        raise ValueError("CONNECT_SIGNING_KEY must be set to a strong random key")
+    key = settings.token_encryption_key
+    if not key:
+        raise ValueError("TOKEN_ENCRYPTION_KEY must be set to a valid Fernet key")
+
+    from cryptography.fernet import Fernet
+    try:
+        Fernet(key.encode("utf-8"))
+    except Exception as e:
+        raise ValueError(f"TOKEN_ENCRYPTION_KEY is not a valid Fernet key: {e}") from e

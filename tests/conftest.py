@@ -1,17 +1,21 @@
 import os
+import tempfile
+
+_tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+_tmp.close()
+
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{_tmp.name}")
+os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+os.environ.setdefault("PLAID_USE_MOCK", "true")
 
 import pytest
-
-# Ensure required security settings exist before app import/startup in tests.
-os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
-os.environ.setdefault("CONNECT_SIGNING_KEY", "test-connect-signing-key-32chars-min")
 
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
 
 settings.token_encryption_key = os.environ["TOKEN_ENCRYPTION_KEY"]
-settings.connect_signing_key = os.environ["CONNECT_SIGNING_KEY"]
+settings.plaid_use_mock = True
 
 
 @pytest.fixture(autouse=True)

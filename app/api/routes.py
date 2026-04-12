@@ -1,46 +1,38 @@
-from datetime import date, datetime
+from datetime import date
+from pathlib import Path
 import logging
 import os
 import subprocess
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.time import utcnow
 from app.db.session import SessionLocal
 from app.services.plaid_client import PlaidClient
-from app.schemas.plaid import (
-    LinkTokenRequest,
-    LinkTokenResponse,
-    PublicTokenExchangeRequest,
-    PublicTokenExchangeResponse,
-)
 from app.models.models import ConnectSession, Item, Transaction, TransactionAnnotation
 from app.services.security import encrypt_token
-from app.services.sync_service import SyncService
+from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+_CONNECT_TUNNEL_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "connect_funnel.sh"
+
 
 def _run_connect_tunnel(action: str) -> None:
-    """
-    Path-scoped Funnel helper.
-
-    If CONNECT_TUNNEL_STRICT=1 (default when automation is enabled), failures
-    raise and block the request. If strict is off, failures are logged only.
-    """
     if os.getenv("CONNECT_TUNNEL_AUTOMATION", "0") != "1":
         return
 
     strict = os.getenv("CONNECT_TUNNEL_STRICT", "1") == "1"
-    script = os.getenv("CONNECT_TUNNEL_SCRIPT", "./scripts/connect_funnel.sh")
     try:
         proc = subprocess.run(
-            [script, action],
-            cwd=os.getenv("CONNECT_TUNNEL_CWD", os.getcwd()),
+            [str(_CONNECT_TUNNEL_SCRIPT), action],
+            cwd=str(_CONNECT_TUNNEL_SCRIPT.parent.parent),
             check=True,
             capture_output=True,
             text=True,
@@ -66,45 +58,19 @@ def health():
     return {"status": "ok", "service": "vibeledger"}
 
 
-@router.post("/plaid/link-token/create", response_model=LinkTokenResponse)
-def create_link_token(payload: LinkTokenRequest):
-    client = PlaidClient()
-    resp = client.create_link_token(payload.user_id)
-    return LinkTokenResponse(link_token=resp["link_token"])
-
-
-@router.post("/plaid/public-token/exchange", response_model=PublicTokenExchangeResponse)
-def exchange_public_token(payload: PublicTokenExchangeRequest, db: Session = Depends(get_db)):
-    client = PlaidClient()
-    resp = client.exchange_public_token(payload.public_token)
-
-    existing = db.query(Item).filter(Item.plaid_item_id == resp["item_id"]).first()
-    if not existing:
-        existing = Item(
-            plaid_item_id=resp["item_id"],
-            access_token_encrypted=encrypt_token(resp["access_token"]),
-            status="active",
-        )
-        db.add(existing)
-    else:
-        existing.access_token_encrypted = encrypt_token(resp["access_token"])
-        existing.status = "active"
-
-    db.commit()
-    return PublicTokenExchangeResponse(item_id=resp["item_id"], status="linked")
-
-
 @router.post("/connect/sessions")
 def create_connect_session(payload: dict, db: Session = Depends(get_db)):
     user_id = payload.get("user_id", "default-user")
-    session = ConnectService().create_session(db, user_id=user_id)
 
-    # Open short-lived public path for the connect flow.
     try:
         _run_connect_tunnel("open")
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
+    client = PlaidClient()
+    link_token = client.create_link_token(user_id)["link_token"]
+
+    session = ConnectService().create_session(db, user_id=user_id, link_token=link_token)
     connect_url = f"{settings.app_base_url}/connect/start?session={session.session_token}"
     return {
         "session_token": session.session_token,
@@ -120,8 +86,12 @@ def connect_start(session: str, db: Session = Depends(get_db)):
     if not active:
         raise HTTPException(status_code=400, detail="invalid or expired session")
 
-    client = PlaidClient()
-    link_token = client.create_link_token(active.user_id)["link_token"]
+    if not active.link_token:
+        client = PlaidClient()
+        active.link_token = client.create_link_token(active.user_id)["link_token"]
+        db.commit()
+
+    link_token = active.link_token
 
     html = f"""
 <!doctype html>
@@ -143,9 +113,9 @@ def connect_start(session: str, db: Session = Depends(get_db)):
             body: JSON.stringify({{ session_token: sessionToken, public_token }})
           }});
           if (resp.ok) {{
-            document.body.innerHTML = '<h3>✅ Account connected. You can return to Discord.</h3>';
+            document.body.innerHTML = '<h3>Account connected. You can return to Discord.</h3>';
           }} else {{
-            document.body.innerHTML = '<h3>❌ Failed to connect. Please retry.</h3>';
+            document.body.innerHTML = '<h3>Failed to connect. Please retry.</h3>';
           }}
         }}
       }});
@@ -186,11 +156,9 @@ def connect_complete(payload: dict, db: Session = Depends(get_db)):
 
     active.status = "completed"
     active.plaid_item_id = resp["item_id"]
-    active.completed_at = datetime.utcnow()
+    active.completed_at = utcnow()
     db.commit()
 
-    # Close short-lived public path right after successful token exchange.
-    # This is path-scoped, so other Funnel handlers stay up.
     try:
         _run_connect_tunnel("close")
     except RuntimeError as e:
@@ -219,6 +187,8 @@ def sync_item(item_id: int, db: Session = Depends(get_db)):
         return SyncService().sync_item(db, item_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except SyncInProgressError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.get("/transactions")
@@ -227,37 +197,53 @@ def list_transactions(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     category: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
-    q = db.query(Transaction, TransactionAnnotation).outerjoin(
+    effective_category = func.coalesce(
+        TransactionAnnotation.user_category,
+        Transaction.plaid_category_primary,
+    )
+
+    base = db.query(Transaction, TransactionAnnotation).outerjoin(
         TransactionAnnotation,
         Transaction.id == TransactionAnnotation.transaction_id,
     )
 
     if start_date:
-        q = q.filter(Transaction.date >= start_date)
+        base = base.filter(Transaction.date >= start_date)
     if end_date:
-        q = q.filter(Transaction.date <= end_date)
+        base = base.filter(Transaction.date <= end_date)
     if category:
-        q = q.filter(TransactionAnnotation.user_category == category)
+        base = base.filter(effective_category == category)
 
-    rows = q.order_by(Transaction.date.desc()).limit(500).all()
-    return [
-        {
-            "id": t.id,
-            "plaid_transaction_id": t.plaid_transaction_id,
-            "date": str(t.date),
-            "amount": float(t.amount),
-            "name": t.name,
-            "merchant_name": t.merchant_name,
-            "pending": t.pending,
-            "annotation": {
-                "user_category": a.user_category if a else None,
-                "notes": a.notes if a else None,
-                "reviewed": a.reviewed if a else False,
-            },
-        }
-        for t, a in rows
-    ]
+    total = base.with_entities(func.count(Transaction.id)).scalar()
+    rows = (
+        base.order_by(Transaction.date.desc(), Transaction.id.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": t.id,
+                "plaid_transaction_id": t.plaid_transaction_id,
+                "date": str(t.date),
+                "amount": round(float(t.amount), 2),
+                "name": t.name,
+                "merchant_name": t.merchant_name,
+                "pending": t.pending,
+                "annotation": {
+                    "user_category": a.user_category if a else None,
+                    "notes": a.notes if a else None,
+                    "reviewed": a.reviewed if a else False,
+                },
+            }
+            for t, a in rows
+        ],
+    }
 
 
 @router.patch("/transactions/{transaction_id}/annotation")
@@ -287,42 +273,73 @@ def patch_annotation(transaction_id: int, payload: dict, db: Session = Depends(g
 
 
 @router.get("/analytics/monthly-spend")
-def monthly_spend(db: Session = Depends(get_db)):
-    rows = (
-        db.query(func.strftime("%Y-%m", Transaction.date), func.sum(Transaction.amount))
-        .group_by(func.strftime("%Y-%m", Transaction.date))
-        .all()
+def monthly_spend(
+    db: Session = Depends(get_db),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+):
+    month_col = func.strftime("%Y-%m", Transaction.date).label("month")
+    q = db.query(
+        month_col,
+        func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)),
     )
-    return [{"month": month, "spend": float(total)} for month, total in rows]
+    if start_date:
+        q = q.filter(Transaction.date >= start_date)
+    if end_date:
+        q = q.filter(Transaction.date <= end_date)
+    rows = q.group_by(month_col).order_by(month_col).all()
+    return [{"month": month, "spend": round(float(total or 0), 2)} for month, total in rows]
 
 
 @router.get("/analytics/category-spend")
-def category_spend(db: Session = Depends(get_db)):
-    rows = (
-        db.query(TransactionAnnotation.user_category, func.sum(Transaction.amount))
-        .join(Transaction, Transaction.id == TransactionAnnotation.transaction_id)
-        .group_by(TransactionAnnotation.user_category)
-        .all()
+def category_spend(
+    db: Session = Depends(get_db),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+):
+    effective_category = func.coalesce(
+        TransactionAnnotation.user_category,
+        Transaction.plaid_category_primary,
+        "uncategorized",
+    ).label("category")
+    q = (
+        db.query(
+            effective_category,
+            func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)),
+        )
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
-    return [{"category": c or "uncategorized", "spend": float(total)} for c, total in rows]
+    if start_date:
+        q = q.filter(Transaction.date >= start_date)
+    if end_date:
+        q = q.filter(Transaction.date <= end_date)
+    rows = q.group_by(effective_category).order_by(effective_category).all()
+    return [{"category": c, "spend": round(float(total or 0), 2)} for c, total in rows]
 
 
 @router.get("/analytics/cashflow-trend")
-def cashflow_trend(db: Session = Depends(get_db)):
-    rows = (
-        db.query(func.strftime("%Y-%m", Transaction.date), func.sum(Transaction.amount))
-        .group_by(func.strftime("%Y-%m", Transaction.date))
-        .all()
+def cashflow_trend(
+    db: Session = Depends(get_db),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+):
+    month_col = func.strftime("%Y-%m", Transaction.date).label("month")
+    q = db.query(
+        month_col,
+        func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)).label("expenses"),
+        func.sum(case((Transaction.amount < 0, -Transaction.amount), else_=0)).label("income"),
     )
-    out = []
-    for month, total in rows:
-        total = float(total)
-        out.append(
-            {
-                "month": month,
-                "expenses": abs(total) if total > 0 else 0.0,
-                "income": abs(total) if total < 0 else 0.0,
-                "net": -total,
-            }
-        )
-    return out
+    if start_date:
+        q = q.filter(Transaction.date >= start_date)
+    if end_date:
+        q = q.filter(Transaction.date <= end_date)
+    rows = q.group_by(month_col).order_by(month_col).all()
+    return [
+        {
+            "month": month,
+            "expenses": round(float(expenses or 0), 2),
+            "income": round(float(income or 0), 2),
+            "net": round(float((income or 0) - (expenses or 0)), 2),
+        }
+        for month, expenses, income in rows
+    ]

@@ -1,9 +1,16 @@
 import json
-from datetime import datetime, date
+from datetime import date
+
 from sqlalchemy.orm import Session
+
+from app.core.time import utcnow
 from app.models.models import Account, AccountBalanceSnapshot, Item, SyncRun, SyncState, Transaction
 from app.services.plaid_client import PlaidClient
 from app.services.security import decrypt_token
+
+
+class SyncInProgressError(Exception):
+    pass
 
 
 class SyncService:
@@ -14,6 +21,14 @@ class SyncService:
         item = db.query(Item).filter(Item.id == item_id).first()
         if not item:
             raise ValueError("item not found")
+
+        in_progress = (
+            db.query(SyncRun)
+            .filter(SyncRun.item_id == item_id, SyncRun.status == "running")
+            .first()
+        )
+        if in_progress:
+            raise SyncInProgressError("sync already running for this item")
 
         state = db.query(SyncState).filter(SyncState.item_id == item_id).first()
         if not state:
@@ -30,9 +45,10 @@ class SyncService:
         data = self.client.sync_transactions(access_token, state.cursor)
         added_count, modified_count, removed_count = self._apply_changes(db, item_id, data)
 
+        now = utcnow()
         state.cursor = data.get("next_cursor")
-        state.last_sync_at = datetime.utcnow()
-        state.last_success_at = datetime.utcnow()
+        state.last_sync_at = now
+        state.last_success_at = now
         state.last_error_code = None
         state.last_error_message = None
         state.consecutive_failures = 0
@@ -41,7 +57,7 @@ class SyncService:
         run.added_count = added_count
         run.modified_count = modified_count
         run.removed_count = removed_count
-        run.finished_at = datetime.utcnow()
+        run.finished_at = now
 
         db.commit()
         return {
@@ -77,16 +93,26 @@ class SyncService:
             existing.currency = a.get("iso_currency_code")
             existing.credit_limit = a.get("limit")
 
-            snap = AccountBalanceSnapshot(
-                account_id=existing.id,
-                as_of_date=today,
-                current_balance=a.get("current_balance"),
-                available_balance=a.get("available_balance"),
-                iso_currency_code=a.get("iso_currency_code"),
-                limit_amount=a.get("limit"),
-                source="accounts_get",
+            snap = (
+                db.query(AccountBalanceSnapshot)
+                .filter(
+                    AccountBalanceSnapshot.account_id == existing.id,
+                    AccountBalanceSnapshot.as_of_date == today,
+                )
+                .first()
             )
-            db.add(snap)
+            if snap is None:
+                snap = AccountBalanceSnapshot(
+                    account_id=existing.id,
+                    as_of_date=today,
+                    source="accounts_get",
+                )
+                db.add(snap)
+            snap.current_balance = a.get("current_balance")
+            snap.available_balance = a.get("available_balance")
+            snap.iso_currency_code = a.get("iso_currency_code")
+            snap.limit_amount = a.get("limit")
+            snap.pulled_at = utcnow()
 
     def _apply_changes(self, db: Session, item_id: int, payload: dict) -> tuple[int, int, int]:
         added_count = 0
@@ -94,41 +120,30 @@ class SyncService:
         removed_count = 0
 
         for t in payload.get("added", []):
-            account = db.query(Account).filter(Account.plaid_account_id == t["account_id"]).first()
-            if not account:
-                account = Account(plaid_account_id=t["account_id"], item_id=item_id, name="Account")
-                db.add(account)
-                db.flush()
-
             existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
             if existing:
-                modified_count += 1
-                existing.amount = t["amount"]
-                existing.name = t["name"]
-                existing.merchant_name = t.get("merchant_name")
-                existing.plaid_category_primary = t.get("plaid_category_primary")
-                existing.pending = t.get("pending", False)
-                existing.raw_json = json.dumps(t)
-            else:
-                added_count += 1
-                tx_date = t.get("date")
-                if isinstance(tx_date, str):
-                    tx_date = date.fromisoformat(tx_date)
+                continue
 
-                db.add(
-                    Transaction(
-                        plaid_transaction_id=t["transaction_id"],
-                        account_id=account.id,
-                        item_id=item_id,
-                        date=tx_date,
-                        amount=t["amount"],
-                        name=t["name"],
-                        merchant_name=t.get("merchant_name"),
-                        plaid_category_primary=t.get("plaid_category_primary"),
-                        pending=t.get("pending", False),
-                        raw_json=json.dumps(t),
-                    )
+            account = self._ensure_account(db, item_id, t["account_id"])
+            added_count += 1
+            tx_date = t.get("date")
+            if isinstance(tx_date, str):
+                tx_date = date.fromisoformat(tx_date)
+
+            db.add(
+                Transaction(
+                    plaid_transaction_id=t["transaction_id"],
+                    account_id=account.id,
+                    item_id=item_id,
+                    date=tx_date,
+                    amount=t["amount"],
+                    name=t["name"],
+                    merchant_name=t.get("merchant_name"),
+                    plaid_category_primary=t.get("plaid_category_primary"),
+                    pending=t.get("pending", False),
+                    raw_json=self._serialize_raw(t),
                 )
+            )
 
         for t in payload.get("modified", []):
             existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
@@ -139,7 +154,7 @@ class SyncService:
                 existing.merchant_name = t.get("merchant_name")
                 existing.plaid_category_primary = t.get("plaid_category_primary")
                 existing.pending = t.get("pending", False)
-                existing.raw_json = json.dumps(t)
+                existing.raw_json = self._serialize_raw(t)
 
         for t in payload.get("removed", []):
             existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
@@ -148,3 +163,18 @@ class SyncService:
                 db.delete(existing)
 
         return added_count, modified_count, removed_count
+
+    def _ensure_account(self, db: Session, item_id: int, plaid_account_id: str) -> Account:
+        account = db.query(Account).filter(Account.plaid_account_id == plaid_account_id).first()
+        if not account:
+            account = Account(plaid_account_id=plaid_account_id, item_id=item_id, name="Account")
+            db.add(account)
+            db.flush()
+        return account
+
+    @staticmethod
+    def _serialize_raw(t: dict) -> str:
+        source = t.get("_source")
+        if source is not None:
+            return json.dumps(source, default=str)
+        return json.dumps({k: v for k, v in t.items() if k != "_source"}, default=str)
