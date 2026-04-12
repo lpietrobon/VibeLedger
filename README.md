@@ -11,7 +11,7 @@ Single-user personal finance ledger with Plaid ingestion.
 ## Quick start
 
 ```bash
-python3.11 -m venv .venv
+python3 -m venv .venv          # requires Python 3.11+
 source .venv/bin/activate
 pip install -e .[dev]
 uvicorn app.main:app --reload
@@ -22,6 +22,17 @@ In a separate shell, run tests:
 ```bash
 source .venv/bin/activate
 pytest
+```
+
+### Fixing a broken venv
+
+Venvs embed absolute paths in their script shebangs. If you move the project directory, rename your user, or clone onto a different machine, the venv will break with "bad interpreter" errors. Recreate it:
+
+```bash
+rm -rf .venv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
 ```
 
 ## Required environment variables

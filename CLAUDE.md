@@ -5,10 +5,12 @@ Single-user personal finance ledger. FastAPI + SQLite + Plaid.
 ## Setup
 
 ```bash
-python3.11 -m venv .venv
+python3 -m venv .venv          # requires Python 3.11+
 source .venv/bin/activate
 pip install -e .[dev]
 ```
+
+If the venv breaks after moving the repo (bad interpreter errors), recreate it: `rm -rf .venv && python3 -m venv .venv && source .venv/bin/activate && pip install -e .[dev]`
 
 ## Run
 
@@ -45,6 +47,7 @@ app/
     scheduler.py       # Background scheduled sync loop
 scripts/
   connect_funnel.sh    # Tailscale Funnel automation for connect flow
+  backup_db.sh         # SQLite backup (cron-friendly, 30-day retention)
 tests/                 # pytest suite (34 tests)
 analytics/             # Standalone Plotly/Streamlit scripts
 ```

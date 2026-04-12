@@ -1,7 +1,8 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.routes import router
 from app.core.auth import BearerAuthMiddleware
@@ -25,7 +26,19 @@ async def lifespan(_: FastAPI):
         pass
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        return response
+
+
 app = FastAPI(title="VibeLedger", lifespan=lifespan)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(BearerAuthMiddleware, token=settings.api_token)
 if settings.allowed_hosts:
     from starlette.middleware.trustedhost import TrustedHostMiddleware

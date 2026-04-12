@@ -1,12 +1,13 @@
 from datetime import date
 from pathlib import Path
 import logging
+import json
 import os
 import subprocess
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from sqlalchemy import case, func
+from sqlalchemy import case, func, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -14,7 +15,7 @@ from app.core.time import utcnow
 from app.db.session import SessionLocal
 from app.services.plaid_client import PlaidClient
 from app.models.models import ConnectSession, Item, Transaction, TransactionAnnotation
-from app.schemas.plaid import CreateConnectSessionRequest, PatchAnnotationRequest
+from app.schemas.plaid import ConnectCompleteRequest, CreateConnectSessionRequest, PatchAnnotationRequest
 from app.services.security import encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
@@ -55,8 +56,14 @@ def get_db():
 
 
 @router.get("/health")
-def health():
-    return {"status": "ok", "service": "vibeledger"}
+def health(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        db_ok = False
+    status = "ok" if db_ok else "degraded"
+    return {"status": status, "service": "vibeledger", "db": "ok" if db_ok else "unreachable"}
 
 
 @router.post("/connect/sessions")
@@ -103,9 +110,9 @@ def connect_start(session: str, db: Session = Depends(get_db)):
     <button id='link-button'>Connect with Plaid</button>
     <script src='https://cdn.plaid.com/link/v2/stable/link-initialize.js'></script>
     <script>
-      const sessionToken = {session!r};
+      const sessionToken = {json.dumps(session)};
       const handler = Plaid.create({{
-        token: {link_token!r},
+        token: {json.dumps(link_token)},
         onSuccess: async (public_token, metadata) => {{
           const completePath = window.location.pathname.replace(/\\/start$/, '/complete');
           const resp = await fetch(completePath, {{
@@ -129,11 +136,9 @@ def connect_start(session: str, db: Session = Depends(get_db)):
 
 
 @router.post("/connect/complete")
-def connect_complete(payload: dict, db: Session = Depends(get_db)):
-    session_token = payload.get("session_token")
-    public_token = payload.get("public_token")
-    if not session_token or not public_token:
-        raise HTTPException(status_code=400, detail="missing session_token or public_token")
+def connect_complete(payload: ConnectCompleteRequest, db: Session = Depends(get_db)):
+    session_token = payload.session_token
+    public_token = payload.public_token
 
     svc = ConnectService()
     active = svc.get_active_session(db, session_token)
