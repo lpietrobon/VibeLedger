@@ -1,5 +1,6 @@
 import json
-from datetime import date
+import logging
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -7,6 +8,8 @@ from app.core.time import utcnow
 from app.models.models import Account, AccountBalanceSnapshot, Item, SyncRun, SyncState, Transaction
 from app.services.plaid_client import PlaidClient
 from app.services.security import decrypt_token
+
+logger = logging.getLogger(__name__)
 
 
 class SyncInProgressError(Exception):
@@ -21,6 +24,21 @@ class SyncService:
         item = db.query(Item).filter(Item.id == item_id).first()
         if not item:
             raise ValueError("item not found")
+
+        # Recover stale runs (stuck > 30 minutes)
+        stale_cutoff = utcnow() - timedelta(minutes=30)
+        stale_runs = (
+            db.query(SyncRun)
+            .filter(SyncRun.item_id == item_id, SyncRun.status == "running", SyncRun.started_at < stale_cutoff)
+            .all()
+        )
+        for stale in stale_runs:
+            stale.status = "error"
+            stale.finished_at = utcnow()
+            stale.error_summary = "marked stale: exceeded 30-minute timeout"
+            logger.warning("Marked stale SyncRun %d for item %d", stale.id, item_id)
+        if stale_runs:
+            db.flush()
 
         in_progress = (
             db.query(SyncRun)
@@ -40,10 +58,24 @@ class SyncService:
         db.add(run)
         db.flush()
 
-        access_token = decrypt_token(item.access_token_encrypted)
-        self._refresh_accounts_and_snapshots(db, item_id, access_token)
-        data = self.client.sync_transactions(access_token, state.cursor)
-        added_count, modified_count, removed_count = self._apply_changes(db, item_id, data)
+        try:
+            access_token = decrypt_token(item.access_token_encrypted)
+            self._refresh_accounts_and_snapshots(db, item_id, access_token)
+            data = self.client.sync_transactions(access_token, state.cursor)
+            added_count, modified_count, removed_count = self._apply_changes(db, item_id, data)
+        except Exception as exc:
+            now = utcnow()
+            run.status = "error"
+            run.finished_at = now
+            run.error_summary = f"{type(exc).__name__}: {exc}"[:500]
+
+            state.last_sync_at = now
+            state.last_error_code = type(exc).__name__
+            state.last_error_message = str(exc)[:1000]
+            state.consecutive_failures = (state.consecutive_failures or 0) + 1
+
+            db.commit()
+            raise
 
         now = utcnow()
         state.cursor = data.get("next_cursor")

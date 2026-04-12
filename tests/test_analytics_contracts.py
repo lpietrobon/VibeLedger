@@ -6,6 +6,7 @@ from app.db.session import SessionLocal
 from app.main import app
 from app.models.models import Account, Item, Transaction, TransactionAnnotation
 from app.services.security import encrypt_token
+from tests.conftest import AUTH_HEADERS
 
 
 def test_analytics_endpoints_return_lists():
@@ -15,7 +16,7 @@ def test_analytics_endpoints_return_lists():
             "/analytics/category-spend",
             "/analytics/cashflow-trend",
         ]:
-            r = client.get(path)
+            r = client.get(path, headers=AUTH_HEADERS)
             assert r.status_code == 200
             assert isinstance(r.json(), list)
 
@@ -55,7 +56,7 @@ def _seed_ledger():
 def test_monthly_spend_only_positive_amounts():
     _seed_ledger()
     with TestClient(app) as client:
-        r = client.get("/analytics/monthly-spend")
+        r = client.get("/analytics/monthly-spend", headers=AUTH_HEADERS)
     assert r.status_code == 200
     data = {row["month"]: row["spend"] for row in r.json()}
     assert data["2026-03"] == 600.0
@@ -65,7 +66,7 @@ def test_monthly_spend_only_positive_amounts():
 def test_monthly_spend_date_filter():
     _seed_ledger()
     with TestClient(app) as client:
-        r = client.get("/analytics/monthly-spend", params={"start_date": "2026-04-01"})
+        r = client.get("/analytics/monthly-spend", params={"start_date": "2026-04-01"}, headers=AUTH_HEADERS)
     assert r.status_code == 200
     months = [row["month"] for row in r.json()]
     assert "2026-03" not in months
@@ -75,7 +76,7 @@ def test_monthly_spend_date_filter():
 def test_cashflow_trend_splits_income_and_expenses():
     _seed_ledger()
     with TestClient(app) as client:
-        r = client.get("/analytics/cashflow-trend")
+        r = client.get("/analytics/cashflow-trend", headers=AUTH_HEADERS)
     assert r.status_code == 200
     data = {row["month"]: row for row in r.json()}
     assert data["2026-03"]["income"] == 1000.0
@@ -89,7 +90,7 @@ def test_cashflow_trend_splits_income_and_expenses():
 def test_category_spend_includes_unannotated_transactions():
     _seed_ledger()
     with TestClient(app) as client:
-        r = client.get("/analytics/category-spend")
+        r = client.get("/analytics/category-spend", headers=AUTH_HEADERS)
     assert r.status_code == 200
     by_cat = {row["category"]: row["spend"] for row in r.json()}
     assert by_cat["FOOD_AND_DRINK"] == 600.0
@@ -105,7 +106,7 @@ def test_category_spend_prefers_annotation_over_plaid():
         db.commit()
 
     with TestClient(app) as client:
-        r = client.get("/analytics/category-spend")
+        r = client.get("/analytics/category-spend", headers=AUTH_HEADERS)
     by_cat = {row["category"]: row["spend"] for row in r.json()}
     assert by_cat["groceries"] == 400.0
     assert by_cat["FOOD_AND_DRINK"] == 200.0

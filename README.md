@@ -81,32 +81,70 @@ The default database path is `~/.vibeledger/vibeledger.db`. Override with `DATAB
 
 Tables are auto-created via `Base.metadata.create_all()` on boot. There is no migration framework; for schema changes on an existing DB, drop and recreate (acceptable for single-user use).
 
-## Readiness assessment
+## Production deployment
 
-### Sensitive data exposure
+### Tailscale HTTPS (recommended)
 
-- **Git history is clean.** No `.db` files, `.env` files, real API keys, or financial data have ever been committed. The `.gitignore` correctly excludes `*.db`, `*.sqlite3`, `.env`, and virtualenvs.
-- `.env.example` contains empty placeholder values only.
-- Access tokens are encrypted at rest via Fernet; the encryption key is never stored in the repo.
+Use `tailscale serve` to proxy the app with automatic HTTPS:
 
-### Sandbox mode
+```bash
+# Start the app on localhost
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 
-Ready. With `PLAID_USE_MOCK=true`, the app runs entirely against mock data with no external calls. With valid sandbox credentials (`PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV=sandbox`), the connect flow and transaction sync work against Plaid's sandbox environment end-to-end.
+# In another shell, expose via Tailscale with HTTPS
+tailscale serve --bg https / http://127.0.0.1:8000
+```
 
-To test sandbox mode:
+The app is now reachable at `https://<your-machine>.tail1234.ts.net` with a valid TLS certificate, accessible only from your Tailnet.
 
-1. Set `PLAID_USE_MOCK=false`, `PLAID_ENV=sandbox`, and provide sandbox credentials.
-2. Generate a `TOKEN_ENCRYPTION_KEY` (see above).
-3. Start the server and create a connect session via `POST /connect/sessions`.
-4. Open the connect URL, link a sandbox institution, and trigger sync via `POST /sync/item/{id}`.
+**Bind to Tailscale IP only (alternative):**
 
-### Production mode
+```bash
+uvicorn app.main:app --host $(tailscale ip -4) --port 8000
+```
 
-Not yet ready. The following should be addressed before pointing at real financial accounts:
+### Running as a systemd service (optional)
 
-- **No authentication on the API.** All endpoints are open to anyone who can reach the host. Before production use, add at minimum a bearer token check or restrict to localhost/VPN.
-- **No HTTPS enforcement.** The app itself serves plain HTTP; it relies on a reverse proxy or tunnel for TLS. Ensure this is in place before handling real credentials.
-- **No error recovery in sync.** If a sync call to Plaid fails mid-way, the `SyncRun` stays in `running` status and blocks future syncs until manually cleaned up. Add try/except around the Plaid call with proper status update on failure.
-- **No scheduled sync.** Transaction ingestion is manual (`POST /sync/item/{id}`). For production use, add a cron or background scheduler to sync periodically.
-- **Single-threaded SQLite.** Concurrent API requests are serialized at the DB level. Fine for single-user, but monitor for lock contention if adding automation.
-- **Link token expiry.** Plaid link tokens expire after 4 hours. The cached `link_token` on `ConnectSession` is not refreshed — if a session lingers, the link token may expire before the user opens it. The 20-minute session TTL mitigates this in practice.
+If you want the app to start on boot and restart on failure, create a systemd unit:
+
+```ini
+# /etc/systemd/system/vibeledger.service
+[Unit]
+Description=VibeLedger
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<your-user>
+WorkingDirectory=/path/to/VibeLedger
+EnvironmentFile=/path/to/VibeLedger/.env
+ExecStart=/path/to/VibeLedger/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now vibeledger
+```
+
+### Recommended env vars for production
+
+```bash
+VIBELEDGER_API_TOKEN=<strong-random-token>
+ALLOWED_HOSTS=<your-machine>.tail1234.ts.net
+SYNC_INTERVAL_HOURS=0
+APP_BASE_URL=https://<your-machine>.tail1234.ts.net
+```
+
+## Notes
+
+- **Single-threaded SQLite.** Concurrent API requests are serialized at the DB level. Fine for single-user.
+- **No migration framework.** For schema changes on an existing DB, drop and recreate (acceptable for single-user). Back up `~/.vibeledger/vibeledger.db` before changes.
+- **Link token expiry.** Plaid link tokens expire after 4 hours. The 20-minute session TTL mitigates this in practice.

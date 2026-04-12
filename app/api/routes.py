@@ -14,6 +14,7 @@ from app.core.time import utcnow
 from app.db.session import SessionLocal
 from app.services.plaid_client import PlaidClient
 from app.models.models import ConnectSession, Item, Transaction, TransactionAnnotation
+from app.schemas.plaid import CreateConnectSessionRequest, PatchAnnotationRequest
 from app.services.security import encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
@@ -59,8 +60,8 @@ def health():
 
 
 @router.post("/connect/sessions")
-def create_connect_session(payload: dict, db: Session = Depends(get_db)):
-    user_id = payload.get("user_id", "default-user")
+def create_connect_session(payload: CreateConnectSessionRequest, db: Session = Depends(get_db)):
+    user_id = payload.user_id
 
     try:
         _run_connect_tunnel("open")
@@ -189,6 +190,33 @@ def sync_item(item_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(e))
     except SyncInProgressError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("sync failed for item %d", item_id)
+        raise HTTPException(status_code=502, detail="sync failed")
+
+
+@router.post("/sync/all")
+def sync_all(db: Session = Depends(get_db)):
+    items = db.query(Item).filter(Item.status == "active").all()
+    if not items:
+        return {"results": [], "summary": "no active items"}
+
+    service = SyncService()
+    results = []
+    for item in items:
+        try:
+            result = service.sync_item(db, item.id)
+            results.append({"item_id": item.id, "plaid_item_id": item.plaid_item_id, **result})
+        except SyncInProgressError:
+            results.append({"item_id": item.id, "plaid_item_id": item.plaid_item_id, "status": "skipped", "reason": "sync already in progress"})
+        except Exception:
+            logger.exception("sync failed for item %d", item.id)
+            results.append({"item_id": item.id, "plaid_item_id": item.plaid_item_id, "status": "error", "reason": "sync failed"})
+
+    succeeded = sum(1 for r in results if r.get("status") == "success")
+    return {"results": results, "summary": f"{succeeded}/{len(results)} items synced"}
 
 
 @router.get("/transactions")
@@ -247,7 +275,7 @@ def list_transactions(
 
 
 @router.patch("/transactions/{transaction_id}/annotation")
-def patch_annotation(transaction_id: int, payload: dict, db: Session = Depends(get_db)):
+def patch_annotation(transaction_id: int, payload: PatchAnnotationRequest, db: Session = Depends(get_db)):
     tx = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if not tx:
         raise HTTPException(status_code=404, detail="transaction not found")
@@ -261,12 +289,12 @@ def patch_annotation(transaction_id: int, payload: dict, db: Session = Depends(g
         annotation = TransactionAnnotation(transaction_id=transaction_id)
         db.add(annotation)
 
-    if "user_category" in payload:
-        annotation.user_category = payload["user_category"]
-    if "notes" in payload:
-        annotation.notes = payload["notes"]
-    if "reviewed" in payload:
-        annotation.reviewed = bool(payload["reviewed"])
+    if payload.user_category is not None:
+        annotation.user_category = payload.user_category
+    if payload.notes is not None:
+        annotation.notes = payload.notes
+    if payload.reviewed is not None:
+        annotation.reviewed = payload.reviewed
 
     db.commit()
     return {"status": "ok", "transaction_id": transaction_id}

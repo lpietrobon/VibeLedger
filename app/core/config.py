@@ -21,6 +21,9 @@ class Settings(BaseModel):
 
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000")
     token_encryption_key: str | None = os.getenv("TOKEN_ENCRYPTION_KEY")
+    api_token: str | None = os.getenv("VIBELEDGER_API_TOKEN")
+    sync_interval_hours: int = int(os.getenv("SYNC_INTERVAL_HOURS", "0"))
+    allowed_hosts: str | None = os.getenv("ALLOWED_HOSTS")
 
 
 settings = Settings()
@@ -39,3 +42,6 @@ def validate_security_settings() -> None:
         Fernet(key.encode("utf-8"))
     except Exception as e:
         raise ValueError(f"TOKEN_ENCRYPTION_KEY is not a valid Fernet key: {e}") from e
+
+    if not settings.api_token:
+        raise ValueError("VIBELEDGER_API_TOKEN must be set")

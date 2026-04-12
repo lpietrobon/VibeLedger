@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from app.core.time import utcnow
 from app.db.session import SessionLocal
 from app.models.models import AccountBalanceSnapshot, Item, SyncRun, SyncState, Transaction
 from app.services.security import encrypt_token
@@ -169,6 +172,137 @@ def test_sync_replay_idempotent_for_repeated_added():
 
         txn_count = db.query(Transaction).filter(Transaction.plaid_transaction_id == "txn-replay").count()
         assert txn_count == 1
+
+
+class FailingPlaidClient:
+    """PlaidClient that raises on sync_transactions."""
+
+    def __init__(self, fail_on="sync"):
+        self.fail_on = fail_on
+
+    def get_accounts(self, _access_token):
+        if self.fail_on == "accounts":
+            raise RuntimeError("Plaid accounts API unavailable")
+        return [
+            {
+                "account_id": "acct-fail",
+                "name": "Checking",
+                "official_name": None,
+                "mask": None,
+                "type": "depository",
+                "subtype": "checking",
+                "current_balance": 100.0,
+                "available_balance": 100.0,
+                "iso_currency_code": "USD",
+                "limit": None,
+            }
+        ]
+
+    def sync_transactions(self, _access_token, cursor):
+        raise RuntimeError("Plaid sync API unavailable")
+
+
+def test_sync_item_plaid_failure_sets_error_status():
+    service = SyncService(client=FailingPlaidClient())
+
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-fail", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        try:
+            service.sync_item(db, item.id)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+        run = db.query(SyncRun).filter(SyncRun.item_id == item.id).first()
+        assert run is not None
+        assert run.status == "error"
+        assert run.finished_at is not None
+        assert "RuntimeError" in run.error_summary
+
+        state = db.query(SyncState).filter(SyncState.item_id == item.id).first()
+        assert state is not None
+        assert state.cursor is None  # cursor not advanced on failure
+        assert state.last_error_code == "RuntimeError"
+        assert state.consecutive_failures == 1
+
+
+def test_sync_consecutive_failures_increment():
+    service = SyncService(client=FailingPlaidClient())
+
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-fail2", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        for expected_count in (1, 2):
+            try:
+                service.sync_item(db, item.id)
+            except RuntimeError:
+                pass
+            state = db.query(SyncState).filter(SyncState.item_id == item.id).first()
+            assert state.consecutive_failures == expected_count
+
+
+def test_sync_success_after_failure_resets_failures():
+    fail_client = FailingPlaidClient()
+    service = SyncService(client=fail_client)
+
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-recover", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        try:
+            service.sync_item(db, item.id)
+        except RuntimeError:
+            pass
+        state = db.query(SyncState).filter(SyncState.item_id == item.id).first()
+        assert state.consecutive_failures == 1
+
+    # Now sync with a working client
+    ok_service = SyncService(client=FakePlaidClient())
+    with SessionLocal() as db:
+        item = db.query(Item).filter(Item.plaid_item_id == "item-recover").first()
+        ok_service.sync_item(db, item.id)
+
+        state = db.query(SyncState).filter(SyncState.item_id == item.id).first()
+        assert state.consecutive_failures == 0
+        assert state.last_error_code is None
+
+
+def test_stale_run_recovery():
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-stale", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        # Manually insert a stale SyncRun (started 60 minutes ago)
+        stale_run = SyncRun(
+            item_id=item.id,
+            status="running",
+            started_at=utcnow() - timedelta(minutes=60),
+        )
+        db.add(stale_run)
+        db.commit()
+        stale_run_id = stale_run.id
+
+        # Sync should succeed because the stale run is auto-recovered
+        service = SyncService(client=FakePlaidClient())
+        result = service.sync_item(db, item.id)
+        assert result["status"] == "success"
+
+        # Verify the stale run was marked as error
+        recovered = db.query(SyncRun).filter(SyncRun.id == stale_run_id).first()
+        assert recovered.status == "error"
+        assert "stale" in recovered.error_summary
 
 
 def test_balance_snapshots_dedup_within_same_day():
