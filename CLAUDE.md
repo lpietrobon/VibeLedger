@@ -15,10 +15,45 @@ If the venv breaks after moving the repo (bad interpreter errors), recreate it: 
 ## Run
 
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --root-path /vibeledger
 ```
 
 Requires a `.env` file (see `.env.example`). The app validates `TOKEN_ENCRYPTION_KEY` (Fernet) and `VIBELEDGER_API_TOKEN` at startup and refuses to start without them.
+
+### Tailscale serve (already done, persists across reboots)
+
+The Tailscale serve route has been configured once with sudo and persists permanently:
+
+```bash
+# Already run — do not re-run unless the route is removed
+sudo tailscale serve --bg --set-path /vibeledger http://127.0.0.1:8000
+```
+
+This routes `https://contabo.tail6fb821.ts.net/vibeledger/` to the app (tailnet-only, not public internet). The route is stored by `tailscaled` and survives reboots. Other apps can be added the same way with their own prefix (e.g. `--set-path /app2`).
+
+### Starting the app
+
+```bash
+cd /home/charlie/.openclaw/workspace/VibeLedger
+source .venv/bin/activate
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --root-path /vibeledger
+```
+
+Once running, the app is reachable at `https://contabo.tail6fb821.ts.net/vibeledger/` from any device on the tailnet. The `--root-path` flag is required so FastAPI generates correct URLs (connect flow links, docs, etc.).
+
+### Linking a new bank account
+
+The Plaid Link widget runs entirely in the browser. The `/connect/complete` callback is a `fetch` from the browser (not from Plaid's servers), so the app only needs to be reachable by the browser — tailnet access is sufficient for sandbox and non-OAuth institutions.
+
+The funnel script is only needed if using OAuth-based institutions (which redirect through `PLAID_REDIRECT_URI`). For those cases:
+
+```bash
+sudo bash scripts/connect_funnel.sh open     # expose /vibeledger/connect via Tailscale Funnel
+# complete the Plaid Link flow in browser
+sudo bash scripts/connect_funnel.sh close    # remove public exposure when done
+```
+
+`status` shows current funnel state: `sudo bash scripts/connect_funnel.sh status`
 
 ## Test
 
@@ -78,5 +113,5 @@ All protected endpoints require `Authorization: Bearer <VIBELEDGER_API_TOKEN>`.
 - **Single-user, no user accounts.** Auth is a single bearer token (`VIBELEDGER_API_TOKEN`).
 - **SQLite.** DB at `~/.vibeledger/vibeledger.db`. No migration framework; schema auto-created on boot.
 - **Plaid access tokens encrypted at rest** with Fernet (`TOKEN_ENCRYPTION_KEY`).
-- **Tailscale for networking.** App binds to localhost; `tailscale serve` provides HTTPS. Never bind to `0.0.0.0`.
+- **Tailscale for networking.** App binds to localhost; `tailscale serve --set-path /vibeledger` provides HTTPS on the tailnet. Never bind to `0.0.0.0`. Set `APP_BASE_URL=https://contabo.tail6fb821.ts.net/vibeledger` in `.env`.
 - **Connect flow** uses short-lived sessions (20min TTL, 256-bit tokens) so `/connect/complete` can be unauthenticated (called from browser).

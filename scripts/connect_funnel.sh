@@ -29,7 +29,7 @@ if [[ -z "$ACTION" ]]; then
   exit 2
 fi
 
-CONNECT_PATH="${CONNECT_PATH:-/connect}"
+CONNECT_PATH="${CONNECT_PATH:-/vibeledger/connect}"
 CONNECT_TARGET="${CONNECT_TARGET:-http://127.0.0.1:8000}"
 
 if [[ -z "${TS_FUNNEL_HOST:-}" ]]; then

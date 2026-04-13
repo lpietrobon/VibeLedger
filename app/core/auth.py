@@ -14,7 +14,11 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         self.token = token
 
     async def dispatch(self, request, call_next):
-        if any(request.url.path.startswith(p) for p in _EXEMPT_PREFIXES):
+        path = request.scope.get("path", request.url.path)
+        root = request.scope.get("root_path", "")
+        if root and path.startswith(root):
+            path = path[len(root):]
+        if any(path.startswith(p) for p in _EXEMPT_PREFIXES):
             return await call_next(request)
         auth = request.headers.get("authorization", "")
         if auth != f"Bearer {self.token}":
