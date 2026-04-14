@@ -1,6 +1,6 @@
 # VibeLedger
 
-Single-user personal finance ledger with Plaid ingestion.
+Single-user personal finance ledger with Plaid ingestion and a Streamlit dashboard (Accounts / Cashflow / Categories / Transfers, Mint/Monarch-style consolidated view with double-entry transfer reconciliation).
 
 ## Prerequisites
 
@@ -13,9 +13,11 @@ Single-user personal finance ledger with Plaid ingestion.
 ```bash
 python3 -m venv .venv          # requires Python 3.11+
 source .venv/bin/activate
-pip install -e .[dev]
+pip install -e '.[dev,dashboard]'   # drop `dashboard` if you only need the API
 uvicorn app.main:app --reload
 ```
+
+The `dashboard` extra installs Streamlit/pandas/requests. Omit it if you only run the API or tests.
 
 In a separate shell, run tests:
 
@@ -92,6 +94,33 @@ The default database path is `~/.vibeledger/vibeledger.db`. Override with `DATAB
 
 Tables are auto-created via `Base.metadata.create_all()` on boot. There is no migration framework; for schema changes on an existing DB, drop and recreate (acceptable for single-user use).
 
+## Dashboard
+
+A Streamlit multipage app provides a consolidated view:
+
+- **Accounts** — balances grouped by type with assets/liabilities/net-worth.
+- **Cashflow** — monthly income vs expense and net trend (transfers excluded by default).
+- **Categories** — top categories, month-over-month comparison, transaction samples.
+- **Transfers** — auto-detected pairs (e.g. credit-card payments crossing checking + credit) awaiting confirmation, plus manual pairing and `is_transfer_override` toggles. Transfer-paired transactions are excluded from cashflow/spend analytics so they don't double-count.
+
+Run locally:
+
+```bash
+streamlit run dashboard_app.py --server.baseUrlPath /vibeledger/dash
+```
+
+The dashboard reads SQLite directly for read paths and calls the FastAPI endpoints for writes (detect, pair, confirm, unpair). It loads the bearer token inline from `.env` so no extra config is needed when run on the same host as the API.
+
+### Serving the dashboard via Tailscale
+
+If the API is exposed via `tailscale serve --set-path /vibeledger`, add a second rule for the dashboard. Because `--set-path` strips the matched prefix and Streamlit's `--server.baseUrlPath` expects the prefix in incoming requests, include the prefix in the **target URL** so the reverse proxy re-prepends it:
+
+```bash
+sudo tailscale serve --bg --set-path /vibeledger/dash http://127.0.0.1:8501/vibeledger/dash
+```
+
+Then browse to `https://<machine>.tail1234.ts.net/vibeledger/dash/` from any tailnet device.
+
 ## Production deployment
 
 ### Tailscale HTTPS (recommended)
@@ -138,11 +167,32 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
+And an optional sibling unit for the dashboard:
+
+```ini
+# /etc/systemd/system/vibeledger-dash.service
+[Unit]
+Description=VibeLedger dashboard
+After=vibeledger.service
+
+[Service]
+Type=simple
+User=<your-user>
+WorkingDirectory=/path/to/VibeLedger
+EnvironmentFile=/path/to/VibeLedger/.env
+ExecStart=/path/to/VibeLedger/.venv/bin/streamlit run dashboard_app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true --server.baseUrlPath /vibeledger/dash --browser.gatherUsageStats false
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
 Then enable and start:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now vibeledger
+sudo systemctl enable --now vibeledger vibeledger-dash
 ```
 
 ### Recommended env vars for production
