@@ -176,6 +176,49 @@ class PlaidClient:
             "has_more": False,
         }
 
+
+    def get_historical_transactions(self, access_token: str, start_date: date, end_date: date) -> list[dict[str, Any]]:
+        if self._mock:
+            # Mock implementation for historical transactions
+            return [
+                {
+                    "transaction_id": f"txn-mock-hist-001",
+                    "account_id": "acct-001",
+                    "date": "2026-01-01",
+                    "amount": 50.00,
+                    "name": "Old Coffee Shop",
+                    "merchant_name": "Old Coffee Shop",
+                    "plaid_category_primary": "FOOD_AND_DRINK",
+                    "pending": False,
+                }
+            ]
+
+        from plaid.model.transactions_get_request import TransactionsGetRequest
+        from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
+
+
+        all_transactions: list[dict[str, Any]] = []
+        offset = 0
+        count = 500  # Max count per request
+
+        while True:
+            request_options = TransactionsGetRequestOptions(offset=offset, count=count)
+            request = TransactionsGetRequest(
+                access_token=access_token,
+                start_date=start_date,
+                end_date=end_date,
+                options=request_options,
+            )
+            response = self._client.transactions_get(request)
+
+            all_transactions.extend([self._normalize_txn(t) for t in response.get("transactions", [])])
+
+            if len(response.get("transactions", [])) < count:
+                break
+            offset += count
+
+        return all_transactions
+
     @staticmethod
     def _normalize_txn(t: dict[str, Any]) -> dict[str, Any]:
         d = t.get("date")

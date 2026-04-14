@@ -100,6 +100,74 @@ class SyncService:
             "cursor": state.cursor,
         }
 
+    def sync_item_historical(self, db: Session, item_id: int, start_date: date, end_date: date) -> dict:
+        item = db.query(Item).filter(Item.id == item_id).first()
+        if not item:
+            raise ValueError("item not found")
+
+        # Recover stale runs (stuck > 30 minutes)
+        stale_cutoff = utcnow() - timedelta(minutes=30)
+        stale_runs = (
+            db.query(SyncRun)
+            .filter(SyncRun.item_id == item_id, SyncRun.status == "running", SyncRun.started_at < stale_cutoff)
+            .all()
+        )
+        for stale in stale_runs:
+            stale.status = "error"
+            stale.finished_at = utcnow()
+            stale.error_summary = "marked stale: exceeded 30-minute timeout"
+            logger.warning("Marked stale SyncRun %d for item %d", stale.id, item_id)
+        if stale_runs:
+            db.flush()
+
+        in_progress = (
+            db.query(SyncRun)
+            .filter(SyncRun.item_id == item_id, SyncRun.status == "running")
+            .first()
+        )
+        if in_progress:
+            raise SyncInProgressError("sync already running for this item")
+
+        run = SyncRun(item_id=item_id, status="running", is_historical=True)
+        db.add(run)
+        db.flush()
+
+        try:
+            access_token = decrypt_token(item.access_token_encrypted)
+            self._refresh_accounts_and_snapshots(db, item_id, access_token)
+            data = self.client.get_historical_transactions(access_token, start_date, end_date)
+            added_count, modified_count, removed_count = self._apply_changes(db, item_id, {"added": data})
+        except Exception as exc:
+            now = utcnow()
+            run.status = "error"
+            run.finished_at = now
+            run.error_summary = f"{type(exc).__name__}: {exc}"[:500]
+
+            # Note: For historical syncs, we don't update SyncState last_sync_at/cursor.
+            # This is because historical sync is additive, not a replacement for ongoing sync.
+
+            db.commit()
+            raise
+
+        now = utcnow()
+        # Note: For historical syncs, we don't update SyncState last_sync_at/cursor.
+        # This is because historical sync is additive, not a replacement for ongoing sync.
+
+        run.status = "success"
+        run.added_count = added_count
+        run.modified_count = modified_count
+        run.removed_count = removed_count
+        run.finished_at = now
+
+        db.commit()
+        return {
+            "status": "success",
+            "added": added_count,
+            "modified": modified_count,
+            "removed": removed_count,
+        }
+
+
     def _refresh_accounts_and_snapshots(self, db: Session, item_id: int, access_token: str) -> None:
         accounts = self.client.get_accounts(access_token)
         today = date.today()

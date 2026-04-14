@@ -33,13 +33,31 @@ This routes `https://contabo.tail6fb821.ts.net/vibeledger/` to the app (tailnet-
 
 ### Starting the app
 
+There is **no systemd unit or service manager** — the app must be started manually and will die when the launching shell exits. Use `nohup` + `disown` (or a tmux session) to keep it alive.
+
+`app/core/config.py` reads settings with `os.getenv` and does **not** auto-load `.env`. You must export the vars into the environment first, or uvicorn will crash at startup with `TOKEN_ENCRYPTION_KEY must be set to a valid Fernet key`.
+
 ```bash
 cd /home/charlie/.openclaw/workspace/VibeLedger
+set -a && source .env && set +a           # export .env into the shell
 source .venv/bin/activate
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --root-path /vibeledger
+nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 --root-path /vibeledger > /tmp/vibeledger.log 2>&1 &
+disown
 ```
 
 Once running, the app is reachable at `https://contabo.tail6fb821.ts.net/vibeledger/` from any device on the tailnet. The `--root-path` flag is required so FastAPI generates correct URLs (connect flow links, docs, etc.).
+
+**Verify it's up:**
+```bash
+curl -sS http://127.0.0.1:8000/health          # local
+curl -sS https://contabo.tail6fb821.ts.net/vibeledger/health   # through tailscale
+```
+
+**Troubleshooting:**
+- `502 Bad Gateway` from `contabo.tail6fb821.ts.net/vibeledger/...` — tailscale serve is proxying correctly but nothing is listening on `127.0.0.1:8000`. Check `ss -tlnp | grep 8000` and `pgrep -af uvicorn`, then restart the app.
+- App logs go to `/tmp/vibeledger.log` when launched as above.
+- Tailscale serve config (persistent): `tailscale serve status` should show `/vibeledger proxy http://127.0.0.1:8000` under `https://contabo.tail6fb821.ts.net`.
+- `.env`'s `APP_BASE_URL` must be exactly `https://contabo.tail6fb821.ts.net/vibeledger` — no trailing slash, no duplicated `/vibeledger`. This is the base used to build `connect_url` returned by `POST /connect/sessions`.
 
 ### Linking a new bank account
 
@@ -92,7 +110,14 @@ analytics/             # Standalone Plotly/Streamlit scripts
 All protected endpoints require `Authorization: Bearer <VIBELEDGER_API_TOKEN>`.
 
 **Link a new bank account:**
-1. `POST /connect/sessions` with `{"user_id": "..."}` — returns a `connect_url` and `session_token`
+1. `POST /connect/sessions` with `{"user_id": "..."}` — **requires `Authorization: Bearer $VIBELEDGER_API_TOKEN`** (only `/connect/start` and `/connect/complete` are exempt from auth, so the browser hop works unauthenticated). Returns a `connect_url` and `session_token`. Example:
+   ```bash
+   curl -X POST https://contabo.tail6fb821.ts.net/vibeledger/connect/sessions \
+     -H "Authorization: Bearer $VIBELEDGER_API_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"user_id": "you"}'
+   ```
+   Missing/wrong token returns `{"detail":"invalid or missing bearer token"}` (401).
 2. Open `connect_url` in a browser to complete Plaid Link (if the app isn't publicly reachable, temporarily expose `/connect/*` via Tailscale Funnel)
 3. On success the browser posts back to `/connect/complete` automatically — the access token is encrypted and stored
 

@@ -93,6 +93,7 @@ class SyncRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="running")
+    is_historical: Mapped[bool] = mapped_column(Boolean, default=False)
     added_count: Mapped[int] = mapped_column(Integer, default=0)
     modified_count: Mapped[int] = mapped_column(Integer, default=0)
     removed_count: Mapped[int] = mapped_column(Integer, default=0)

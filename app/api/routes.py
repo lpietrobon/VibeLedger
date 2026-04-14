@@ -187,6 +187,26 @@ def connect_session_status(session_token: str, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/sync/item/{item_id}/historical")
+def sync_item_historical(
+    item_id: int,
+    start_date: date = Query(..., description="Start date for historical sync (YYYY-MM-DD)"),
+    end_date: date = Query(..., description="End date for historical sync (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+):
+    try:
+        return SyncService().sync_item_historical(db, item_id, start_date, end_date)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except SyncInProgressError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("historical sync failed for item %d", item_id)
+        raise HTTPException(status_code=502, detail="historical sync failed")
+
+
 @router.post("/sync/item/{item_id}")
 def sync_item(item_id: int, db: Session = Depends(get_db)):
     try:
