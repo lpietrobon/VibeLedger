@@ -1,86 +1,55 @@
-import sqlite3
-import pandas as pd
 import streamlit as st
-import plotly.express as px
-from datetime import date, timedelta
 
-st.set_page_config(page_title='VibeLedger Dashboard', layout='wide')
-st.title('VibeLedger — Category Explorer')
+from dashboard_lib import (
+    DEFAULT_API,
+    apply_filters,
+    load_accounts,
+    load_transactions,
+    load_transfer_pairs,
+    sidebar_filters,
+)
 
-DB_PATH = st.sidebar.text_input('DB path', 'vibeledger.db')
-
-def load_df(db_path: str):
-    conn = sqlite3.connect(db_path)
-    q = '''
-    SELECT t.id, t.date, t.amount, t.name, t.merchant_name,
-           t.plaid_category_primary,
-           COALESCE(ta.user_category, t.plaid_category_primary, 'uncategorized') AS effective_category,
-           a.name AS account_name, a.mask, a.type, a.subtype
-    FROM transactions t
-    LEFT JOIN transaction_annotations ta ON ta.transaction_id=t.id
-    LEFT JOIN accounts a ON a.id=t.account_id
-    '''
-    df = pd.read_sql_query(q, conn)
-    conn.close()
-    if not df.empty:
-        df['date'] = pd.to_datetime(df['date']).dt.date
-    return df
+st.set_page_config(page_title="VibeLedger", layout="wide")
+st.title("VibeLedger")
+st.caption("Consolidated multi-account view. Use the sidebar pages for details.")
 
 try:
-    df = load_df(DB_PATH)
+    df = load_transactions(st.session_state.get("db_path", "")) if st.session_state.get("db_path") else load_transactions(__import__("dashboard_lib").DEFAULT_DB)
 except Exception as e:
-    st.error(f'Failed to load DB: {e}')
+    st.error(f"Failed to load DB: {e}")
     st.stop()
+
+db_path, start_d, end_d, accounts, excl_xfer = sidebar_filters(df)
 
 if df.empty:
-    st.warning('No transactions found.')
+    st.warning("No transactions in DB yet. Link an account and sync first.")
     st.stop()
 
-min_d, max_d = df['date'].min(), df['date'].max()
-def_start = max(min_d, date.today() - timedelta(days=30))
-start_d, end_d = st.sidebar.date_input('Date range', (def_start, max_d), min_value=min_d, max_value=max_d)
+f = apply_filters(df, start_d, end_d, accounts, excl_xfer)
 
-accounts = sorted(df['account_name'].fillna('Unknown').unique().tolist())
-selected_accounts = st.sidebar.multiselect('Accounts', accounts, default=accounts)
-
-cats = sorted(df['effective_category'].fillna('uncategorized').unique().tolist())
-selected_cats = st.sidebar.multiselect('Categories', cats, default=cats)
-
-f = df[(df['date'] >= start_d) & (df['date'] <= end_d)]
-f = f[f['account_name'].fillna('Unknown').isin(selected_accounts)]
-f = f[f['effective_category'].fillna('uncategorized').isin(selected_cats)]
-
-spend = f[f['amount'] > 0].copy()
-
-col1, col2 = st.columns(2)
+col1, col2, col3, col4 = st.columns(4)
+spend = f[f["amount"] > 0]["amount"].sum()
+income = -f[f["amount"] < 0]["amount"].sum()
+net = income - spend
 with col1:
-    st.metric('Transactions', len(f))
+    st.metric("Transactions", len(f))
 with col2:
-    st.metric('Spend (positive amounts)', f"${spend['amount'].sum():,.2f}")
+    st.metric("Spend", f"${spend:,.2f}")
+with col3:
+    st.metric("Income", f"${income:,.2f}")
+with col4:
+    st.metric("Net", f"${net:,.2f}")
 
-st.subheader('Top Categories')
-cat = spend.groupby('effective_category', as_index=False)['amount'].sum().sort_values('amount', ascending=False).head(20)
-fig = px.bar(cat, x='amount', y='effective_category', orientation='h', title='Spend by Category')
-fig.update_layout(yaxis_title='Category', xaxis_title='Spend')
-st.plotly_chart(fig, use_container_width=True)
+accounts_df = load_accounts(db_path)
+pairs_df = load_transfer_pairs(db_path)
 
-st.subheader('This Month vs Last Month')
-if not spend.empty:
-    today = date.today()
-    first_this = today.replace(day=1)
-    first_prev = (first_this - timedelta(days=1)).replace(day=1)
-    last_prev = first_this - timedelta(days=1)
-    m = spend.copy()
-    m['bucket'] = m['date'].apply(lambda d: 'This month' if d >= first_this else ('Last month' if first_prev <= d <= last_prev else 'Other'))
-    m = m[m['bucket'].isin(['This month','Last month'])]
-    cmp = m.groupby(['effective_category','bucket'], as_index=False)['amount'].sum()
-    top = cmp.groupby('effective_category', as_index=False)['amount'].sum().sort_values('amount', ascending=False).head(15)['effective_category']
-    cmp = cmp[cmp['effective_category'].isin(top)]
-    fig2 = px.bar(cmp, x='effective_category', y='amount', color='bucket', barmode='group', title='Category comparison')
-    fig2.update_xaxes(tickangle=35)
-    st.plotly_chart(fig2, use_container_width=True)
+st.subheader("At a glance")
+c1, c2 = st.columns(2)
+with c1:
+    st.write(f"**Accounts linked:** {len(accounts_df)}")
+    st.write(f"**Transfer pairs detected:** {len(pairs_df)} ({(pairs_df['confirmed']==1).sum() if not pairs_df.empty else 0} confirmed)")
+with c2:
+    st.write(f"**API base:** `{DEFAULT_API}`")
+    st.write("**Pages:** Accounts · Cashflow · Categories · Transfers")
 
-st.subheader('Transaction Samples by Category')
-cat_pick = st.selectbox('Pick a category', sorted(f['effective_category'].fillna('uncategorized').unique().tolist()))
-samples = f[f['effective_category'].fillna('uncategorized') == cat_pick].sort_values('date', ascending=False)
-st.dataframe(samples[['date','amount','account_name','merchant_name','name','plaid_category_primary','effective_category']].head(200), use_container_width=True)
+st.info("Jump into a page from the left sidebar for deeper views.")

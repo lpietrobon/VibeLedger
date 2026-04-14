@@ -33,31 +33,35 @@ This routes `https://contabo.tail6fb821.ts.net/vibeledger/` to the app (tailnet-
 
 ### Starting the app
 
-There is **no systemd unit or service manager** — the app must be started manually and will die when the launching shell exits. Use `nohup` + `disown` (or a tmux session) to keep it alive.
+The app runs as a **systemd user service** (`vibeledger.service` at `~/.config/systemd/user/vibeledger.service`). Lingering is enabled for user `charlie`, so the service starts at boot and survives logout. This is the **only supported way** to run the app in this environment — do not launch uvicorn manually with `nohup`+`&`, it won't survive agent exec boundaries (Claude-Code-style Bash tools reap their process group).
 
-`app/core/config.py` reads settings with `os.getenv` and does **not** auto-load `.env`. You must export the vars into the environment first, or uvicorn will crash at startup with `TOKEN_ENCRYPTION_KEY must be set to a valid Fernet key`.
+**For agents: the service is normally already running.** Your first action should be `curl http://127.0.0.1:8000/health`, not `systemctl start`. Only restart if the health check fails. **Never run `pkill -f uvicorn`** — it kills the systemd-managed process and leaves the service in a confused state; use `systemctl --user restart vibeledger` instead.
 
+**Control the service:**
 ```bash
-cd /home/charlie/.openclaw/workspace/VibeLedger
-set -a && source .env && set +a           # export .env into the shell
-source .venv/bin/activate
-nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 --root-path /vibeledger > /tmp/vibeledger.log 2>&1 &
-disown
+systemctl --user start vibeledger        # start
+systemctl --user stop vibeledger         # stop
+systemctl --user restart vibeledger      # restart (after .env or code change)
+systemctl --user status vibeledger       # status
+journalctl --user -u vibeledger -n 100   # recent logs (also mirrored to /tmp/vibeledger.log)
 ```
 
-Once running, the app is reachable at `https://contabo.tail6fb821.ts.net/vibeledger/` from any device on the tailnet. The `--root-path` flag is required so FastAPI generates correct URLs (connect flow links, docs, etc.).
+The unit file reads `.env` via `EnvironmentFile=`, runs `/home/charlie/.openclaw/workspace/VibeLedger/.venv/bin/uvicorn`, and has `Restart=on-failure`. If you edit the unit file, run `systemctl --user daemon-reload` before restart.
+
+Once running, the app is reachable at `https://contabo.tail6fb821.ts.net/vibeledger/` from any device on the tailnet. The `--root-path /vibeledger` flag (baked into the unit's `ExecStart`) is required so FastAPI generates correct URLs (connect flow links, docs, etc.).
 
 **Verify it's up:**
 ```bash
-curl -sS http://127.0.0.1:8000/health          # local
+systemctl --user is-active vibeledger                          # should print "active"
+curl -sS http://127.0.0.1:8000/health                          # local
 curl -sS https://contabo.tail6fb821.ts.net/vibeledger/health   # through tailscale
 ```
 
 **Troubleshooting:**
-- `502 Bad Gateway` from `contabo.tail6fb821.ts.net/vibeledger/...` — tailscale serve is proxying correctly but nothing is listening on `127.0.0.1:8000`. Check `ss -tlnp | grep 8000` and `pgrep -af uvicorn`, then restart the app.
-- App logs go to `/tmp/vibeledger.log` when launched as above.
+- `502 Bad Gateway` from `contabo.tail6fb821.ts.net/vibeledger/...` — tailscale serve is proxying correctly but nothing is listening on `127.0.0.1:8000`. Run `systemctl --user status vibeledger` and `journalctl --user -u vibeledger -n 50` to see why it's down.
+- Startup failure `TOKEN_ENCRYPTION_KEY must be set...` — means `EnvironmentFile=` isn't finding `.env`. Verify the path in the unit file and that `.env` exists and is readable.
 - Tailscale serve config (persistent): `tailscale serve status` should show `/vibeledger proxy http://127.0.0.1:8000` under `https://contabo.tail6fb821.ts.net`.
-- `.env`'s `APP_BASE_URL` must be exactly `https://contabo.tail6fb821.ts.net/vibeledger` — no trailing slash, no duplicated `/vibeledger`. This is the base used to build `connect_url` returned by `POST /connect/sessions`.
+- `.env`'s `APP_BASE_URL` must be exactly `https://contabo.tail6fb821.ts.net/vibeledger` — no trailing slash, no duplicated `/vibeledger`. This is the base used to build `connect_url` returned by `POST /connect/sessions`. After changing, `systemctl --user restart vibeledger`.
 
 ### Linking a new bank account
 
@@ -108,6 +112,19 @@ analytics/             # Standalone Plotly/Streamlit scripts
 ## Common operations
 
 All protected endpoints require `Authorization: Bearer <VIBELEDGER_API_TOKEN>`.
+
+### Calling the API from an agent on this box
+
+Agents running on this VPS (e.g. openclaw/Claude Code instances) should read the token inline from `.env` on every call. Do **not** `export` it into a shell session, and do **not** ask the user to paste it — it's already on disk and the agent has filesystem access.
+
+Canonical pattern:
+
+```bash
+curl -H "Authorization: Bearer $(grep ^VIBELEDGER_API_TOKEN /home/charlie/.openclaw/workspace/VibeLedger/.env | cut -d= -f2-)" \
+  https://contabo.tail6fb821.ts.net/vibeledger/<endpoint>
+```
+
+Rationale: keeps the token out of the agent's conversation context and environment while still letting the agent make calls autonomously. The token is a single-user bearer used to gate access from other devices on the tailnet; removing it would expose Plaid-linked account data to anyone on the tailnet, so it stays.
 
 **Link a new bank account:**
 1. `POST /connect/sessions` with `{"user_id": "..."}` — **requires `Authorization: Bearer $VIBELEDGER_API_TOKEN`** (only `/connect/start` and `/connect/complete` are exempt from auth, so the browser hop works unauthenticated). Returns a `connect_url` and `session_token`. Example:

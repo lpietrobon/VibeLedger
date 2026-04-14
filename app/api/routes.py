@@ -7,18 +7,19 @@ import subprocess
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from sqlalchemy import case, func, text
+from sqlalchemy import case, func, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.time import utcnow
 from app.db.session import SessionLocal
 from app.services.plaid_client import PlaidClient
-from app.models.models import ConnectSession, Item, Transaction, TransactionAnnotation
+from app.models.models import Account, ConnectSession, Item, Transaction, TransactionAnnotation, TransferPair
 from app.schemas.plaid import ConnectCompleteRequest, CreateConnectSessionRequest, PatchAnnotationRequest
 from app.services.security import encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
+from app.services import transfer_detector
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -325,17 +326,49 @@ def patch_annotation(transaction_id: int, payload: PatchAnnotationRequest, db: S
     return {"status": "ok", "transaction_id": transaction_id}
 
 
+def _apply_transfer_exclusion(q, include_transfers: bool):
+    """Filter out any transaction participating in a TransferPair or flagged via
+    TransactionAnnotation.is_transfer_override."""
+    if include_transfers:
+        return q
+    pair_out = db_pair_ids_subquery_out()
+    pair_in = db_pair_ids_subquery_in()
+    return q.filter(
+        ~Transaction.id.in_(pair_out),
+        ~Transaction.id.in_(pair_in),
+        or_(
+            TransactionAnnotation.is_transfer_override == False,  # noqa: E712
+            TransactionAnnotation.is_transfer_override.is_(None),
+        ),
+    )
+
+
+def db_pair_ids_subquery_out():
+    from sqlalchemy import select as sa_select
+    return sa_select(TransferPair.txn_out_id)
+
+
+def db_pair_ids_subquery_in():
+    from sqlalchemy import select as sa_select
+    return sa_select(TransferPair.txn_in_id)
+
+
 @router.get("/analytics/monthly-spend")
 def monthly_spend(
     db: Session = Depends(get_db),
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
+    include_transfers: bool = Query(default=False),
 ):
     month_col = func.strftime("%Y-%m", Transaction.date).label("month")
-    q = db.query(
-        month_col,
-        func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)),
+    q = (
+        db.query(
+            month_col,
+            func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)),
+        )
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
+    q = _apply_transfer_exclusion(q, include_transfers)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -349,6 +382,7 @@ def category_spend(
     db: Session = Depends(get_db),
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
+    include_transfers: bool = Query(default=False),
 ):
     effective_category = func.coalesce(
         TransactionAnnotation.user_category,
@@ -362,6 +396,7 @@ def category_spend(
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
+    q = _apply_transfer_exclusion(q, include_transfers)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -375,13 +410,18 @@ def cashflow_trend(
     db: Session = Depends(get_db),
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
+    include_transfers: bool = Query(default=False),
 ):
     month_col = func.strftime("%Y-%m", Transaction.date).label("month")
-    q = db.query(
-        month_col,
-        func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)).label("expenses"),
-        func.sum(case((Transaction.amount < 0, -Transaction.amount), else_=0)).label("income"),
+    q = (
+        db.query(
+            month_col,
+            func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)).label("expenses"),
+            func.sum(case((Transaction.amount < 0, -Transaction.amount), else_=0)).label("income"),
+        )
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
+    q = _apply_transfer_exclusion(q, include_transfers)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -396,3 +436,111 @@ def cashflow_trend(
         }
         for month, expenses, income in rows
     ]
+
+
+@router.get("/analytics/accounts-summary")
+def accounts_summary(db: Session = Depends(get_db)):
+    accounts = db.query(Account).all()
+    by_type: dict[str, list[dict]] = {}
+    for a in accounts:
+        bal = float(a.current_balance) if a.current_balance is not None else 0.0
+        by_type.setdefault(a.type or "other", []).append({
+            "id": a.id,
+            "name": a.name,
+            "mask": a.mask,
+            "subtype": a.subtype,
+            "current_balance": round(bal, 2),
+            "available_balance": round(float(a.available_balance), 2) if a.available_balance is not None else None,
+            "currency": a.currency,
+            "credit_limit": round(float(a.credit_limit), 2) if a.credit_limit is not None else None,
+        })
+    assets = sum(x["current_balance"] for x in by_type.get("depository", []))
+    liabilities = sum(x["current_balance"] for x in by_type.get("credit", []))
+    liabilities += sum(x["current_balance"] for x in by_type.get("loan", []))
+    return {
+        "assets": round(assets, 2),
+        "liabilities": round(liabilities, 2),
+        "net_worth": round(assets - liabilities, 2),
+        "groups": by_type,
+    }
+
+
+@router.post("/transfers/detect")
+def transfers_detect(
+    db: Session = Depends(get_db),
+    window_days: int = Query(default=3, ge=0, le=14),
+):
+    created = transfer_detector.detect_candidates(db, window_days=window_days)
+    return {"created": len(created), "pair_ids": [p.id for p in created]}
+
+
+@router.get("/transfers")
+def transfers_list(
+    db: Session = Depends(get_db),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+):
+    total = db.query(func.count(TransferPair.id)).scalar()
+    rows = (
+        db.query(TransferPair).order_by(TransferPair.id.desc()).limit(limit).offset(offset).all()
+    )
+    items = []
+    for p in rows:
+        out = db.get(Transaction, p.txn_out_id)
+        inn = db.get(Transaction, p.txn_in_id)
+        items.append({
+            "id": p.id,
+            "detected_by": p.detected_by,
+            "confirmed": p.confirmed,
+            "amount": round(float(out.amount), 2) if out else None,
+            "out": {
+                "transaction_id": p.txn_out_id,
+                "account_id": out.account_id if out else None,
+                "date": str(out.date) if out else None,
+                "name": out.name if out else None,
+            },
+            "in": {
+                "transaction_id": p.txn_in_id,
+                "account_id": inn.account_id if inn else None,
+                "date": str(inn.date) if inn else None,
+                "name": inn.name if inn else None,
+            },
+        })
+    return {"total": total, "items": items}
+
+
+@router.post("/transfers")
+def transfers_create(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    try:
+        txn_a_id = int(payload["txn_a_id"])
+        txn_b_id = int(payload["txn_b_id"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="txn_a_id and txn_b_id required")
+    try:
+        pair = transfer_detector.manual_pair(db, txn_a_id, txn_b_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"id": pair.id, "status": "paired"}
+
+
+@router.post("/transfers/{pair_id}/confirm")
+def transfers_confirm(pair_id: int, db: Session = Depends(get_db)):
+    pair = db.get(TransferPair, pair_id)
+    if not pair:
+        raise HTTPException(status_code=404, detail="pair not found")
+    pair.confirmed = True
+    db.commit()
+    return {"id": pair.id, "confirmed": True}
+
+
+@router.delete("/transfers/{pair_id}")
+def transfers_delete(pair_id: int, db: Session = Depends(get_db)):
+    pair = db.get(TransferPair, pair_id)
+    if not pair:
+        raise HTTPException(status_code=404, detail="pair not found")
+    db.delete(pair)
+    db.commit()
+    return {"status": "unpaired"}

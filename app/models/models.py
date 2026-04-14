@@ -70,7 +70,23 @@ class TransactionAnnotation(Base):
     user_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_transfer_override: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class TransferPair(Base):
+    __tablename__ = "transfer_pairs"
+    __table_args__ = (
+        UniqueConstraint("txn_out_id", name="uq_transfer_out"),
+        UniqueConstraint("txn_in_id", name="uq_transfer_in"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    txn_out_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), index=True)
+    txn_in_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), index=True)
+    detected_by: Mapped[str] = mapped_column(String(16), default="auto")
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class SyncState(Base):

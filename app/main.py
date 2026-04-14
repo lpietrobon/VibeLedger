@@ -8,6 +8,7 @@ from app.api.routes import router
 from app.core.auth import BearerAuthMiddleware
 from app.core.config import settings, validate_security_settings
 from app.db.base import Base
+from app.db.schema_patches import apply_patches
 from app.db.session import engine
 from app.models import models  # noqa: F401
 from app.services.scheduler import scheduled_sync_loop
@@ -17,6 +18,7 @@ from app.services.scheduler import scheduled_sync_loop
 async def lifespan(_: FastAPI):
     validate_security_settings()
     Base.metadata.create_all(bind=engine)
+    apply_patches(engine)
     sync_task = asyncio.create_task(scheduled_sync_loop())
     yield
     sync_task.cancel()
