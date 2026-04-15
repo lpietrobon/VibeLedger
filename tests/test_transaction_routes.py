@@ -84,3 +84,59 @@ def test_transaction_pagination():
         assert body2["total"] == 5
         assert len(body2["items"]) == 2
         assert body["items"][0]["id"] != body2["items"][0]["id"]
+
+
+def test_transactions_include_effective_category_source_and_rule_id_contract():
+    tx_rule = _seed_transaction("item-cr1", "acct-cr1", "tx-contract-rule", date(2026, 4, 6), 11.0, "Starbucks Kiosk", plaid_category="DINING")
+    _seed_transaction("item-cr4", "acct-cr4", "tx-contract-rule-only", date(2026, 4, 6), 14.0, "Starbucks Reserve", plaid_category="DINING")
+    _seed_transaction("item-cr2", "acct-cr2", "tx-contract-plaid", date(2026, 4, 6), 8.0, "Unknown Merchant", plaid_category="PLAID_ONLY")
+    _seed_transaction("item-cr3", "acct-cr3", "tx-contract-none", date(2026, 4, 6), 7.0, "No Category", plaid_category=None)
+
+    with TestClient(app) as client:
+        create_rule = client.post(
+            "/category-rules",
+            json={"rank": 1, "enabled": True, "description_regex": "starbucks", "assigned_category": "coffee"},
+            headers=AUTH_HEADERS,
+        )
+        assert create_rule.status_code == 200
+        rule_id = create_rule.json()["id"]
+
+        apply_resp = client.post(
+            "/category-rules/apply",
+            json={"dry_run": False, "scope": {"start_date": "2026-04-01", "end_date": "2026-04-30"}},
+            headers=AUTH_HEADERS,
+        )
+        assert apply_resp.status_code == 200
+
+        client.patch(
+            f"/transactions/{tx_rule}/annotation",
+            json={"user_category": "manual-coffee"},
+            headers=AUTH_HEADERS,
+        )
+
+        r = client.get("/transactions", headers=AUTH_HEADERS)
+        assert r.status_code == 200
+
+    by_plaid_id = {item["plaid_transaction_id"]: item for item in r.json()["items"]}
+
+    manual_row = by_plaid_id["tx-contract-rule"]
+    assert manual_row["effective_category"] == "manual-coffee"
+    assert manual_row["category_source"] == "manual"
+    assert manual_row["rule_id"] is None
+
+    rule_row = by_plaid_id["tx-contract-rule-only"]
+    assert rule_row["effective_category"] == "coffee"
+    assert rule_row["category_source"] == "rule"
+    assert rule_row["rule_id"] == rule_id
+
+    plaid_row = by_plaid_id["tx-contract-plaid"]
+    assert plaid_row["effective_category"] == "PLAID_ONLY"
+    assert plaid_row["category_source"] == "plaid"
+    assert plaid_row["rule_id"] is None
+
+    uncategorized_row = by_plaid_id["tx-contract-none"]
+    assert uncategorized_row["effective_category"] == "uncategorized"
+    assert uncategorized_row["category_source"] == "default"
+    assert uncategorized_row["rule_id"] is None
+
+    assert rule_id is not None
