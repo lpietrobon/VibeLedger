@@ -1,7 +1,18 @@
 from datetime import datetime, date
 from decimal import Decimal
 
-from sqlalchemy import String, DateTime, ForeignKey, Boolean, Numeric, Date, Text, Integer, UniqueConstraint
+from sqlalchemy import (
+    String,
+    DateTime,
+    ForeignKey,
+    Boolean,
+    Numeric,
+    Date,
+    Text,
+    Integer,
+    UniqueConstraint,
+    Index,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.time import utcnow
@@ -68,10 +79,48 @@ class TransactionAnnotation(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     transaction_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), unique=True)
     user_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    rule_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("category_rules.id"), nullable=True, index=True)
+    rule_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     is_transfer_override: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class CategoryRule(Base):
+    __tablename__ = "category_rules"
+    __table_args__ = (
+        Index("ix_category_rules_enabled_rank", "enabled", "rank"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rank: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    description_regex: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    account_name_regex: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    min_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    max_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    assigned_category: Mapped[str] = mapped_column(String(128))
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class CategoryDecisionEvent(Base):
+    __tablename__ = "category_decision_events"
+    __table_args__ = (
+        Index("ix_category_decision_events_transaction_changed_at", "transaction_id", "changed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    transaction_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), index=True)
+    old_effective_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    new_effective_category: Mapped[str] = mapped_column(String(128))
+    source: Mapped[str] = mapped_column(String(32))
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("category_rules.id"), nullable=True)
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class TransferPair(Base):
