@@ -1,4 +1,6 @@
 from datetime import date
+from decimal import Decimal
+import re
 from pathlib import Path
 import logging
 import json
@@ -14,8 +16,26 @@ from app.core.config import settings
 from app.core.time import utcnow
 from app.db.session import SessionLocal
 from app.services.plaid_client import PlaidClient
-from app.models.models import Account, ConnectSession, Item, Transaction, TransactionAnnotation, TransferPair
-from app.schemas.plaid import ConnectCompleteRequest, CreateConnectSessionRequest, PatchAnnotationRequest
+from app.models.models import (
+    Account,
+    CategoryDecisionEvent,
+    CategoryRule,
+    ConnectSession,
+    Item,
+    Transaction,
+    TransactionAnnotation,
+    TransferPair,
+)
+from app.schemas.plaid import (
+    CategoryRuleApplyRequest,
+    CategoryRuleCreateRequest,
+    CategoryRulePatchRequest,
+    CategoryRulePreviewRequest,
+    CategoryRuleRecomputeRequest,
+    ConnectCompleteRequest,
+    CreateConnectSessionRequest,
+    PatchAnnotationRequest,
+)
 from app.services.security import encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
@@ -324,6 +344,293 @@ def patch_annotation(transaction_id: int, payload: PatchAnnotationRequest, db: S
 
     db.commit()
     return {"status": "ok", "transaction_id": transaction_id}
+
+
+
+def _serialize_rule(rule: CategoryRule) -> dict:
+    return {
+        "id": rule.id,
+        "rank": rule.rank,
+        "enabled": rule.enabled,
+        "description_regex": rule.description_regex,
+        "account_name_regex": rule.account_name_regex,
+        "min_amount": float(rule.min_amount) if rule.min_amount is not None else None,
+        "max_amount": float(rule.max_amount) if rule.max_amount is not None else None,
+        "assigned_category": rule.assigned_category,
+        "name": rule.name,
+        "created_at": rule.created_at.isoformat(),
+        "updated_at": rule.updated_at.isoformat(),
+    }
+
+
+def _compiled_regex(pattern: str | None):
+    if not pattern:
+        return None
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        raise HTTPException(status_code=400, detail=f"invalid regex '{pattern}': {e}")
+
+
+def _tx_matches_rule(tx: Transaction, account: Account | None, compiled_rule: dict) -> bool:
+    desc_re = compiled_rule["description_re"]
+    account_re = compiled_rule["account_re"]
+
+    tx_desc = tx.name or ""
+    account_name = (account.name if account else "") or ""
+
+    if desc_re and not desc_re.search(tx_desc):
+        return False
+    if account_re and not account_re.search(account_name):
+        return False
+
+    amount = Decimal(tx.amount)
+    if compiled_rule["min_amount"] is not None and amount < compiled_rule["min_amount"]:
+        return False
+    if compiled_rule["max_amount"] is not None and amount > compiled_rule["max_amount"]:
+        return False
+    return True
+
+
+def _compile_rule(rule: CategoryRule | dict) -> dict:
+    get = (lambda k: getattr(rule, k)) if not isinstance(rule, dict) else (lambda k: rule.get(k))
+    return {
+        "id": get("id"),
+        "rank": int(get("rank") or 0),
+        "enabled": bool(get("enabled")),
+        "description_re": _compiled_regex(get("description_regex")),
+        "account_re": _compiled_regex(get("account_name_regex")),
+        "min_amount": Decimal(get("min_amount")) if get("min_amount") is not None else None,
+        "max_amount": Decimal(get("max_amount")) if get("max_amount") is not None else None,
+        "assigned_category": get("assigned_category"),
+    }
+
+
+def _scoped_transactions(db: Session, scope, only_without_user_category: bool = False):
+    q = db.query(Transaction, Account, TransactionAnnotation).join(Account, Account.id == Transaction.account_id).outerjoin(
+        TransactionAnnotation,
+        TransactionAnnotation.transaction_id == Transaction.id,
+    )
+
+    if scope.start_date:
+        q = q.filter(Transaction.date >= scope.start_date)
+    if scope.end_date:
+        q = q.filter(Transaction.date <= scope.end_date)
+    if scope.account_ids:
+        q = q.filter(Transaction.account_id.in_(scope.account_ids))
+    if scope.item_ids:
+        q = q.filter(Transaction.item_id.in_(scope.item_ids))
+    if not scope.include_pending:
+        q = q.filter(Transaction.pending == False)  # noqa: E712
+    if only_without_user_category:
+        q = q.filter(or_(TransactionAnnotation.user_category.is_(None), TransactionAnnotation.id.is_(None)))
+
+    return q.order_by(Transaction.id.asc()).all()
+
+
+def _effective_category(annotation: TransactionAnnotation | None, fallback: str | None) -> str:
+    if annotation and annotation.user_category:
+        return annotation.user_category
+    if annotation and annotation.rule_category:
+        return annotation.rule_category
+    return fallback or "uncategorized"
+
+
+def _simulate_rule_stack(rows, compiled_rules: list[dict]):
+    simulated = []
+    for tx, account, annotation in rows:
+        matched_rule = next((r for r in compiled_rules if r["enabled"] and _tx_matches_rule(tx, account, r)), None)
+        current = _effective_category(annotation, tx.plaid_category_primary)
+        simulated_effective = annotation.user_category if annotation and annotation.user_category else (
+            matched_rule["assigned_category"] if matched_rule else (tx.plaid_category_primary or "uncategorized")
+        )
+        simulated.append({
+            "tx": tx,
+            "annotation": annotation,
+            "current_effective_category": current,
+            "simulated_effective_category": simulated_effective,
+            "matched_rule_id": matched_rule["id"] if matched_rule else None,
+            "matched_assigned_category": matched_rule["assigned_category"] if matched_rule else None,
+            "would_change": current != simulated_effective,
+        })
+    return simulated
+
+
+@router.get("/category-rules")
+def list_category_rules(db: Session = Depends(get_db)):
+    rules = db.query(CategoryRule).order_by(CategoryRule.rank.asc(), CategoryRule.id.asc()).all()
+    return {"items": [_serialize_rule(rule) for rule in rules]}
+
+
+@router.post("/category-rules")
+def create_category_rule(payload: CategoryRuleCreateRequest, db: Session = Depends(get_db)):
+    rule = CategoryRule(
+        rank=payload.rank,
+        enabled=payload.enabled,
+        description_regex=payload.description_regex,
+        account_name_regex=payload.account_name_regex,
+        min_amount=payload.min_amount,
+        max_amount=payload.max_amount,
+        assigned_category=payload.assigned_category,
+        name=payload.name,
+    )
+    _compile_rule(rule)
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return _serialize_rule(rule)
+
+
+@router.patch("/category-rules/{rule_id}")
+def patch_category_rule(rule_id: int, payload: CategoryRulePatchRequest, db: Session = Depends(get_db)):
+    rule = db.get(CategoryRule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="rule not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(rule, key, value)
+
+    _compile_rule(rule)
+    db.commit()
+    db.refresh(rule)
+    return _serialize_rule(rule)
+
+
+@router.delete("/category-rules/{rule_id}")
+def delete_category_rule(rule_id: int, db: Session = Depends(get_db)):
+    rule = db.get(CategoryRule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="rule not found")
+    db.delete(rule)
+    db.commit()
+    return {"status": "deleted", "id": rule_id}
+
+
+@router.post("/category-rules/preview")
+def preview_category_rules(payload: CategoryRulePreviewRequest, db: Session = Depends(get_db)):
+    base_rules = db.query(CategoryRule).order_by(CategoryRule.rank.asc(), CategoryRule.id.asc()).all()
+
+    draft_rule_payload = payload.draft_rule.model_dump() if payload.draft_rule else None
+    if payload.rule_id and not draft_rule_payload:
+        existing = db.get(CategoryRule, payload.rule_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="rule not found")
+        draft_rule_payload = {
+            "id": existing.id,
+            "rank": existing.rank,
+            "enabled": existing.enabled,
+            "description_regex": existing.description_regex,
+            "account_name_regex": existing.account_name_regex,
+            "min_amount": existing.min_amount,
+            "max_amount": existing.max_amount,
+            "assigned_category": existing.assigned_category,
+        }
+
+    merged_rules: list[CategoryRule | dict] = []
+    replaced = False
+    for rule in base_rules:
+        if draft_rule_payload and payload.rule_id and rule.id == payload.rule_id:
+            merged_rules.append({**draft_rule_payload, "id": rule.id})
+            replaced = True
+        else:
+            merged_rules.append(rule)
+
+    if draft_rule_payload and (not payload.rule_id or not replaced):
+        merged_rules.append({**draft_rule_payload, "id": payload.rule_id})
+
+    compiled_rules = sorted([_compile_rule(r) for r in merged_rules], key=lambda r: (r["rank"], r["id"] or 0))
+    rows = _scoped_transactions(db, payload.scope)
+    simulated = _simulate_rule_stack(rows, compiled_rules)
+
+    changed = [s for s in simulated if s["would_change"]]
+    sample = []
+    for row in changed[:payload.sample_limit]:
+        tx = row["tx"]
+        sample.append({
+            "transaction_id": tx.id,
+            "date": str(tx.date),
+            "amount": round(float(tx.amount), 2),
+            "name": tx.name,
+            "current_effective_category": row["current_effective_category"],
+            "simulated_effective_category": row["simulated_effective_category"],
+            "rule_id": row["matched_rule_id"],
+        })
+
+    return {
+        "total_scanned": len(simulated),
+        "would_change_count": len(changed),
+        "samples": sample,
+    }
+
+
+@router.post("/category-rules/apply")
+def apply_category_rules(payload: CategoryRuleApplyRequest, db: Session = Depends(get_db)):
+    rules = db.query(CategoryRule).order_by(CategoryRule.rank.asc(), CategoryRule.id.asc()).all()
+    compiled_rules = [_compile_rule(rule) for rule in rules]
+    rows = _scoped_transactions(db, payload.scope, only_without_user_category=True)
+
+    total_scanned = len(rows)
+    simulated = _simulate_rule_stack(rows, compiled_rules)
+    changes = [row for row in simulated if row["would_change"]]
+
+    if payload.dry_run:
+        return {
+            "dry_run": True,
+            "total_scanned": total_scanned,
+            "would_change_count": len(changes),
+            "updated_count": 0,
+            "event_count": 0,
+        }
+
+    updated_count = 0
+    event_count = 0
+    now = utcnow()
+    for start in range(0, len(simulated), payload.batch_size):
+        batch = simulated[start : start + payload.batch_size]
+        for row in batch:
+            tx = row["tx"]
+            annotation = row["annotation"]
+            if not annotation:
+                annotation = TransactionAnnotation(transaction_id=tx.id)
+                db.add(annotation)
+
+            annotation.rule_category = row["matched_assigned_category"]
+            annotation.rule_id = row["matched_rule_id"]
+            annotation.rule_evaluated_at = now
+            updated_count += 1
+
+            if row["would_change"]:
+                db.add(CategoryDecisionEvent(
+                    transaction_id=tx.id,
+                    old_effective_category=row["current_effective_category"],
+                    new_effective_category=row["simulated_effective_category"],
+                    source="rule_apply",
+                    rule_id=row["matched_rule_id"],
+                    changed_at=now,
+                    metadata_json=json.dumps({"dry_run": False}),
+                ))
+                event_count += 1
+        db.flush()
+
+    db.commit()
+    return {
+        "dry_run": False,
+        "total_scanned": total_scanned,
+        "would_change_count": len(changes),
+        "updated_count": updated_count,
+        "event_count": event_count,
+    }
+
+
+@router.post("/category-rules/recompute-all")
+def recompute_all_category_rules(payload: CategoryRuleRecomputeRequest, db: Session = Depends(get_db)):
+    apply_payload = CategoryRuleApplyRequest(
+        dry_run=False,
+        batch_size=payload.batch_size,
+        scope={"include_pending": payload.include_pending},
+    )
+    return apply_category_rules(apply_payload, db)
 
 
 def _apply_transfer_exclusion(q, include_transfers: bool):
