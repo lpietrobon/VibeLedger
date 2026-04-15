@@ -27,6 +27,24 @@ logger = logging.getLogger(__name__)
 _CONNECT_TUNNEL_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "connect_funnel.sh"
 
 
+def _effective_category_expr():
+    return func.coalesce(
+        TransactionAnnotation.user_category,
+        TransactionAnnotation.rule_category,
+        Transaction.plaid_category_primary,
+        "uncategorized",
+    )
+
+
+def _category_source_expr():
+    return case(
+        (TransactionAnnotation.user_category.is_not(None), "manual"),
+        (TransactionAnnotation.rule_category.is_not(None), "rule"),
+        (Transaction.plaid_category_primary.is_not(None), "plaid"),
+        else_="default",
+    )
+
+
 def _run_connect_tunnel(action: str) -> None:
     if os.getenv("CONNECT_TUNNEL_AUTOMATION", "0") != "1":
         return
@@ -254,12 +272,15 @@ def list_transactions(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
-    effective_category = func.coalesce(
-        TransactionAnnotation.user_category,
-        Transaction.plaid_category_primary,
-    )
+    effective_category = _effective_category_expr().label("effective_category")
+    category_source = _category_source_expr().label("category_source")
 
-    base = db.query(Transaction, TransactionAnnotation).outerjoin(
+    base = db.query(
+        Transaction,
+        TransactionAnnotation,
+        effective_category,
+        category_source,
+    ).outerjoin(
         TransactionAnnotation,
         Transaction.id == TransactionAnnotation.transaction_id,
     )
@@ -269,7 +290,7 @@ def list_transactions(
     if end_date:
         base = base.filter(Transaction.date <= end_date)
     if category:
-        base = base.filter(effective_category == category)
+        base = base.filter(_effective_category_expr() == category)
 
     total = base.with_entities(func.count(Transaction.id)).scalar()
     rows = (
@@ -289,13 +310,16 @@ def list_transactions(
                 "name": t.name,
                 "merchant_name": t.merchant_name,
                 "pending": t.pending,
+                "effective_category": resolved_category,
+                "category_source": resolved_source,
+                "rule_id": a.rule_id if (a and resolved_source == "rule") else None,
                 "annotation": {
                     "user_category": a.user_category if a else None,
                     "notes": a.notes if a else None,
                     "reviewed": a.reviewed if a else False,
                 },
             }
-            for t, a in rows
+            for t, a, resolved_category, resolved_source in rows
         ],
     }
 
@@ -384,11 +408,7 @@ def category_spend(
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
 ):
-    effective_category = func.coalesce(
-        TransactionAnnotation.user_category,
-        Transaction.plaid_category_primary,
-        "uncategorized",
-    ).label("category")
+    effective_category = _effective_category_expr().label("category")
     q = (
         db.query(
             effective_category,
