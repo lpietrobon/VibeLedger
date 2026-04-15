@@ -6,6 +6,7 @@ import logging
 import json
 import os
 import subprocess
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -403,15 +404,15 @@ def _tx_matches_rule(tx: Transaction, account: Account | None, compiled_rule: di
     tx_desc = tx.name or ""
     account_name = (account.name if account else "") or ""
 
-    if desc_re and not desc_re.search(tx_desc):
-        return False
-    if account_re and not account_re.search(account_name):
-        return False
-
     amount = Decimal(tx.amount)
     if compiled_rule["min_amount"] is not None and amount < compiled_rule["min_amount"]:
         return False
     if compiled_rule["max_amount"] is not None and amount > compiled_rule["max_amount"]:
+        return False
+
+    if account_re and (not account_name or not account_re.search(account_name)):
+        return False
+    if desc_re and (not tx_desc or not desc_re.search(tx_desc)):
         return False
     return True
 
@@ -430,7 +431,7 @@ def _compile_rule(rule: CategoryRule | dict) -> dict:
     }
 
 
-def _scoped_transactions(db: Session, scope, only_without_user_category: bool = False):
+def _scoped_transactions_query(db: Session, scope):
     q = db.query(Transaction, Account, TransactionAnnotation).join(Account, Account.id == Transaction.account_id).outerjoin(
         TransactionAnnotation,
         TransactionAnnotation.transaction_id == Transaction.id,
@@ -446,10 +447,26 @@ def _scoped_transactions(db: Session, scope, only_without_user_category: bool = 
         q = q.filter(Transaction.item_id.in_(scope.item_ids))
     if not scope.include_pending:
         q = q.filter(Transaction.pending == False)  # noqa: E712
-    if only_without_user_category:
-        q = q.filter(or_(TransactionAnnotation.user_category.is_(None), TransactionAnnotation.id.is_(None)))
 
-    return q.order_by(Transaction.id.asc()).all()
+    return q.order_by(Transaction.id.asc())
+
+
+def _scoped_transactions(db: Session, scope):
+    return _scoped_transactions_query(db, scope).all()
+
+
+def _iter_scoped_transaction_batches(db: Session, scope, batch_size: int):
+    base_query = _scoped_transactions_query(db, scope)
+    last_tx_id: int | None = None
+    while True:
+        query = base_query
+        if last_tx_id is not None:
+            query = query.filter(Transaction.id > last_tx_id)
+        batch = query.limit(batch_size).all()
+        if not batch:
+            break
+        last_tx_id = batch[-1][0].id
+        yield batch
 
 
 def _effective_category(annotation: TransactionAnnotation | None, fallback: str | None) -> str:
@@ -590,60 +607,119 @@ def preview_category_rules(payload: CategoryRulePreviewRequest, db: Session = De
 
 @router.post("/category-rules/apply")
 def apply_category_rules(payload: CategoryRuleApplyRequest, db: Session = Depends(get_db)):
-    rules = db.query(CategoryRule).order_by(CategoryRule.rank.asc(), CategoryRule.id.asc()).all()
+    run_started = time.perf_counter()
+    now = utcnow()
+    rules = (
+        db.query(CategoryRule)
+        .filter(CategoryRule.enabled == True)  # noqa: E712
+        .order_by(CategoryRule.rank.asc(), CategoryRule.id.asc())
+        .all()
+    )
     compiled_rules = [_compile_rule(rule) for rule in rules]
-    rows = _scoped_transactions(db, payload.scope, only_without_user_category=True)
 
-    total_scanned = len(rows)
-    simulated = _simulate_rule_stack(rows, compiled_rules)
-    changes = [row for row in simulated if row["would_change"]]
-
-    if payload.dry_run:
-        return {
-            "dry_run": True,
-            "total_scanned": total_scanned,
-            "would_change_count": len(changes),
-            "updated_count": 0,
-            "event_count": 0,
-        }
-
+    scanned = 0
+    matched = 0
+    changed = 0
+    skipped_manual = 0
     updated_count = 0
     event_count = 0
-    now = utcnow()
-    for start in range(0, len(simulated), payload.batch_size):
-        batch = simulated[start : start + payload.batch_size]
-        for row in batch:
-            tx = row["tx"]
-            annotation = row["annotation"]
-            if not annotation:
-                annotation = TransactionAnnotation(transaction_id=tx.id)
-                db.add(annotation)
 
-            annotation.rule_category = row["matched_assigned_category"]
-            annotation.rule_id = row["matched_rule_id"]
-            annotation.rule_evaluated_at = now
-            updated_count += 1
+    for batch in _iter_scoped_transaction_batches(db, payload.scope, payload.batch_size):
+        annotation_inserts = []
+        annotation_updates = []
+        event_inserts = []
 
-            if row["would_change"]:
-                db.add(CategoryDecisionEvent(
-                    transaction_id=tx.id,
-                    old_effective_category=row["current_effective_category"],
-                    new_effective_category=row["simulated_effective_category"],
-                    source="rule_apply",
-                    rule_id=row["matched_rule_id"],
-                    changed_at=now,
-                    metadata_json=json.dumps({"dry_run": False}),
-                ))
-                event_count += 1
-        db.flush()
+        for tx, account, annotation in batch:
+            scanned += 1
 
-    db.commit()
+            if annotation and annotation.user_category:
+                skipped_manual += 1
+                continue
+
+            matched_rule = next(
+                (rule for rule in compiled_rules if _tx_matches_rule(tx, account, rule)),
+                None,
+            )
+            if matched_rule:
+                matched += 1
+
+            current_effective = _effective_category(annotation, tx.plaid_category_primary)
+            simulated_effective = (
+                matched_rule["assigned_category"]
+                if matched_rule
+                else (tx.plaid_category_primary or "uncategorized")
+            )
+            effective_changed = current_effective != simulated_effective
+            if effective_changed:
+                changed += 1
+
+            if payload.dry_run:
+                continue
+
+            matched_category = matched_rule["assigned_category"] if matched_rule else None
+            matched_rule_id = matched_rule["id"] if matched_rule else None
+
+            if annotation:
+                annotation_updates.append(
+                    {
+                        "id": annotation.id,
+                        "rule_category": matched_category,
+                        "rule_id": matched_rule_id,
+                        "rule_evaluated_at": now,
+                    }
+                )
+            else:
+                annotation_inserts.append(
+                    {
+                        "transaction_id": tx.id,
+                        "rule_category": matched_category,
+                        "rule_id": matched_rule_id,
+                        "rule_evaluated_at": now,
+                    }
+                )
+
+            if effective_changed:
+                event_inserts.append(
+                    {
+                        "transaction_id": tx.id,
+                        "old_effective_category": current_effective,
+                        "new_effective_category": simulated_effective,
+                        "source": "rule_apply",
+                        "rule_id": matched_rule_id,
+                        "changed_at": now,
+                        "metadata_json": json.dumps({"dry_run": False}),
+                    }
+                )
+
+        if not payload.dry_run:
+            if annotation_inserts:
+                db.bulk_insert_mappings(TransactionAnnotation, annotation_inserts)
+            if annotation_updates:
+                db.bulk_update_mappings(TransactionAnnotation, annotation_updates)
+            if event_inserts:
+                db.bulk_insert_mappings(CategoryDecisionEvent, event_inserts)
+            db.flush()
+            updated_count += len(annotation_inserts) + len(annotation_updates)
+            event_count += len(event_inserts)
+
+    if not payload.dry_run:
+        db.commit()
+
+    duration_ms = int((time.perf_counter() - run_started) * 1000)
+    run_summary = {
+        "scanned": scanned,
+        "matched": matched,
+        "changed": changed,
+        "skipped_manual": skipped_manual,
+        "duration_ms": duration_ms,
+    }
     return {
-        "dry_run": False,
-        "total_scanned": total_scanned,
-        "would_change_count": len(changes),
+        "dry_run": payload.dry_run,
+        "total_scanned": scanned,
+        "would_change_count": changed,
         "updated_count": updated_count,
         "event_count": event_count,
+        "run_summary": run_summary,
     }
 
 
