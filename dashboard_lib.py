@@ -51,6 +51,39 @@ def api_get(path: str, params: dict | None = None, base: str | None = None) -> r
     return requests.get(url, params=params or {}, headers=_headers(), timeout=30)
 
 
+def api_patch(path: str, json: dict | None = None, base: str | None = None) -> requests.Response:
+    url = (base or DEFAULT_API).rstrip("/") + path
+    return requests.patch(url, json=json or {}, headers=_headers(), timeout=30)
+
+
+def extract_error_message(resp: requests.Response) -> str:
+    try:
+        body = resp.json()
+    except Exception:
+        return resp.text.strip() or "Unknown error"
+
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        parts = []
+        for item in detail:
+            if isinstance(item, dict):
+                loc = ".".join(str(x) for x in item.get("loc", []))
+                msg = item.get("msg")
+                if loc and msg:
+                    parts.append(f"{loc}: {msg}")
+                elif msg:
+                    parts.append(str(msg))
+            else:
+                parts.append(str(item))
+        if parts:
+            return "; ".join(parts)
+    if isinstance(body, dict):
+        return body.get("message") or body.get("error") or str(body)
+    return str(body)
+
+
 @st.cache_data(ttl=60)
 def load_transactions(db_path: str) -> pd.DataFrame:
     conn = sqlite3.connect(db_path)
