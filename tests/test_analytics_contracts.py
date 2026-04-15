@@ -110,3 +110,60 @@ def test_category_spend_prefers_annotation_over_plaid():
     by_cat = {row["category"]: row["spend"] for row in r.json()}
     assert by_cat["groceries"] == 400.0
     assert by_cat["FOOD_AND_DRINK"] == 200.0
+
+
+def test_category_spend_reflects_rule_apply_outcomes():
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="i-rule-analytics", access_token_encrypted=encrypt_token("t"), status="active")
+        db.add(item)
+        db.flush()
+        account = Account(plaid_account_id="a-rule-analytics", item_id=item.id, name="Rewards Card")
+        db.add(account)
+        db.flush()
+        db.add_all(
+            [
+                Transaction(
+                    plaid_transaction_id="tx-rule-analytics-1",
+                    account_id=account.id,
+                    item_id=item.id,
+                    date=date(2026, 4, 7),
+                    amount=8.0,
+                    name="Starbucks Downtown",
+                    plaid_category_primary="DINING",
+                    pending=False,
+                ),
+                Transaction(
+                    plaid_transaction_id="tx-rule-analytics-2",
+                    account_id=account.id,
+                    item_id=item.id,
+                    date=date(2026, 4, 8),
+                    amount=20.0,
+                    name="Neighborhood Market",
+                    plaid_category_primary="GROCERIES",
+                    pending=False,
+                ),
+            ]
+        )
+        db.commit()
+
+    with TestClient(app) as client:
+        create_rule = client.post(
+            "/category-rules",
+            json={"rank": 1, "enabled": True, "description_regex": "starbucks", "assigned_category": "coffee"},
+            headers=AUTH_HEADERS,
+        )
+        assert create_rule.status_code == 200
+
+        apply_resp = client.post(
+            "/category-rules/apply",
+            json={"dry_run": False, "scope": {"start_date": "2026-04-01", "end_date": "2026-04-30"}},
+            headers=AUTH_HEADERS,
+        )
+        assert apply_resp.status_code == 200
+
+        analytics = client.get("/analytics/category-spend", headers=AUTH_HEADERS)
+        assert analytics.status_code == 200
+
+    by_cat = {row["category"]: row["spend"] for row in analytics.json()}
+    assert by_cat["coffee"] == 8.0
+    assert by_cat["GROCERIES"] == 20.0
