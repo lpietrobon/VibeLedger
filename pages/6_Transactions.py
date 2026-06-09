@@ -202,6 +202,7 @@ if selected_rows:
         "notes": row.get("notes"),
         "reviewed": row.get("reviewed", False),
     }
-    render_annotation_editor(txn_id, current, api_base, key_prefix="tx_")
+    all_cats = sorted({c for c in df["effective_category"].fillna("uncategorized").unique().tolist() if type(c) is str})
+    render_annotation_editor(txn_id, current, api_base, key_prefix="tx_", categories=all_cats)
 else:
     st.info("Click a row to annotate it.")

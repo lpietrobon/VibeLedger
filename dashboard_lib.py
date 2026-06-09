@@ -197,19 +197,55 @@ def render_annotation_editor(
     current: dict,
     api_base: str,
     key_prefix: str = "",
+    categories: list[str] | None = None,
 ) -> None:
     """Render an inline annotation form for a single transaction.
 
     key_prefix must differ per page to avoid Streamlit widget key collisions:
     use "tx_" on the Transactions page, "cat_" on the Categories page, etc.
+
+    categories: if provided, the category field becomes a searchable selectbox
+    with a fallback text input for entering a brand-new category name.
     """
+    _raw_cat = current.get("user_category")
+    current_cat = _raw_cat if isinstance(_raw_cat, str) else ""
+
     with st.form(f"{key_prefix}ann_form_{txn_id}"):
         st.caption(f"Transaction #{txn_id}")
-        cat_val = st.text_input(
-            "Category override",
-            value=current.get("user_category") or "",
-            placeholder="Leave blank to use rule/Plaid category",
-        )
+
+        if categories is not None:
+            # Coerce to plain Python str — pandas rows return numpy.str_ subclasses
+            # which break sorted() when mixed with str in CPython 3.13.
+            clean = sorted({str(c) for c in (categories or []) if c is not None and not isinstance(c, float) and c})
+            clean_set = frozenset(clean)
+            current_cat = str(current_cat) if current_cat else ""
+            options = [""] + clean
+            if current_cat and current_cat not in clean_set:
+                options = [""] + sorted(clean_set | {current_cat})
+            try:
+                idx = options.index(current_cat)
+            except ValueError:
+                idx = 0
+            selected_cat = st.selectbox(
+                "Category override",
+                options=options,
+                index=idx,
+                format_func=lambda x: x or "(inherit from rules/Plaid)",
+            )
+            new_cat_input = st.text_input(
+                "Or type a new category",
+                value="",
+                placeholder="Leave blank to use selection above",
+            )
+            # Explicit new entry takes priority over selectbox selection.
+            cat_val = new_cat_input.strip() or selected_cat
+        else:
+            cat_val = st.text_input(
+                "Category override",
+                value=current_cat,
+                placeholder="Leave blank to use rule/Plaid category",
+            )
+
         merchant_val = st.text_input(
             "Merchant name override",
             value=current.get("merchant_name_override") or "",

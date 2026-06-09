@@ -169,14 +169,21 @@ if not spend.empty:
     m = m[m["bucket"].isin(["This month", "Last month"])]
     if not m.empty:
         cmp = m.groupby(["effective_category", "bucket"], as_index=False)["amount"].sum()
-        top = (
+        # Order categories by combined spend so the biggest are at the top
+        order = (
             cmp.groupby("effective_category", as_index=False)["amount"].sum()
-            .sort_values("amount", ascending=False)
-            .head(15)["effective_category"]
+            .sort_values("amount", ascending=True)
+            .tail(12)["effective_category"]
+            .tolist()
         )
-        cmp = cmp[cmp["effective_category"].isin(top)]
-        fig2 = px.bar(cmp, x="effective_category", y="amount", color="bucket", barmode="group", title="Category comparison")
-        fig2.update_xaxes(tickangle=35)
+        cmp = cmp[cmp["effective_category"].isin(order)]
+        fig2 = px.bar(
+            cmp, x="amount", y="effective_category", color="bucket",
+            barmode="group", orientation="h",
+            category_orders={"effective_category": order},
+            title="This month vs last month",
+        )
+        fig2.update_layout(yaxis_title=None, xaxis_title="Spend", legend_title=None)
         st.plotly_chart(fig2, use_container_width=True)
     else:
         st.caption("No data for current or last month in the filtered range.")
@@ -221,4 +228,5 @@ if not f.empty:
             "notes": sel_row.get("notes"),
             "reviewed": sel_row.get("reviewed", False),
         }
-        render_annotation_editor(txn_id, current, api_base, key_prefix="cat_")
+        all_cats = sorted({c for c in f_base["effective_category"].fillna("uncategorized").unique().tolist() if type(c) is str})
+        render_annotation_editor(txn_id, current, api_base, key_prefix="cat_", categories=all_cats)
