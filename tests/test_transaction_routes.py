@@ -4,12 +4,12 @@ from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
 from app.main import app
-from app.models.models import Account, Item, Transaction
+from app.models.models import Account, Item, Transaction, TransactionAnnotation
 from app.services.security import encrypt_token
 from tests.conftest import AUTH_HEADERS
 
 
-def _seed_transaction(item_plaid_id: str, account_plaid_id: str, tx_plaid_id: str, tx_date: date, amount: float, name: str, plaid_category: str | None = None):
+def _seed_transaction(item_plaid_id: str, account_plaid_id: str, tx_plaid_id: str, tx_date: date, amount: float, name: str, plaid_category: str | None = None, merchant_name: str | None = None):
     with SessionLocal() as db:
         item = Item(plaid_item_id=item_plaid_id, access_token_encrypted=encrypt_token("tok"), status="active")
         db.add(item)
@@ -26,6 +26,7 @@ def _seed_transaction(item_plaid_id: str, account_plaid_id: str, tx_plaid_id: st
             date=tx_date,
             amount=amount,
             name=name,
+            merchant_name=merchant_name,
             plaid_category_primary=plaid_category,
             pending=False,
         )
@@ -53,7 +54,7 @@ def test_annotation_patch_and_transaction_filters_work_end_to_end():
         assert body["total"] == 1
         assert len(body["items"]) == 1
         assert body["items"][0]["plaid_transaction_id"] == "tx-food"
-        assert body["items"][0]["annotation"] == {"user_category": "food", "notes": "team lunch", "reviewed": True}
+        assert body["items"][0]["annotation"] == {"user_category": "food", "merchant_name_override": None, "notes": "team lunch", "reviewed": True}
 
         by_category = client.get("/transactions", params={"category": "food"}, headers=AUTH_HEADERS)
         assert by_category.status_code == 200
@@ -140,3 +141,70 @@ def test_transactions_include_effective_category_source_and_rule_id_contract():
     assert uncategorized_row["rule_id"] is None
 
     assert rule_id is not None
+
+
+def test_merchant_name_override_patch_and_roundtrip():
+    tx_id = _seed_transaction("item-mo1", "acct-mo1", "tx-mo1", date(2026, 5, 1), 42.0, "DUNKIN #123", merchant_name="Dunkin")
+
+    with TestClient(app) as client:
+        resp = client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"merchant_name_override": "Dunkin Donuts"},
+            headers=AUTH_HEADERS,
+        )
+        assert resp.status_code == 200
+
+        r = client.get("/transactions", params={"start_date": "2026-05-01", "end_date": "2026-05-01"}, headers=AUTH_HEADERS)
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) == 1
+        row = items[0]
+        assert row["merchant_name"] == "Dunkin"                             # raw Plaid unchanged
+        assert row["annotation"]["merchant_name_override"] == "Dunkin Donuts"
+
+
+def test_merchant_name_on_transaction_immutable_after_annotation_patch():
+    tx_id = _seed_transaction("item-mo2", "acct-mo2", "tx-mo2", date(2026, 5, 2), 15.0, "STARBUCKS", merchant_name="Starbucks")
+
+    with TestClient(app) as client:
+        client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"merchant_name_override": "Coffee Shop"},
+            headers=AUTH_HEADERS,
+        )
+
+    with SessionLocal() as db:
+        tx = db.query(Transaction).filter(Transaction.id == tx_id).first()
+        assert tx.merchant_name == "Starbucks"
+
+
+def test_merchant_name_override_clear_with_empty_string():
+    tx_id = _seed_transaction("item-mo3", "acct-mo3", "tx-mo3", date(2026, 5, 3), 9.0, "CAFE", merchant_name="Cafe Raw")
+
+    with TestClient(app) as client:
+        client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"merchant_name_override": "My Cafe"},
+            headers=AUTH_HEADERS,
+        )
+        # Clear the override with empty string
+        client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"merchant_name_override": ""},
+            headers=AUTH_HEADERS,
+        )
+        r = client.get("/transactions", params={"start_date": "2026-05-03", "end_date": "2026-05-03"}, headers=AUTH_HEADERS)
+        row = r.json()["items"][0]
+        assert row["annotation"]["merchant_name_override"] is None
+        assert row["merchant_name"] == "Cafe Raw"   # raw Plaid value still intact
+
+
+def test_merchant_name_override_absent_when_no_annotation():
+    tx_id = _seed_transaction("item-mo4", "acct-mo4", "tx-mo4", date(2026, 5, 4), 7.0, "RAW MERCHANT", merchant_name="Raw Merchant")
+
+    with TestClient(app) as client:
+        r = client.get("/transactions", params={"start_date": "2026-05-04", "end_date": "2026-05-04"}, headers=AUTH_HEADERS)
+
+    row = r.json()["items"][0]
+    assert row["merchant_name"] == "Raw Merchant"
+    assert row["annotation"]["merchant_name_override"] is None

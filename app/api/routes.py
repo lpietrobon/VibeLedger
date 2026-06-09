@@ -35,6 +35,7 @@ from app.schemas.plaid import (
     CategoryRuleRecomputeRequest,
     ConnectCompleteRequest,
     CreateConnectSessionRequest,
+    PatchAccountRequest,
     PatchAnnotationRequest,
 )
 from app.services.security import encrypt_token
@@ -63,6 +64,20 @@ def _category_source_expr():
         (TransactionAnnotation.rule_category.is_not(None), "rule"),
         (Transaction.plaid_category_primary.is_not(None), "plaid"),
         else_="default",
+    )
+
+
+def _effective_merchant_expr():
+    return func.coalesce(
+        TransactionAnnotation.merchant_name_override,
+        Transaction.merchant_name,
+    )
+
+
+def _effective_account_name_expr():
+    return func.coalesce(
+        Account.nickname,
+        Account.name + " ··" + Account.mask,
     )
 
 
@@ -336,6 +351,7 @@ def list_transactions(
                 "rule_id": a.rule_id if (a and resolved_source == "rule") else None,
                 "annotation": {
                     "user_category": a.user_category if a else None,
+                    "merchant_name_override": a.merchant_name_override if a else None,
                     "notes": a.notes if a else None,
                     "reviewed": a.reviewed if a else False,
                 },
@@ -362,6 +378,8 @@ def patch_annotation(transaction_id: int, payload: PatchAnnotationRequest, db: S
 
     if payload.user_category is not None:
         annotation.user_category = payload.user_category
+    if payload.merchant_name_override is not None:
+        annotation.merchant_name_override = payload.merchant_name_override or None
     if payload.notes is not None:
         annotation.notes = payload.notes
     if payload.reviewed is not None:
@@ -370,6 +388,16 @@ def patch_annotation(transaction_id: int, payload: PatchAnnotationRequest, db: S
     db.commit()
     return {"status": "ok", "transaction_id": transaction_id}
 
+
+@router.patch("/accounts/{account_id}")
+def patch_account(account_id: int, payload: PatchAccountRequest, db: Session = Depends(get_db)):
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="account not found")
+    if payload.nickname is not None:
+        account.nickname = payload.nickname or None
+    db.commit()
+    return {"status": "ok", "account_id": account_id}
 
 
 def _serialize_rule(rule: CategoryRule) -> dict:

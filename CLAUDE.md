@@ -16,11 +16,13 @@ If the venv breaks after moving the repo (bad interpreter errors), recreate it: 
 
 ## Run
 
+**Do not run manually** — use the systemd services (see below). The canonical command (baked into `vibeledger.service`) is:
+
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --root-path /vibeledger
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --root-path /vibeledger --reload
 ```
 
-Requires a `.env` file (see `.env.example`). The app validates `TOKEN_ENCRYPTION_KEY` (Fernet) and `VIBELEDGER_API_TOKEN` at startup and refuses to start without them.
+`--reload` is enabled so edits to any `app/` file take effect immediately without a manual restart. `--root-path /vibeledger` is required so FastAPI generates correct URLs. Requires a `.env` file (see `.env.example`). The app validates `TOKEN_ENCRYPTION_KEY` (Fernet) and `VIBELEDGER_API_TOKEN` at startup and refuses to start without them.
 
 ### Tailscale serve (already done, persists across reboots)
 

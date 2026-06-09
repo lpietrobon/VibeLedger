@@ -88,19 +88,14 @@ def extract_error_message(resp: requests.Response) -> str:
 def load_transactions(db_path: str) -> pd.DataFrame:
     conn = sqlite3.connect(db_path)
     try:
+        # All COALESCE/effective-field logic lives in the effective_transactions
+        # view (defined in schema_patches.py). Add new correctable fields there.
         q = """
-        SELECT t.id, t.account_id, t.date, t.amount, t.name, t.merchant_name,
-               t.pending,
-               t.plaid_category_primary,
-               COALESCE(ta.user_category, t.plaid_category_primary, 'uncategorized') AS effective_category,
-               COALESCE(ta.is_transfer_override, 0) AS is_transfer_override,
-               a.name AS account_name, a.mask, a.type AS account_type, a.subtype AS account_subtype,
+        SELECT et.*,
                tp_out.id AS pair_as_out, tp_in.id AS pair_as_in
-        FROM transactions t
-        LEFT JOIN transaction_annotations ta ON ta.transaction_id=t.id
-        LEFT JOIN accounts a ON a.id=t.account_id
-        LEFT JOIN transfer_pairs tp_out ON tp_out.txn_out_id=t.id
-        LEFT JOIN transfer_pairs tp_in ON tp_in.txn_in_id=t.id
+        FROM effective_transactions et
+        LEFT JOIN transfer_pairs tp_out ON tp_out.txn_out_id = et.id
+        LEFT JOIN transfer_pairs tp_in  ON tp_in.txn_in_id  = et.id
         """
         df = pd.read_sql_query(q, conn)
     finally:
@@ -119,7 +114,9 @@ def load_accounts(db_path: str) -> pd.DataFrame:
     try:
         df = pd.read_sql_query(
             """
-            SELECT a.id, a.name, a.mask, a.type, a.subtype,
+            SELECT a.id, a.name, a.nickname,
+                   COALESCE(a.nickname, a.name || ' \xb7\xb7' || a.mask) AS effective_account_name,
+                   a.mask, a.type, a.subtype,
                    a.current_balance, a.available_balance, a.credit_limit, a.currency,
                    i.institution_name
             FROM accounts a
@@ -176,7 +173,8 @@ def sidebar_filters(df: pd.DataFrame):
         key="date_range",
     )
 
-    accounts = sorted(df["account_name"].fillna("Unknown").unique().tolist())
+    acct_col = "effective_account_name" if "effective_account_name" in df.columns else "account_name"
+    accounts = sorted(df[acct_col].fillna("Unknown").unique().tolist())
     selected = st.sidebar.multiselect("Accounts", accounts, default=accounts, key="accounts")
     exclude_transfers = st.sidebar.checkbox("Exclude transfers", value=True, key="excl_xfer")
     return db_path, start_d, end_d, selected, exclude_transfers
@@ -187,7 +185,51 @@ def apply_filters(df: pd.DataFrame, start_d, end_d, accounts, exclude_transfers:
     if start_d is not None:
         f = f[(f["date"] >= start_d) & (f["date"] <= end_d)]
     if accounts:
-        f = f[f["account_name"].fillna("Unknown").isin(accounts)]
+        acct_col = "effective_account_name" if "effective_account_name" in f.columns else "account_name"
+        f = f[f[acct_col].fillna("Unknown").isin(accounts)]
     if exclude_transfers and "is_transfer" in f.columns:
         f = f[~f["is_transfer"]]
     return f
+
+
+def render_annotation_editor(
+    txn_id: int,
+    current: dict,
+    api_base: str,
+    key_prefix: str = "",
+) -> None:
+    """Render an inline annotation form for a single transaction.
+
+    key_prefix must differ per page to avoid Streamlit widget key collisions:
+    use "tx_" on the Transactions page, "cat_" on the Categories page, etc.
+    """
+    with st.form(f"{key_prefix}ann_form_{txn_id}"):
+        st.caption(f"Transaction #{txn_id}")
+        cat_val = st.text_input(
+            "Category override",
+            value=current.get("user_category") or "",
+            placeholder="Leave blank to use rule/Plaid category",
+        )
+        merchant_val = st.text_input(
+            "Merchant name override",
+            value=current.get("merchant_name_override") or "",
+            placeholder="Leave blank to use Plaid merchant",
+        )
+        notes_val = st.text_area("Notes", value=current.get("notes") or "")
+        reviewed_val = st.checkbox("Reviewed", value=bool(current.get("reviewed", False)))
+        submitted = st.form_submit_button("Save")
+
+    if submitted:
+        payload = {
+            "user_category": cat_val.strip() or None,
+            "merchant_name_override": merchant_val.strip() or None,
+            "notes": notes_val.strip() or None,
+            "reviewed": reviewed_val,
+        }
+        resp = api_patch(f"/transactions/{txn_id}/annotation", json=payload, base=api_base)
+        if resp.ok:
+            st.success("Saved.")
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.error(f"Save failed ({resp.status_code}): {extract_error_message(resp)}")

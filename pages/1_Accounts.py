@@ -1,12 +1,13 @@
 import pandas as pd
 import streamlit as st
 
-from dashboard_lib import DEFAULT_DB, load_accounts
+from dashboard_lib import DEFAULT_API, DEFAULT_DB, api_patch, extract_error_message, load_accounts
 
 st.set_page_config(page_title="Accounts", layout="wide")
 st.title("Accounts Summary")
 
 db_path = st.sidebar.text_input("DB path", DEFAULT_DB, key="db_path")
+api_base = st.sidebar.text_input("API base", DEFAULT_API, key="api_base")
 
 try:
     accounts = load_accounts(db_path)
@@ -38,9 +39,36 @@ st.caption("Assets = depository/investment balances. Liabilities = credit + loan
 
 for type_name, group in accounts.groupby(accounts["type"].fillna("other")):
     st.subheader(f"{type_name} ({len(group)})")
-    cols = ["name", "mask", "subtype", "institution_name", "current_balance", "available_balance", "credit_limit", "currency"]
-    view = group[cols].copy()
-    view["current_balance"] = view["current_balance"].map(lambda v: f"${v:,.2f}")
-    st.dataframe(view, use_container_width=True, hide_index=True)
+    for _, row in group.iterrows():
+        acct_id = int(row["id"])
+        display_name = row.get("effective_account_name") or row["name"]
+        bal = f"${float(row['current_balance']):,.2f}"
+
+        with st.expander(f"{display_name}  —  {bal}", expanded=False):
+            st.write(f"**Raw name:** {row['name']}  ·  **Mask:** ···{row['mask']}  ·  **Subtype:** {row['subtype']}")
+            if row.get("institution_name"):
+                st.write(f"**Institution:** {row['institution_name']}")
+
+            with st.form(f"nickname_form_{acct_id}"):
+                new_nick = st.text_input(
+                    "Nickname",
+                    value=row.get("nickname") or "",
+                    placeholder="e.g. Chase Sapphire, Citi Double Cash",
+                )
+                save = st.form_submit_button("Save nickname")
+
+            if save:
+                resp = api_patch(
+                    f"/accounts/{acct_id}",
+                    json={"nickname": new_nick.strip() or None},
+                    base=api_base,
+                )
+                if resp.ok:
+                    st.success("Saved.")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error(f"Failed: {extract_error_message(resp)}")
+
     subtotal = group["current_balance"].sum()
     st.caption(f"Subtotal: ${subtotal:,.2f}")

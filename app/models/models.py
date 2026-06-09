@@ -45,6 +45,7 @@ class Account(Base):
     mask: Mapped[str | None] = mapped_column(String(8), nullable=True)
     type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     subtype: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    nickname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     current_balance: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     available_balance: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
@@ -85,6 +86,7 @@ class TransactionAnnotation(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     is_transfer_override: Mapped[bool] = mapped_column(Boolean, default=False)
+    merchant_name_override: Mapped[str | None] = mapped_column(String(255), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 

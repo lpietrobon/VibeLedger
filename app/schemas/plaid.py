@@ -32,8 +32,13 @@ class ConnectCompleteRequest(BaseModel):
 
 class PatchAnnotationRequest(BaseModel):
     user_category: str | None = None
+    merchant_name_override: str | None = None
     notes: str | None = None
     reviewed: bool | None = None
+
+
+class PatchAccountRequest(BaseModel):
+    nickname: str | None = None
 
 
 class CategoryRuleDraft(BaseModel):

@@ -8,6 +8,7 @@ from app.core.time import utcnow
 from app.models.models import Account, AccountBalanceSnapshot, Item, SyncRun, SyncState, Transaction
 from app.services.plaid_client import PlaidClient
 from app.services.security import decrypt_token
+from app.services.transfer_detector import detect_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,13 @@ class SyncService:
         run.finished_at = now
 
         db.commit()
+
+        if added_count > 0:
+            new_pairs = detect_candidates(db)
+            if new_pairs:
+                db.commit()
+                logger.info("Transfer detection after sync: %d new pair(s) found", len(new_pairs))
+
         return {
             "status": "success",
             "added": added_count,
@@ -160,6 +168,13 @@ class SyncService:
         run.finished_at = now
 
         db.commit()
+
+        if added_count > 0:
+            new_pairs = detect_candidates(db)
+            if new_pairs:
+                db.commit()
+                logger.info("Transfer detection after historical sync: %d new pair(s) found", len(new_pairs))
+
         return {
             "status": "success",
             "added": added_count,

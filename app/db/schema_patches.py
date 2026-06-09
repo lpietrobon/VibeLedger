@@ -51,6 +51,70 @@ def apply_patches(engine: Engine) -> None:
                 "ADD COLUMN rule_evaluated_at DATETIME"
             ))
 
+    if not _has_column(engine, "transaction_annotations", "merchant_name_override"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE transaction_annotations "
+                "ADD COLUMN merchant_name_override VARCHAR(255)"
+            ))
+
+    if not _has_column(engine, "accounts", "nickname"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE accounts ADD COLUMN nickname VARCHAR(255)"
+            ))
+
+    # effective_transactions view — single canonical source for all COALESCE
+    # definitions. Recreated on every startup (safe: views hold no data).
+    with engine.begin() as conn:
+        conn.execute(text("DROP VIEW IF EXISTS effective_transactions"))
+        conn.execute(text("""
+            CREATE VIEW effective_transactions AS
+            SELECT
+                t.id,
+                t.plaid_transaction_id,
+                t.account_id,
+                t.item_id,
+                t.date,
+                t.amount,
+                t.name,
+                t.merchant_name,
+                t.pending,
+                t.plaid_category_primary,
+                COALESCE(ta.user_category, ta.rule_category, CASE t.plaid_category_primary
+                    WHEN 'FOOD_AND_DRINK'      THEN 'FOOD/OTHER'
+                    WHEN 'TRANSPORTATION'      THEN 'TRANSPORT/OTHER'
+                    WHEN 'GENERAL_MERCHANDISE' THEN 'SHOPPING/GENERAL'
+                    WHEN 'GENERAL_SERVICES'    THEN 'SERVICES/GENERAL'
+                    WHEN 'ENTERTAINMENT'       THEN 'FUN/ENTERTAINMENT'
+                    WHEN 'TRAVEL'              THEN 'FUN/TRAVEL'
+                    WHEN 'LOAN_PAYMENTS'       THEN 'FINANCE/LOANS'
+                    WHEN 'RENT_AND_UTILITIES'  THEN 'HOUSING/RENT_AND_UTILITIES'
+                    WHEN 'MEDICAL'             THEN 'HEALTH/MEDICAL'
+                    WHEN 'PERSONAL_CARE'       THEN 'HEALTH/PERSONAL_CARE'
+                    ELSE t.plaid_category_primary
+                END, 'uncategorized') AS effective_category,
+                COALESCE(ta.merchant_name_override, t.merchant_name)
+                    AS effective_merchant,
+                COALESCE(a.nickname, a.name || ' \xb7\xb7' || a.mask)
+                    AS effective_account_name,
+                COALESCE(ta.is_transfer_override, 0) AS is_transfer_override,
+                ta.merchant_name_override,
+                ta.user_category,
+                ta.rule_category,
+                ta.rule_id,
+                ta.notes,
+                COALESCE(ta.reviewed, 0) AS reviewed,
+                a.name      AS account_name,
+                a.nickname  AS account_nickname,
+                a.mask,
+                a.type      AS account_type,
+                a.subtype   AS account_subtype
+            FROM transactions t
+            LEFT JOIN transaction_annotations ta ON ta.transaction_id = t.id
+            LEFT JOIN accounts a ON a.id = t.account_id
+        """))
+
     with engine.begin() as conn:
         conn.execute(text(
             "CREATE TABLE IF NOT EXISTS category_rules ("

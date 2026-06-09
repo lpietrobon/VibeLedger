@@ -20,7 +20,7 @@ from dashboard_lib import (
 
 st.set_page_config(page_title="Rules", layout="wide")
 st.title("Category rules")
-st.caption("Manage rule stack order, simulate impacts, and apply rule decisions.")
+st.caption("Click a rule to edit it. Use the editor panel below to create or modify rules.")
 
 
 def _list_rules(api_base: str) -> list[dict]:
@@ -97,7 +97,6 @@ def _pick_preview_payload(editing_rule_id: int | None, scope: dict) -> dict | No
     if draft["min_amount"] == "invalid" or draft["max_amount"] == "invalid":
         st.error("Amount bounds must be valid decimal numbers.")
         return None
-
     preview_payload: dict = {"scope": scope, "sample_limit": 200}
     if editing_rule_id:
         preview_payload["rule_id"] = editing_rule_id
@@ -156,83 +155,84 @@ rules = _list_rules(api_base)
 
 if "editing_rule_id" not in st.session_state:
     _reset_editor()
+if "rule_just_reset" not in st.session_state:
+    st.session_state.rule_just_reset = False
+if st.session_state.get("pending_reset"):
+    del st.session_state["pending_reset"]
+    _reset_editor()
 
-st.subheader("Rule stack")
+# ── Rule stack table ──────────────────────────────────────────────────────────
 if not rules:
-    st.info("No rules yet. Create one in the editor below.")
+    st.info("No rules yet. Use the editor below to create one.")
+    event = None
 else:
     stack_rows = [
         {
-            "ID": int(r["id"]),
             "rank": int(r.get("rank", 0)),
-            "enabled": bool(r.get("enabled", False)),
+            "on": bool(r.get("enabled", False)),
+            "name": r.get("name") or "",
             "conditions": _render_conditions(r),
-            "assigned category": r.get("assigned_category", ""),
+            "category": r.get("assigned_category", ""),
         }
         for r in rules
     ]
-    st.dataframe(pd.DataFrame(stack_rows), hide_index=True, use_container_width=True)
+    event = st.dataframe(
+        pd.DataFrame(stack_rows),
+        hide_index=True,
+        use_container_width=True,
+        key="rules_table",
+        on_select="rerun",
+        selection_mode="single-row",
+        column_config={
+            "rank": st.column_config.NumberColumn("rank", width="small"),
+            "on": st.column_config.CheckboxColumn("on", width="small"),
+            "name": st.column_config.TextColumn("name", width="medium"),
+            "conditions": st.column_config.TextColumn("conditions", width="large"),
+            "category": st.column_config.TextColumn("category", width="medium"),
+        },
+    )
 
-    ordered_ids = [int(r["id"]) for r in rules]
-    for idx, rule in enumerate(rules):
-        c1, c2, c3, c4, c5, c6 = st.columns([2.2, 1, 1, 1, 1, 1])
-        with c1:
-            st.caption(
-                f"#{rule['id']} · rank={rule['rank']} · {'enabled' if rule['enabled'] else 'disabled'} · {rule.get('name') or 'unnamed'}"
-            )
-        with c2:
-            if st.button("↑", key=f"up_{rule['id']}", disabled=idx == 0):
-                reordered = ordered_ids.copy()
-                reordered[idx - 1], reordered[idx] = reordered[idx], reordered[idx - 1]
-                if _renumber_rules(reordered, api_base):
-                    st.rerun()
-        with c3:
-            if st.button("↓", key=f"down_{rule['id']}", disabled=idx == len(rules) - 1):
-                reordered = ordered_ids.copy()
-                reordered[idx], reordered[idx + 1] = reordered[idx + 1], reordered[idx]
-                if _renumber_rules(reordered, api_base):
-                    st.rerun()
-        with c4:
-            if st.button("Edit", key=f"edit_{rule['id']}"):
-                _hydrate_editor(rule)
-                st.rerun()
-        with c5:
-            if st.button("Toggle", key=f"toggle_{rule['id']}"):
-                if _patch_rule(int(rule["id"]), {"enabled": not bool(rule.get("enabled", True))}, api_base):
-                    st.rerun()
-        with c6:
-            if st.button("Delete", key=f"delete_{rule['id']}"):
-                resp = api_delete(f"/category-rules/{int(rule['id'])}", base=api_base)
-                if resp.ok:
-                    st.success(f"Deleted rule #{rule['id']}.")
-                    st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.error(f"Delete failed ({resp.status_code}): {extract_error_message(resp)}")
+    # Hydrate editor when a different row is selected
+    selected_rows = (event.selection or {}).get("rows", [])
+    if selected_rows and selected_rows[0] < len(rules):
+        selected_rule = rules[selected_rows[0]]
+        if st.session_state.rule_just_reset:
+            st.session_state.rule_just_reset = False  # consume; keep editor in new-rule mode
+        elif st.session_state.get("editing_rule_id") != int(selected_rule["id"]):
+            _hydrate_editor(selected_rule)
+
+# ── Inline editor ─────────────────────────────────────────────────────────────
+edit_id = st.session_state.get("editing_rule_id")
+ordered_ids = [int(r["id"]) for r in rules]
+current_idx = next((i for i, r in enumerate(rules) if int(r["id"]) == edit_id), None)
 
 st.divider()
-st.subheader("Rule editor")
-
-edit_id = st.session_state.get("editing_rule_id")
 if edit_id:
-    st.info(f"Editing rule #{edit_id}")
+    rule_label = st.session_state.get("rule_name") or f"#{edit_id}"
+    st.subheader(f"Editing: {rule_label}")
+else:
+    st.subheader("New rule")
 
 with st.form("rule_editor"):
-    st.number_input("Rank", key="rule_rank", step=1)
-    st.checkbox("Enabled", key="rule_enabled")
-    st.text_input("Rule name", key="rule_name", placeholder="Optional label")
-    st.text_input("Description regex", key="rule_description_regex", placeholder="e.g. starbucks|coffee")
-    st.text_input("Account regex", key="rule_account_regex", placeholder="e.g. checking|visa")
-    st.text_input("Min amount", key="rule_min_amount", placeholder="Optional decimal")
-    st.text_input("Max amount", key="rule_max_amount", placeholder="Optional decimal")
-    st.text_input("Assigned category *", key="rule_assigned_category", placeholder="coffee")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.number_input("Rank", key="rule_rank", step=1)
+        st.checkbox("Enabled", key="rule_enabled")
+        st.text_input("Rule name", key="rule_name", placeholder="Optional label")
+        st.text_input("Assigned category *", key="rule_assigned_category", placeholder="Coffee")
+    with c2:
+        st.text_input("Description regex", key="rule_description_regex", placeholder="e.g. starbucks|coffee")
+        st.text_input("Account regex", key="rule_account_regex", placeholder="e.g. checking|visa")
+        st.text_input("Min amount", key="rule_min_amount", placeholder="Optional decimal")
+        st.text_input("Max amount", key="rule_max_amount", placeholder="Optional decimal")
 
     col_save, col_new = st.columns(2)
-    submit = col_save.form_submit_button("Save rule")
-    new_rule = col_new.form_submit_button("Start new")
+    submit = col_save.form_submit_button("Save rule", use_container_width=True)
+    new_rule = col_new.form_submit_button("Start new", use_container_width=True)
 
 if new_rule:
-    _reset_editor()
+    st.session_state["pending_reset"] = True
+    st.session_state.rule_just_reset = True
     st.rerun()
 
 if submit:
@@ -246,7 +246,7 @@ if submit:
         if draft["min_amount"] > draft["max_amount"]:
             hints.append("Min amount cannot be greater than max amount.")
     if not any([draft["description_regex"], draft["account_name_regex"], draft["min_amount"], draft["max_amount"]]):
-        st.warning("Hint: this rule has no conditions and could match all transactions.")
+        st.warning("Hint: this rule has no conditions and will match all transactions.")
 
     if hints:
         for h in hints:
@@ -271,11 +271,44 @@ if submit:
             st.success("Rule saved.")
             st.cache_data.clear()
             if not edit_id:
-                _reset_editor()
+                st.session_state["pending_reset"] = True
             st.rerun()
         else:
             st.error(f"Server validation failed ({resp.status_code}): {extract_error_message(resp)}")
 
+# Quick actions for the selected rule (reorder, toggle, delete)
+if edit_id and current_idx is not None:
+    current_rule = rules[current_idx]
+    act_cols = st.columns([1, 1, 1, 1, 4])
+    with act_cols[0]:
+        if st.button("↑ Move up", key="move_up", disabled=current_idx == 0, use_container_width=True):
+            reordered = ordered_ids.copy()
+            reordered[current_idx - 1], reordered[current_idx] = reordered[current_idx], reordered[current_idx - 1]
+            if _renumber_rules(reordered, api_base):
+                st.rerun()
+    with act_cols[1]:
+        if st.button("↓ Move down", key="move_down", disabled=current_idx == len(rules) - 1, use_container_width=True):
+            reordered = ordered_ids.copy()
+            reordered[current_idx], reordered[current_idx + 1] = reordered[current_idx + 1], reordered[current_idx]
+            if _renumber_rules(reordered, api_base):
+                st.rerun()
+    with act_cols[2]:
+        toggle_label = "Disable" if current_rule.get("enabled") else "Enable"
+        if st.button(toggle_label, key="toggle_rule", use_container_width=True):
+            if _patch_rule(edit_id, {"enabled": not bool(current_rule.get("enabled", True))}, api_base):
+                st.rerun()
+    with act_cols[3]:
+        if st.button("Delete", key="delete_rule", use_container_width=True, type="secondary"):
+            resp = api_delete(f"/category-rules/{edit_id}", base=api_base)
+            if resp.ok:
+                st.success(f"Deleted rule #{edit_id}.")
+                _reset_editor()
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error(f"Delete failed ({resp.status_code}): {extract_error_message(resp)}")
+
+# ── Test panel ────────────────────────────────────────────────────────────────
 st.divider()
 st.subheader("Test panel")
 
@@ -291,10 +324,7 @@ scope_start, scope_end = st.date_input(
 account_options = []
 if not accounts_df.empty:
     account_options = [
-        {
-            "id": int(row["id"]),
-            "label": f"#{int(row['id'])} {row.get('name') or 'Unknown'}",
-        }
+        {"id": int(row["id"]), "label": f"#{int(row['id'])} {row.get('name') or 'Unknown'}"}
         for _, row in accounts_df.sort_values("name").iterrows()
     ]
 selected_account_labels = st.multiselect(
@@ -326,7 +356,6 @@ if preview_result:
         f"Scanned: {preview_result.get('total_scanned', 0)} · "
         f"Would change: {preview_result.get('would_change_count', 0)}"
     )
-
     samples = preview_result.get("samples", [])
     samples_df = pd.DataFrame(samples)
     if samples_df.empty:
@@ -349,6 +378,7 @@ if preview_result:
         }
         st.dataframe(samples_df[list(diff_cols.keys())].rename(columns=diff_cols), hide_index=True, use_container_width=True)
 
+# ── Apply panel ───────────────────────────────────────────────────────────────
 st.divider()
 st.subheader("Apply panel")
 
