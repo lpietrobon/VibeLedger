@@ -8,7 +8,16 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from dashboard_lib import DEFAULT_API, DEFAULT_DB, apply_filters, load_transactions, render_annotation_editor, sidebar_filters
+from dashboard_lib import (
+    DEFAULT_API,
+    DEFAULT_DB,
+    apply_filters,
+    cumulative_series,
+    load_transactions,
+    period_bounds,
+    render_annotation_editor,
+    sidebar_filters,
+)
 
 st.set_page_config(page_title="Categories", layout="wide")
 st.title("Categories")
@@ -68,10 +77,12 @@ def _cat_parse_and_add(raw: str) -> None:
         st.session_state.cat_filters.append({"type": "text", "value": text_val, "label": f'"{text_val}"'})
 
 
-def _cat_apply_omnibar(base_df: pd.DataFrame) -> pd.DataFrame:
+def _cat_apply_omnibar(base_df: pd.DataFrame, skip_dates: bool = False) -> pd.DataFrame:
     f = base_df.copy()
     for filt in st.session_state.cat_filters:
         ft, fv = filt["type"], filt["value"]
+        if skip_dates and ft in ("date_from", "date_to"):
+            continue
         if ft == "text":
             term = fv.lower()
             f = f[
@@ -111,6 +122,27 @@ def _on_cat_omnibar_change():
         _cat_parse_and_add(raw)
         st.session_state.cat_omnibar_counter += 1
 
+
+def _set_date_filter(from_d: date) -> None:
+    st.session_state.cat_filters = [
+        flt for flt in st.session_state.cat_filters if flt["type"] not in ("date_from", "date_to")
+    ]
+    from_str = from_d.strftime("%Y-%m-%d")
+    st.session_state.cat_filters.append({"type": "date_from", "value": from_str, "label": f"from {from_str}"})
+    st.rerun()
+
+
+_today = date.today()
+quick_col1, quick_col2, quick_col3, _quick_spacer = st.columns([1, 1, 1, 7])
+with quick_col1:
+    if st.button("Current month", use_container_width=True):
+        _set_date_filter(_today.replace(day=1))
+with quick_col2:
+    if st.button("Since last month", use_container_width=True):
+        _set_date_filter((_today.replace(day=1) - timedelta(days=1)).replace(day=1))
+with quick_col3:
+    if st.button("YTD", use_container_width=True):
+        _set_date_filter(date(_today.year, 1, 1))
 
 st.text_input(
     "Filter",
@@ -156,37 +188,62 @@ fig = px.bar(cat_agg, x="amount", y="effective_category", orientation="h", title
 fig.update_layout(yaxis_title="Category", xaxis_title="Spend")
 st.plotly_chart(fig, use_container_width=True)
 
-st.subheader("This month vs last month")
-if not spend.empty:
-    today = date.today()
-    first_this = today.replace(day=1)
-    first_prev = (first_this - timedelta(days=1)).replace(day=1)
-    last_prev = first_this - timedelta(days=1)
-    m = spend.copy()
-    m["bucket"] = m["date"].apply(
-        lambda d: "This month" if d >= first_this else ("Last month" if first_prev <= d <= last_prev else "Other")
+st.divider()
+st.subheader("Spending trends")
+granularity = st.radio("Granularity", ["Monthly", "Yearly"], horizontal=True, key="cat_granularity")
+gran = "monthly" if granularity == "Monthly" else "yearly"
+cur_label = "This month" if gran == "monthly" else "This year"
+prev_label = "Last month" if gran == "monthly" else "Last year"
+
+bounds = period_bounds(gran, _today)
+
+f_period = _cat_apply_omnibar(f_base, skip_dates=True)
+spend_period = f_period[f_period["amount"] > 0].copy()
+
+cur_spend = spend_period[
+    (spend_period["date"] >= bounds["cur_start"]) & (spend_period["date"] <= bounds["cur_end"])
+]
+prev_spend = spend_period[
+    (spend_period["date"] >= bounds["prev_start"]) & (spend_period["date"] <= bounds["prev_end"])
+]
+
+m = pd.concat([cur_spend.assign(bucket=cur_label), prev_spend.assign(bucket=prev_label)], ignore_index=True)
+if not m.empty:
+    cmp = m.groupby(["effective_category", "bucket"], as_index=False)["amount"].sum()
+    # Order categories by combined spend so the biggest are at the top
+    order = (
+        cmp.groupby("effective_category", as_index=False)["amount"].sum()
+        .sort_values("amount", ascending=True)
+        .tail(12)["effective_category"]
+        .tolist()
     )
-    m = m[m["bucket"].isin(["This month", "Last month"])]
-    if not m.empty:
-        cmp = m.groupby(["effective_category", "bucket"], as_index=False)["amount"].sum()
-        # Order categories by combined spend so the biggest are at the top
-        order = (
-            cmp.groupby("effective_category", as_index=False)["amount"].sum()
-            .sort_values("amount", ascending=True)
-            .tail(12)["effective_category"]
-            .tolist()
-        )
-        cmp = cmp[cmp["effective_category"].isin(order)]
-        fig2 = px.bar(
-            cmp, x="amount", y="effective_category", color="bucket",
-            barmode="group", orientation="h",
-            category_orders={"effective_category": order},
-            title="This month vs last month",
-        )
-        fig2.update_layout(yaxis_title=None, xaxis_title="Spend", legend_title=None)
-        st.plotly_chart(fig2, use_container_width=True)
-    else:
-        st.caption("No data for current or last month in the filtered range.")
+    cmp = cmp[cmp["effective_category"].isin(order)]
+    fig2 = px.bar(
+        cmp, x="amount", y="effective_category", color="bucket",
+        barmode="group", orientation="h",
+        category_orders={"effective_category": order, "bucket": [cur_label, prev_label]},
+        title=f"{cur_label} vs {prev_label} by category",
+    )
+    fig2.update_layout(yaxis_title=None, xaxis_title="Spend", legend_title=None)
+    st.plotly_chart(fig2, use_container_width=True)
+else:
+    st.caption("No data for the current or previous period in the filtered range.")
+
+this_cum = cumulative_series(cur_spend, gran, bounds["cur_len"])
+this_cum["series"] = cur_label
+last_cum = cumulative_series(prev_spend, gran, bounds["prev_len"])
+last_cum["series"] = prev_label
+
+combined = pd.concat([this_cum, last_cum], ignore_index=True)
+x_title = "Day of month" if gran == "monthly" else "Day of year"
+fig3 = px.line(
+    combined, x="x", y="cumulative", color="series",
+    line_dash="series",
+    line_dash_map={cur_label: "solid", prev_label: "dot"},
+    title=f"Cumulative spend: {cur_label.lower()} vs {prev_label.lower()}",
+)
+fig3.update_layout(xaxis_title=x_title, yaxis_title="Cumulative spend ($)", legend_title=None)
+st.plotly_chart(fig3, use_container_width=True)
 
 # ── Transaction samples ───────────────────────────────────────────────────────
 st.subheader("Transaction samples by category")

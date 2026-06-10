@@ -192,6 +192,60 @@ def apply_filters(df: pd.DataFrame, start_d, end_d, accounts, exclude_transfers:
     return f
 
 
+def period_bounds(granularity: str, today) -> dict:
+    """Return current/previous period start/end dates for 'monthly' or 'yearly' granularity.
+
+    cur_len/prev_len are the day-of-period (day-of-month or day-of-year) for the
+    last day of each period, used as the x-axis range for cumulative charts.
+    """
+    import calendar
+    from datetime import date, timedelta
+
+    if granularity == "yearly":
+        cur_start = date(today.year, 1, 1)
+        cur_end = today
+        prev_start = date(today.year - 1, 1, 1)
+        try:
+            prev_end = date(today.year - 1, today.month, today.day)
+        except ValueError:
+            # today is Feb 29 and the previous year is not a leap year
+            prev_end = date(today.year - 1, 2, 28)
+        cur_len = cur_end.timetuple().tm_yday
+        prev_len = 366 if calendar.isleap(prev_start.year) else 365
+    else:
+        cur_start = today.replace(day=1)
+        cur_end = today
+        prev_end = cur_start - timedelta(days=1)
+        prev_start = prev_end.replace(day=1)
+        cur_len = cur_end.day
+        prev_len = calendar.monthrange(prev_start.year, prev_start.month)[1]
+
+    return {
+        "cur_start": cur_start,
+        "cur_end": cur_end,
+        "prev_start": prev_start,
+        "prev_end": prev_end,
+        "cur_len": cur_len,
+        "prev_len": prev_len,
+    }
+
+
+def cumulative_series(period_df: pd.DataFrame, granularity: str, max_x: int) -> pd.DataFrame:
+    """Group amounts by day-of-month or day-of-year, reindex to 1..max_x, and cumsum.
+
+    Returns a DataFrame with columns "x" and "cumulative".
+    """
+    if period_df.empty:
+        daily = pd.Series(dtype=float)
+    elif granularity == "yearly":
+        daily = period_df.groupby(period_df["date"].apply(lambda d: d.timetuple().tm_yday))["amount"].sum()
+    else:
+        daily = period_df.groupby(period_df["date"].apply(lambda d: d.day))["amount"].sum()
+    daily = daily.reindex(range(1, max_x + 1), fill_value=0.0)
+    cum = daily.cumsum()
+    return pd.DataFrame({"x": cum.index, "cumulative": cum.values})
+
+
 def render_annotation_editor(
     txn_id: int,
     current: dict,
