@@ -1,6 +1,6 @@
 # VibeLedger
 
-Single-user personal finance ledger. FastAPI + SQLite + Plaid. Streamlit dashboard (multipage: Accounts / Cashflow / Categories / Transfers) served alongside the API.
+Single-user personal finance ledger. FastAPI + SQLite + Plaid, with a multipage Streamlit dashboard (Accounts / Cashflow / Categories / Transfers) served alongside the API.
 
 ## Setup
 
@@ -10,98 +10,52 @@ source .venv/bin/activate
 pip install -e '.[dev,dashboard]'
 ```
 
-The `dashboard` extra installs Streamlit/pandas/requests, needed only if you run or modify the dashboard. `dev` alone is enough to run tests or develop the API.
+- `dev` is enough for tests/API work; `dashboard` extra adds Streamlit/pandas/requests.
+- If the venv breaks after moving the repo: `rm -rf .venv && python3 -m venv .venv && source .venv/bin/activate && pip install -e .[dev]`
 
-If the venv breaks after moving the repo (bad interpreter errors), recreate it: `rm -rf .venv && python3 -m venv .venv && source .venv/bin/activate && pip install -e .[dev]`
+## Running the app
 
-## Run
-
-**Do not run manually** — use the systemd services (see below). The canonical command (baked into `vibeledger.service`) is:
-
-```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --root-path /vibeledger --reload
-```
-
-`--reload` is enabled so edits to any `app/` file take effect immediately without a manual restart. `--root-path /vibeledger` is required so FastAPI generates correct URLs. Requires a `.env` file (see `.env.example`). The app validates `TOKEN_ENCRYPTION_KEY` (Fernet) and `VIBELEDGER_API_TOKEN` at startup and refuses to start without them.
-
-### Tailscale serve (already done, persists across reboots)
-
-Two serve routes are configured permanently — both tailnet-only (not public internet), stored by `tailscaled`, survive reboots:
-
-```bash
-# Already run — do not re-run unless routes are removed
-sudo tailscale serve --bg --set-path /vibeledger http://127.0.0.1:8000
-sudo tailscale serve --bg --set-path /vibeledger/dash http://127.0.0.1:8501/vibeledger/dash
-```
-
-- `https://contabo.tail6fb821.ts.net/vibeledger/` → FastAPI on 127.0.0.1:8000
-- `https://contabo.tail6fb821.ts.net/vibeledger/dash/` → Streamlit on 127.0.0.1:8501
-
-**Why the dashboard target URL repeats `/vibeledger/dash`:** `--set-path` strips the matched prefix before proxying. Streamlit's `--server.baseUrlPath` expects the prefix to be present in both incoming requests and generated asset URLs. Putting `/vibeledger/dash` in the target URL makes the reverse proxy re-prepend what `--set-path` stripped, so Streamlit sees the full path it expects. The API avoids this hack because uvicorn's `--root-path /vibeledger` accepts a stripped prefix (ASGI root_path semantics).
-
-Other apps can be added the same way with their own prefix (e.g. `--set-path /app2`).
-
-### Starting the app
-
-Two **systemd user services** run side-by-side (unit files at `~/.config/systemd/user/`). Lingering is enabled for user `charlie`, so both start at boot and survive logout. This is the **only supported way** to run them — do not launch uvicorn/streamlit manually with `nohup`+`&`, they won't survive agent exec boundaries (Claude-Code-style Bash tools reap their process group).
+**Do not run uvicorn/streamlit manually** (`nohup`+`&` won't survive agent exec boundaries). Two systemd **user** services do this, with lingering enabled so they survive reboot/logout:
 
 | Service | Port | What | URL |
 |---|---|---|---|
-| `vibeledger.service` | 8000 | FastAPI (uvicorn) | `/vibeledger/` |
+| `vibeledger.service` | 8000 | FastAPI (`--reload`, `--root-path /vibeledger`) | `/vibeledger/` |
 | `vibeledger-dash.service` | 8501 | Streamlit dashboard | `/vibeledger/dash/` |
 
-**For agents: both services are normally already running.** First actions should be `curl http://127.0.0.1:8000/health` and `curl http://127.0.0.1:8501/vibeledger/dash/_stcore/health`, not `systemctl start`. Only restart if a health check fails. **Never `pkill -f uvicorn` or `pkill -f streamlit`** — it leaves the managed process in a confused state; use `systemctl --user restart <service>` instead.
+- **First action for agents:** `curl http://127.0.0.1:8000/health` and `curl http://127.0.0.1:8501/vibeledger/dash/_stcore/health` — both services are normally already up. Only restart on failure.
+- Restart after code changes: `systemctl --user restart vibeledger` (app/.env) or `vibeledger-dash` (dashboard files).
+- Logs: `journalctl --user -u vibeledger -n 100` (also `/tmp/vibeledger.log`); same pattern for `-dash`.
+- **Never `pkill -f uvicorn/streamlit`** — use `systemctl --user restart <service>`.
+- Edited a unit file? `systemctl --user daemon-reload` first.
+- Requires `.env` (see `.env.example`); app refuses to start without `TOKEN_ENCRYPTION_KEY` (Fernet) and `VIBELEDGER_API_TOKEN`.
 
-**Control the services:**
+**Tailnet access** (already configured, persists across reboots — don't re-run unless routes are removed):
 ```bash
-systemctl --user restart vibeledger          # API (after .env or app/ code change)
-systemctl --user restart vibeledger-dash     # Dashboard (after dashboard_app.py / pages/ / dashboard_lib.py change)
-systemctl --user status vibeledger vibeledger-dash
-journalctl --user -u vibeledger -n 100       # API logs (also /tmp/vibeledger.log)
-journalctl --user -u vibeledger-dash -n 100  # dash logs (also /tmp/vibeledger-dash.log)
+sudo tailscale serve --bg --set-path /vibeledger http://127.0.0.1:8000
+sudo tailscale serve --bg --set-path /vibeledger/dash http://127.0.0.1:8501/vibeledger/dash
 ```
-
-Both unit files read `.env` via `EnvironmentFile=` and have `Restart=on-failure`. If you edit a unit file, run `systemctl --user daemon-reload` before restart.
-
-Once running, the app is reachable at `https://contabo.tail6fb821.ts.net/vibeledger/` from any device on the tailnet. The `--root-path /vibeledger` flag (baked into the unit's `ExecStart`) is required so FastAPI generates correct URLs (connect flow links, docs, etc.).
-
-**Verify it's up:**
-```bash
-systemctl --user is-active vibeledger vibeledger-dash                        # both "active"
-curl -sS http://127.0.0.1:8000/health                                        # API local
-curl -sS http://127.0.0.1:8501/vibeledger/dash/_stcore/health                # dash local
-curl -sS https://contabo.tail6fb821.ts.net/vibeledger/health                 # API tailnet
-curl -sS https://contabo.tail6fb821.ts.net/vibeledger/dash/_stcore/health    # dash tailnet
-```
+- `https://contabo.tail6fb821.ts.net/vibeledger/` → API, `.../vibeledger/dash/` → dashboard.
+- The dashboard target URL repeats `/vibeledger/dash` because `--set-path` strips that prefix before proxying, and Streamlit's `--server.baseUrlPath` expects it back. The API doesn't need this trick (uvicorn `--root-path` accepts a stripped prefix).
+- `.env`'s `APP_BASE_URL` must be exactly `https://contabo.tail6fb821.ts.net/vibeledger` (no trailing slash) — used to build Plaid Link `connect_url`.
 
 **Troubleshooting:**
-- `502 Bad Gateway` from `contabo.tail6fb821.ts.net/vibeledger/...` — tailscale serve is proxying correctly but nothing is listening on `127.0.0.1:8000`. Run `systemctl --user status vibeledger` and `journalctl --user -u vibeledger -n 50` to see why it's down.
-- Startup failure `TOKEN_ENCRYPTION_KEY must be set...` — means `EnvironmentFile=` isn't finding `.env`. Verify the path in the unit file and that `.env` exists and is readable.
-- Tailscale serve config (persistent): `tailscale serve status` should show `/vibeledger proxy http://127.0.0.1:8000` under `https://contabo.tail6fb821.ts.net`.
-- `.env`'s `APP_BASE_URL` must be exactly `https://contabo.tail6fb821.ts.net/vibeledger` — no trailing slash, no duplicated `/vibeledger`. This is the base used to build `connect_url` returned by `POST /connect/sessions`. After changing, `systemctl --user restart vibeledger`.
+- `502 Bad Gateway` → nothing listening on `127.0.0.1:8000`; check `systemctl --user status vibeledger` / journal.
+- `TOKEN_ENCRYPTION_KEY must be set` → `.env` not found by `EnvironmentFile=` in the unit.
 
-### Linking a new bank account
+### Linking a bank account
 
-The Plaid Link widget runs entirely in the browser. The `/connect/complete` callback is a `fetch` from the browser (not from Plaid's servers), so the app only needs to be reachable by the browser — tailnet access is sufficient for sandbox and non-OAuth institutions.
+1. `POST /connect/sessions` (auth required) → returns `connect_url` + `session_token` (20min TTL).
+2. Open `connect_url` in a browser, complete Plaid Link. Sandbox/non-OAuth institutions work over the tailnet alone.
+3. OAuth institutions need `PLAID_REDIRECT_URI` reachable publicly — wrap with `sudo bash scripts/connect_funnel.sh open|close|status` (Tailscale Funnel for `/connect/*`).
+4. Browser auto-posts to `/connect/complete` (unauthenticated by design) — access token is encrypted and stored.
 
-The funnel script is only needed if using OAuth-based institutions (which redirect through `PLAID_REDIRECT_URI`). For those cases:
+**Transaction history:** new links request `days_requested=730` (Plaid's 2-year hard max; some institutions cap lower). Backfill is async (2–30 min) — re-run `/sync/item/{id}` if the first sync only returns ~90 days.
 
-```bash
-sudo bash scripts/connect_funnel.sh open     # expose /vibeledger/connect via Tailscale Funnel
-# complete the Plaid Link flow in browser
-sudo bash scripts/connect_funnel.sh close    # remove public exposure when done
-```
-
-`status` shows current funnel state: `sudo bash scripts/connect_funnel.sh status`
-
-**Transaction history window:** `create_link_token()` (in `app/services/plaid_client.py`) requests `transactions.days_requested=730` — Plaid's hard maximum (2 years) for the `transactions` product. This is the most history Plaid supports regardless of institution; some institutions (e.g. Capital One) cap lower than that, and Plaid backfills history asynchronously after linking (can take 2–30 minutes), so an immediate `/sync/item/{id}` may only return the first ~90 days until the historical pull finishes — re-run `/sync/item/{id}` after a few minutes if so.
-
-This setting only applies to **newly-created** items — it cannot be changed retroactively for an item that's already linked. To extend an existing item's history:
-
-1. `POST /items/{item_id}/remove` — calls Plaid `/item/remove` and deletes the item's accounts/transactions/annotations/transfer pairs locally. **Destructive**: any manual category overrides/notes on that item's transactions are lost.
-2. Re-run the normal connect flow (`POST /connect/sessions` → open `connect_url` in browser → complete Plaid Link), wrapping with `connect_funnel.sh open`/`close` for OAuth institutions as above.
-3. `POST /sync/item/{new_item_id}` to pull transactions (retry after a few minutes if the historical backfill hasn't finished).
-4. `POST /category-rules/recompute-all` — rule-based categories aren't applied automatically during sync, so newly-synced transactions need this to get `rule_category` populated.
+This setting is **not retroactive** for existing items. To extend history on an already-linked item:
+1. `POST /items/{item_id}/remove` — removes the Plaid item and deletes local accounts/transactions/annotations/transfer pairs for it. Manual annotations are preserved via `annotation_fingerprints` (see below) and reapplied automatically on re-sync if the same transactions come back.
+2. Re-link via the connect flow above.
+3. `POST /sync/item/{new_item_id}` (retry after a few minutes for backfill).
+4. `POST /category-rules/recompute-all` — categorization rules aren't applied automatically during sync.
 
 ## Test
 
@@ -109,102 +63,80 @@ This setting only applies to **newly-created** items — it cannot be changed re
 pytest
 ```
 
-Tests use `PLAID_USE_MOCK=true` and an in-memory SQLite DB (configured in `tests/conftest.py`). No external services needed.
+Uses `PLAID_USE_MOCK=true` and a temp SQLite DB (`tests/conftest.py`). No external services needed. ~70 tests.
 
 ## Project layout
 
 ```
 app/
   main.py                    # FastAPI app, lifespan, middleware setup
-  api/routes.py              # All API endpoints (incl. /transfers, /analytics/accounts-summary)
+  api/routes.py              # All API endpoints
   core/auth.py               # Bearer token middleware
   core/config.py             # Settings (from env vars)
   db/session.py              # SQLAlchemy engine + session
-  db/schema_patches.py       # Idempotent ALTER TABLEs on startup (no migration framework)
-  models/models.py           # ORM models (Item, Account, Transaction, TransferPair, ...)
+  db/schema_patches.py       # Idempotent ALTER TABLEs + backfills on startup (no migration framework)
+  models/models.py           # ORM models (Item, Account, Transaction, TransferPair, AnnotationFingerprint, ...)
   schemas/plaid.py           # Pydantic request/response schemas
   services/
     connect_service.py       # Plaid Link session management
-    plaid_client.py          # Plaid API wrapper (real + mock)
-    security.py              # Fernet encrypt/decrypt for access tokens
-    sync_service.py          # Transaction sync pipeline
-    scheduler.py             # Background scheduled sync loop
-    transfer_detector.py     # Heuristic pair-match for double-entry transfers
+    plaid_client.py           # Plaid API wrapper (real + mock)
+    security.py               # Fernet encrypt/decrypt for access tokens
+    sync_service.py            # Transaction sync pipeline + annotation fingerprint reapply
+    txn_fingerprint.py         # Content hash for transactions (account mask + date + amount + name)
+    scheduler.py               # Background scheduled sync loop
+    transfer_detector.py       # Heuristic pair-match for double-entry transfers
 dashboard_app.py             # Streamlit entry page (overview + shared filters)
 dashboard_lib.py             # Cached SQLite loaders + HTTP helpers for mutations
 pages/
   1_Accounts.py              # Balances grouped by type, net worth estimate
   2_Cashflow.py              # Monthly income vs expense, net trend
-  3_Categories.py            # Top categories, MoM, samples
+  3_Categories.py            # Top categories, MoM/YoY trends, samples + annotation
   4_Transfers.py             # Review queue: confirm/unpair, manual pairing
 scripts/
   connect_funnel.sh          # Tailscale Funnel automation for connect flow
   backup_db.sh               # SQLite backup (cron-friendly, 30-day retention)
-tests/                       # pytest suite (47 tests)
-analytics/                   # Standalone Plotly/Streamlit scripts (legacy)
+tests/                       # pytest suite
 ```
 
 ## Common operations
 
 All protected endpoints require `Authorization: Bearer <VIBELEDGER_API_TOKEN>`.
 
-### Calling the API from an agent on this box
-
-Agents running on this VPS (e.g. openclaw/Claude Code instances) should read the token inline from `.env` on every call. Do **not** `export` it into a shell session, and do **not** ask the user to paste it — it's already on disk and the agent has filesystem access.
-
-Canonical pattern:
-
+**Calling the API as an agent on this box:** read the token inline from `.env` per call — don't `export` it or ask the user for it:
 ```bash
-curl -H "Authorization: Bearer $(grep ^VIBELEDGER_API_TOKEN /home/charlie/.openclaw/workspace/VibeLedger/.env | cut -d= -f2-)" \
+curl -H "Authorization: Bearer $(grep ^VIBELEDGER_API_TOKEN .env | cut -d= -f2-)" \
   https://contabo.tail6fb821.ts.net/vibeledger/<endpoint>
 ```
+The token gates tailnet access to Plaid-linked account data, so it stays.
 
-Rationale: keeps the token out of the agent's conversation context and environment while still letting the agent make calls autonomously. The token is a single-user bearer used to gate access from other devices on the tailnet; removing it would expose Plaid-linked account data to anyone on the tailnet, so it stays.
+**Sync:**
+- `POST /sync/item/{item_id}` — sync one account; `POST /sync/all` — sync all.
+- `SYNC_INTERVAL_HOURS` in `.env` enables automatic background sync (off by default).
 
-**Link a new bank account:**
-1. `POST /connect/sessions` with `{"user_id": "..."}` — **requires `Authorization: Bearer $VIBELEDGER_API_TOKEN`** (only `/connect/start` and `/connect/complete` are exempt from auth, so the browser hop works unauthenticated). Returns a `connect_url` and `session_token`. Example:
-   ```bash
-   curl -X POST https://contabo.tail6fb821.ts.net/vibeledger/connect/sessions \
-     -H "Authorization: Bearer $VIBELEDGER_API_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"user_id": "you"}'
-   ```
-   Missing/wrong token returns `{"detail":"invalid or missing bearer token"}` (401).
-2. Open `connect_url` in a browser to complete Plaid Link (if the app isn't publicly reachable, temporarily expose `/connect/*` via Tailscale Funnel)
-3. On success the browser posts back to `/connect/complete` automatically — the access token is encrypted and stored
-
-**Sync transactions:**
-- `POST /sync/item/{item_id}` — sync a single linked account
-- `POST /sync/all` — sync all active accounts
-- Set `SYNC_INTERVAL_HOURS` in `.env` to enable automatic background sync (disabled by default)
-
-**Query transactions:**
-- `GET /transactions` — list transactions. Supports query params: `start_date`, `end_date`, `category`, `limit`, `offset`
-- `PATCH /transactions/{id}/annotation` — add user category, notes, or mark reviewed
+**Transactions & annotations:**
+- `GET /transactions` — supports `start_date`, `end_date`, `category`, `limit`, `offset`.
+- `PATCH /transactions/{id}/annotation` — set `user_category`, `merchant_name_override`, `notes`, `reviewed`. Also upserts an `annotation_fingerprints` row keyed by the transaction's content hash, so the annotation survives item removal/re-link.
+- `GET /annotations/fingerprints?unapplied_only=true` — list saved annotation fingerprints, optionally only those not currently matched to a live transaction.
 
 **Analytics:**
-- `GET /analytics/monthly-spend`, `/analytics/category-spend`, `/analytics/cashflow-trend` — all support `start_date`/`end_date`. By default they exclude transactions that are part of a `TransferPair` or flagged `is_transfer_override=true` (so credit-card payments don't double-count). Pass `?include_transfers=true` for raw numbers.
-- `GET /analytics/accounts-summary` — current balances grouped by type, plus assets / liabilities / net-worth estimate.
+- `GET /analytics/monthly-spend`, `/category-spend`, `/cashflow-trend` — support `start_date`/`end_date`; exclude transfer-paired/`is_transfer_override` transactions by default (`?include_transfers=true` for raw numbers).
+- `GET /analytics/accounts-summary` — balances by type + net worth.
 
 **Transfers (double-entry reconciliation):**
-- `POST /transfers/detect` — heuristic: pair any unpaired outflow (`amount > 0`) with an unpaired opposite-sign match on a *different* account within `window_days` (default 3). Idempotent.
-- `GET /transfers` — list pairs with both sides expanded.
-- `POST /transfers` — manual pair (`{"txn_a_id", "txn_b_id"}`). Rejects same-account, amount-mismatch, or already-paired txns.
-- `POST /transfers/{id}/confirm` — mark an auto-detected pair as confirmed.
-- `DELETE /transfers/{id}` — unpair.
-- `PATCH /transactions/{id}/annotation` can also set `is_transfer_override` via Python (no schema field exposed in `PatchAnnotationRequest` yet — set directly via the dashboard's Transfers page or SQL if needed).
+- `POST /transfers/detect` — pairs unpaired opposite-sign transactions on different accounts within `window_days` (default 3). Idempotent.
+- `GET /transfers`, `POST /transfers` (manual pair), `POST /transfers/{id}/confirm`, `DELETE /transfers/{id}`.
+- `is_transfer_override` on `transaction_annotations` flags transfers the heuristic can't pair (partial amounts, fees) — set via the Transfers dashboard page.
 
-### Dashboard notes
-
-- Multipage Streamlit lives in [dashboard_app.py](dashboard_app.py) + [pages/](pages/). [dashboard_lib.py](dashboard_lib.py) is the shared loader (cached direct SQLite reads) and the thin wrapper for API mutations (auth header loaded inline from `.env`).
-- The dashboard reads SQLite directly for read paths (fast, no token plumbing) and calls the FastAPI endpoints for writes (so auth middleware, validation, and transfer logic stay centralized).
-- `is_transfer_override` on [transaction_annotations](app/models/models.py) is a lightweight flag for transfers the heuristic can't pair (e.g. partial amounts, fee deductions). Set via the Transfers page.
-- To bring the dashboard up after a code change: `systemctl --user restart vibeledger-dash`.
+**Dashboard:**
+- Reads SQLite directly (cached, fast); writes go through the FastAPI endpoints (auth/validation/transfer logic stay centralized).
+- Date range pickers default to the last 90 days even though more history may be loaded — widen the range to see older data.
+- Restart after changes: `systemctl --user restart vibeledger-dash`.
 
 ## Key design decisions
 
-- **Single-user, no user accounts.** Auth is a single bearer token (`VIBELEDGER_API_TOKEN`).
-- **SQLite.** DB at `~/.vibeledger/vibeledger.db`. No migration framework; schema auto-created on boot.
+- **Single-user, no accounts.** Auth is one bearer token (`VIBELEDGER_API_TOKEN`).
+- **SQLite** at `~/.vibeledger/vibeledger.db`. No migration framework — schema auto-created via `create_all`, plus idempotent patches/backfills in `schema_patches.py`.
 - **Plaid access tokens encrypted at rest** with Fernet (`TOKEN_ENCRYPTION_KEY`).
-- **Tailscale for networking.** App binds to localhost; `tailscale serve --set-path /vibeledger` provides HTTPS on the tailnet. Never bind to `0.0.0.0`. Set `APP_BASE_URL=https://contabo.tail6fb821.ts.net/vibeledger` in `.env`.
-- **Connect flow** uses short-lived sessions (20min TTL, 256-bit tokens) so `/connect/complete` can be unauthenticated (called from browser).
+- **Tailscale-only networking.** App binds to localhost; never bind `0.0.0.0`.
+- **Connect flow** uses short-lived sessions (20min TTL, 256-bit tokens) so `/connect/complete` can be unauthenticated.
+- **Annotation fingerprints**: manual annotations are keyed by a content hash (account mask + date + amount + name) independent of `transaction_id`, so they survive transaction deletion/re-sync (e.g. item re-link).
