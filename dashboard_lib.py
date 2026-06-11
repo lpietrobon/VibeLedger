@@ -256,7 +256,7 @@ def render_annotation_editor(
     """Render an inline annotation form for a single transaction.
 
     key_prefix must differ per page to avoid Streamlit widget key collisions:
-    use "tx_" on the Transactions page, "cat_" on the Categories page, etc.
+    use "tx_" on the Transactions page, "cat_" on the Spend page, etc.
 
     categories: if provided, the category field becomes a searchable selectbox
     with a fallback text input for entering a brand-new category name.

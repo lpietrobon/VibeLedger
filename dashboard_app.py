@@ -50,6 +50,6 @@ with c1:
     st.write(f"**Transfer pairs detected:** {len(pairs_df)} ({(pairs_df['confirmed']==1).sum() if not pairs_df.empty else 0} confirmed)")
 with c2:
     st.write(f"**API base:** `{DEFAULT_API}`")
-    st.write("**Pages:** Accounts · Cashflow · Categories · Transfers")
+    st.write("**Pages:** Accounts · Cashflow · Spend · Transfers")
 
 st.info("Jump into a page from the left sidebar for deeper views.")

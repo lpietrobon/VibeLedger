@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import calendar
 import re
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 import plotly.express as px
@@ -19,8 +19,8 @@ from dashboard_lib import (
     sidebar_filters,
 )
 
-st.set_page_config(page_title="Categories", layout="wide")
-st.title("Categories")
+st.set_page_config(page_title="Spend", layout="wide")
+st.title("Spend")
 
 try:
     df = load_transactions(st.session_state.get("db_path") or DEFAULT_DB)
@@ -123,26 +123,7 @@ def _on_cat_omnibar_change():
         st.session_state.cat_omnibar_counter += 1
 
 
-def _set_date_filter(from_d: date) -> None:
-    st.session_state.cat_filters = [
-        flt for flt in st.session_state.cat_filters if flt["type"] not in ("date_from", "date_to")
-    ]
-    from_str = from_d.strftime("%Y-%m-%d")
-    st.session_state.cat_filters.append({"type": "date_from", "value": from_str, "label": f"from {from_str}"})
-    st.rerun()
-
-
 _today = date.today()
-quick_col1, quick_col2, quick_col3, _quick_spacer = st.columns([1, 1, 1, 7])
-with quick_col1:
-    if st.button("Current month", use_container_width=True):
-        _set_date_filter(_today.replace(day=1))
-with quick_col2:
-    if st.button("Since last month", use_container_width=True):
-        _set_date_filter((_today.replace(day=1) - timedelta(days=1)).replace(day=1))
-with quick_col3:
-    if st.button("YTD", use_container_width=True):
-        _set_date_filter(date(_today.year, 1, 1))
 
 st.text_input(
     "Filter",
@@ -181,14 +162,7 @@ spend = f[f["amount"] > 0].copy()
 
 st.metric("Spend", f"${spend['amount'].sum():,.2f}")
 
-# ── Charts ────────────────────────────────────────────────────────────────────
-st.subheader("Top categories")
-cat_agg = spend.groupby("effective_category", as_index=False)["amount"].sum().sort_values("amount", ascending=False).head(20)
-fig = px.bar(cat_agg, x="amount", y="effective_category", orientation="h", title="Spend by category")
-fig.update_layout(yaxis_title="Category", xaxis_title="Spend")
-st.plotly_chart(fig, use_container_width=True)
-
-st.divider()
+# ── Spending trends ──────────────────────────────────────────────────────────
 st.subheader("Spending trends")
 granularity = st.radio("Granularity", ["Monthly", "Yearly"], horizontal=True, key="cat_granularity")
 gran = "monthly" if granularity == "Monthly" else "yearly"
@@ -206,6 +180,22 @@ cur_spend = spend_period[
 prev_spend = spend_period[
     (spend_period["date"] >= bounds["prev_start"]) & (spend_period["date"] <= bounds["prev_end"])
 ]
+
+this_cum = cumulative_series(cur_spend, gran, bounds["cur_len"])
+this_cum["series"] = cur_label
+last_cum = cumulative_series(prev_spend, gran, bounds["prev_len"])
+last_cum["series"] = prev_label
+
+combined = pd.concat([this_cum, last_cum], ignore_index=True)
+x_title = "Day of month" if gran == "monthly" else "Day of year"
+fig3 = px.line(
+    combined, x="x", y="cumulative", color="series",
+    line_dash="series",
+    line_dash_map={cur_label: "solid", prev_label: "dot"},
+    title=f"Cumulative spend: {cur_label.lower()} vs {prev_label.lower()}",
+)
+fig3.update_layout(xaxis_title=x_title, yaxis_title="Cumulative spend ($)", legend_title=None)
+st.plotly_chart(fig3, use_container_width=True)
 
 m = pd.concat([cur_spend.assign(bucket=cur_label), prev_spend.assign(bucket=prev_label)], ignore_index=True)
 if not m.empty:
@@ -229,21 +219,7 @@ if not m.empty:
 else:
     st.caption("No data for the current or previous period in the filtered range.")
 
-this_cum = cumulative_series(cur_spend, gran, bounds["cur_len"])
-this_cum["series"] = cur_label
-last_cum = cumulative_series(prev_spend, gran, bounds["prev_len"])
-last_cum["series"] = prev_label
-
-combined = pd.concat([this_cum, last_cum], ignore_index=True)
-x_title = "Day of month" if gran == "monthly" else "Day of year"
-fig3 = px.line(
-    combined, x="x", y="cumulative", color="series",
-    line_dash="series",
-    line_dash_map={cur_label: "solid", prev_label: "dot"},
-    title=f"Cumulative spend: {cur_label.lower()} vs {prev_label.lower()}",
-)
-fig3.update_layout(xaxis_title=x_title, yaxis_title="Cumulative spend ($)", legend_title=None)
-st.plotly_chart(fig3, use_container_width=True)
+st.divider()
 
 # ── Transaction samples ───────────────────────────────────────────────────────
 st.subheader("Transaction samples by category")
