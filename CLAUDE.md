@@ -94,6 +94,15 @@ sudo bash scripts/connect_funnel.sh close    # remove public exposure when done
 
 `status` shows current funnel state: `sudo bash scripts/connect_funnel.sh status`
 
+**Transaction history window:** `create_link_token()` (in `app/services/plaid_client.py`) requests `transactions.days_requested=730` — Plaid's hard maximum (2 years) for the `transactions` product. This is the most history Plaid supports regardless of institution; some institutions (e.g. Capital One) cap lower than that, and Plaid backfills history asynchronously after linking (can take 2–30 minutes), so an immediate `/sync/item/{id}` may only return the first ~90 days until the historical pull finishes — re-run `/sync/item/{id}` after a few minutes if so.
+
+This setting only applies to **newly-created** items — it cannot be changed retroactively for an item that's already linked. To extend an existing item's history:
+
+1. `POST /items/{item_id}/remove` — calls Plaid `/item/remove` and deletes the item's accounts/transactions/annotations/transfer pairs locally. **Destructive**: any manual category overrides/notes on that item's transactions are lost.
+2. Re-run the normal connect flow (`POST /connect/sessions` → open `connect_url` in browser → complete Plaid Link), wrapping with `connect_funnel.sh open`/`close` for OAuth institutions as above.
+3. `POST /sync/item/{new_item_id}` to pull transactions (retry after a few minutes if the historical backfill hasn't finished).
+4. `POST /category-rules/recompute-all` — rule-based categories aren't applied automatically during sync, so newly-synced transactions need this to get `rule_category` populated.
+
 ## Test
 
 ```bash

@@ -5,10 +5,20 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from app.core.time import utcnow
-from app.models.models import Account, AccountBalanceSnapshot, Item, SyncRun, SyncState, Transaction
+from app.models.models import (
+    Account,
+    AccountBalanceSnapshot,
+    AnnotationFingerprint,
+    Item,
+    SyncRun,
+    SyncState,
+    Transaction,
+    TransactionAnnotation,
+)
 from app.services.plaid_client import PlaidClient
 from app.services.security import decrypt_token
 from app.services.transfer_detector import detect_candidates
+from app.services.txn_fingerprint import compute_txn_hash
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +243,7 @@ class SyncService:
         added_count = 0
         modified_count = 0
         removed_count = 0
+        occurrence_counts: dict[str, int] = {}
 
         for t in payload.get("added", []):
             existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
@@ -245,20 +256,32 @@ class SyncService:
             if isinstance(tx_date, str):
                 tx_date = date.fromisoformat(tx_date)
 
-            db.add(
-                Transaction(
-                    plaid_transaction_id=t["transaction_id"],
-                    account_id=account.id,
-                    item_id=item_id,
-                    date=tx_date,
-                    amount=t["amount"],
-                    name=t["name"],
-                    merchant_name=t.get("merchant_name"),
-                    plaid_category_primary=t.get("plaid_category_primary"),
-                    pending=t.get("pending", False),
-                    raw_json=self._serialize_raw(t),
+            txn_hash = compute_txn_hash(account.mask, tx_date, t["amount"], t["name"])
+            if txn_hash not in occurrence_counts:
+                occurrence_counts[txn_hash] = (
+                    db.query(Transaction).filter(Transaction.txn_hash == txn_hash).count()
                 )
+            txn_occurrence = occurrence_counts[txn_hash]
+            occurrence_counts[txn_hash] += 1
+
+            new_txn = Transaction(
+                plaid_transaction_id=t["transaction_id"],
+                account_id=account.id,
+                item_id=item_id,
+                date=tx_date,
+                amount=t["amount"],
+                name=t["name"],
+                merchant_name=t.get("merchant_name"),
+                plaid_category_primary=t.get("plaid_category_primary"),
+                pending=t.get("pending", False),
+                raw_json=self._serialize_raw(t),
+                txn_hash=txn_hash,
+                txn_occurrence=txn_occurrence,
             )
+            db.add(new_txn)
+            db.flush()
+
+            self._reapply_fingerprint(db, new_txn, txn_hash, txn_occurrence)
 
         for t in payload.get("modified", []):
             existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
@@ -278,6 +301,51 @@ class SyncService:
                 db.delete(existing)
 
         return added_count, modified_count, removed_count
+
+    def _reapply_fingerprint(self, db: Session, txn: Transaction, txn_hash: str, txn_occurrence: int) -> None:
+        candidates = (
+            db.query(AnnotationFingerprint)
+            .filter(
+                AnnotationFingerprint.txn_hash == txn_hash,
+                AnnotationFingerprint.txn_occurrence == txn_occurrence,
+            )
+            .all()
+        )
+        fingerprint = None
+        for candidate in candidates:
+            if candidate.applied_transaction_id is None:
+                fingerprint = candidate
+                break
+            still_exists = (
+                db.query(Transaction.id)
+                .filter(
+                    Transaction.id == candidate.applied_transaction_id,
+                    Transaction.id != txn.id,
+                )
+                .first()
+            )
+            if not still_exists:
+                fingerprint = candidate
+                break
+        if not fingerprint:
+            return
+
+        annotation = TransactionAnnotation(
+            transaction_id=txn.id,
+            user_category=fingerprint.user_category,
+            merchant_name_override=fingerprint.merchant_name_override,
+            notes=fingerprint.notes,
+            reviewed=fingerprint.reviewed,
+            is_transfer_override=fingerprint.is_transfer_override,
+        )
+        db.add(annotation)
+
+        fingerprint.applied_transaction_id = txn.id
+        fingerprint.applied_at = utcnow()
+        logger.info(
+            "Reapplied annotation fingerprint %d to transaction %d (hash=%s occurrence=%d)",
+            fingerprint.id, txn.id, txn_hash, txn_occurrence,
+        )
 
     def _ensure_account(self, db: Session, item_id: int, plaid_account_id: str) -> Account:
         account = db.query(Account).filter(Account.plaid_account_id == plaid_account_id).first()

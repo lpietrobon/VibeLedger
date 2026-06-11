@@ -4,6 +4,8 @@ The project has no migration framework; Base.metadata.create_all handles new
 tables but cannot add columns to existing tables. Run on startup after
 create_all to keep long-lived single-user DBs in sync without a full drop.
 """
+from datetime import date
+
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
@@ -20,6 +22,29 @@ def _has_index(engine: Engine, table: str, index_name: str) -> bool:
     if table not in insp.get_table_names():
         return False
     return index_name in {idx["name"] for idx in insp.get_indexes(table)}
+
+
+def _backfill_txn_hashes(engine: Engine) -> None:
+    from app.services.txn_fingerprint import compute_txn_hash
+
+    with engine.begin() as conn:
+        rows = conn.execute(text(
+            "SELECT t.id, t.date, t.amount, t.name, a.mask "
+            "FROM transactions t "
+            "LEFT JOIN accounts a ON a.id = t.account_id "
+            "ORDER BY t.id"
+        )).fetchall()
+
+        seen: dict[str, int] = {}
+        for row in rows:
+            txn_date = row.date if isinstance(row.date, date) else date.fromisoformat(row.date)
+            h = compute_txn_hash(row.mask, txn_date, row.amount, row.name)
+            occurrence = seen.get(h, 0)
+            seen[h] = occurrence + 1
+            conn.execute(
+                text("UPDATE transactions SET txn_hash = :h, txn_occurrence = :occ WHERE id = :id"),
+                {"h": h, "occ": occurrence, "id": row.id},
+            )
 
 
 def apply_patches(engine: Engine) -> None:
@@ -63,6 +88,31 @@ def apply_patches(engine: Engine) -> None:
             conn.execute(text(
                 "ALTER TABLE accounts ADD COLUMN nickname VARCHAR(255)"
             ))
+
+    if not _has_column(engine, "transactions", "txn_hash"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE transactions ADD COLUMN txn_hash VARCHAR(16)"
+            ))
+
+    if not _has_column(engine, "transactions", "txn_occurrence"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE transactions ADD COLUMN txn_occurrence INTEGER"
+            ))
+
+    if not _has_index(engine, "transactions", "ix_transactions_txn_hash"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX ix_transactions_txn_hash ON transactions(txn_hash)"
+            ))
+
+    with engine.connect() as conn:
+        unhashed = conn.execute(text(
+            "SELECT COUNT(*) FROM transactions WHERE txn_hash IS NULL"
+        )).scalar()
+    if unhashed:
+        _backfill_txn_hashes(engine)
 
     # effective_transactions view — single canonical source for all COALESCE
     # definitions. Recreated on every startup (safe: views hold no data).

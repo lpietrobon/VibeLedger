@@ -70,6 +70,8 @@ class Transaction(Base):
     plaid_category_primary: Mapped[str | None] = mapped_column(String(128), nullable=True)
     pending: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    txn_hash: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    txn_occurrence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -88,6 +90,30 @@ class TransactionAnnotation(Base):
     is_transfer_override: Mapped[bool] = mapped_column(Boolean, default=False)
     merchant_name_override: Mapped[str | None] = mapped_column(String(255), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AnnotationFingerprint(Base):
+    __tablename__ = "annotation_fingerprints"
+    __table_args__ = (
+        UniqueConstraint("txn_hash", "txn_occurrence", name="uq_annotation_fingerprint"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    txn_hash: Mapped[str] = mapped_column(String(16), index=True)
+    txn_occurrence: Mapped[int] = mapped_column(Integer)
+    account_mask: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    txn_date: Mapped[date] = mapped_column(Date)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    name: Mapped[str] = mapped_column(String(255))
+    user_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    merchant_name_override: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_transfer_override: Mapped[bool] = mapped_column(Boolean, default=False)
+    source_transaction_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"))
+    applied_transaction_id: Mapped[int | None] = mapped_column(ForeignKey("transactions.id"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class CategoryRule(Base):

@@ -19,10 +19,14 @@ from app.db.session import SessionLocal
 from app.services.plaid_client import PlaidClient
 from app.models.models import (
     Account,
+    AccountBalanceSnapshot,
+    AnnotationFingerprint,
     CategoryDecisionEvent,
     CategoryRule,
     ConnectSession,
     Item,
+    SyncRun,
+    SyncState,
     Transaction,
     TransactionAnnotation,
     TransferPair,
@@ -38,7 +42,7 @@ from app.schemas.plaid import (
     PatchAccountRequest,
     PatchAnnotationRequest,
 )
-from app.services.security import encrypt_token
+from app.services.security import decrypt_token, encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
@@ -242,6 +246,47 @@ def connect_session_status(session_token: str, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/items/{item_id}/remove")
+def remove_item(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="item not found")
+
+    try:
+        access_token = decrypt_token(item.access_token_encrypted)
+        PlaidClient().remove_item(access_token)
+    except Exception:
+        logger.exception("Plaid item_remove failed for item %d; continuing with local cleanup", item_id)
+
+    account_ids = [a.id for a in db.query(Account.id).filter(Account.item_id == item_id)]
+    txn_ids = [t.id for t in db.query(Transaction.id).filter(Transaction.item_id == item_id)]
+
+    if txn_ids:
+        db.query(TransferPair).filter(
+            or_(TransferPair.txn_out_id.in_(txn_ids), TransferPair.txn_in_id.in_(txn_ids))
+        ).delete(synchronize_session=False)
+        db.query(CategoryDecisionEvent).filter(CategoryDecisionEvent.transaction_id.in_(txn_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(TransactionAnnotation).filter(TransactionAnnotation.transaction_id.in_(txn_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Transaction).filter(Transaction.item_id == item_id).delete(synchronize_session=False)
+
+    if account_ids:
+        db.query(AccountBalanceSnapshot).filter(AccountBalanceSnapshot.account_id.in_(account_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Account).filter(Account.item_id == item_id).delete(synchronize_session=False)
+
+    db.query(SyncRun).filter(SyncRun.item_id == item_id).delete(synchronize_session=False)
+    db.query(SyncState).filter(SyncState.item_id == item_id).delete(synchronize_session=False)
+    db.delete(item)
+    db.commit()
+
+    return {"status": "removed", "item_id": item_id}
+
+
 @router.post("/sync/item/{item_id}/historical")
 def sync_item_historical(
     item_id: int,
@@ -385,8 +430,71 @@ def patch_annotation(transaction_id: int, payload: PatchAnnotationRequest, db: S
     if payload.reviewed is not None:
         annotation.reviewed = payload.reviewed
 
+    if tx.txn_hash is not None:
+        account = db.query(Account).filter(Account.id == tx.account_id).first()
+        fingerprint = (
+            db.query(AnnotationFingerprint)
+            .filter(
+                AnnotationFingerprint.txn_hash == tx.txn_hash,
+                AnnotationFingerprint.txn_occurrence == tx.txn_occurrence,
+            )
+            .first()
+        )
+        if not fingerprint:
+            fingerprint = AnnotationFingerprint(
+                txn_hash=tx.txn_hash,
+                txn_occurrence=tx.txn_occurrence,
+                account_mask=account.mask if account else None,
+                txn_date=tx.date,
+                amount=tx.amount,
+                name=tx.name,
+                source_transaction_id=tx.id,
+            )
+            db.add(fingerprint)
+
+        fingerprint.user_category = annotation.user_category
+        fingerprint.merchant_name_override = annotation.merchant_name_override
+        fingerprint.notes = annotation.notes
+        fingerprint.reviewed = annotation.reviewed
+        fingerprint.is_transfer_override = annotation.is_transfer_override
+        fingerprint.source_transaction_id = tx.id
+        fingerprint.applied_transaction_id = tx.id
+        fingerprint.applied_at = utcnow()
+
     db.commit()
     return {"status": "ok", "transaction_id": transaction_id}
+
+
+@router.get("/annotations/fingerprints")
+def list_annotation_fingerprints(
+    unapplied_only: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    q = db.query(AnnotationFingerprint)
+    if unapplied_only:
+        q = q.filter(AnnotationFingerprint.applied_transaction_id.is_(None))
+    rows = q.order_by(AnnotationFingerprint.updated_at.desc()).all()
+    return [
+        {
+            "id": f.id,
+            "txn_hash": f.txn_hash,
+            "txn_occurrence": f.txn_occurrence,
+            "account_mask": f.account_mask,
+            "txn_date": f.txn_date,
+            "amount": f.amount,
+            "name": f.name,
+            "user_category": f.user_category,
+            "merchant_name_override": f.merchant_name_override,
+            "notes": f.notes,
+            "reviewed": f.reviewed,
+            "is_transfer_override": f.is_transfer_override,
+            "source_transaction_id": f.source_transaction_id,
+            "applied_transaction_id": f.applied_transaction_id,
+            "updated_at": f.updated_at,
+            "applied_at": f.applied_at,
+        }
+        for f in rows
+    ]
 
 
 @router.patch("/accounts/{account_id}")

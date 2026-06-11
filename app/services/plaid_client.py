@@ -50,6 +50,7 @@ class PlaidClient:
         from plaid.model.country_code import CountryCode
         from plaid.model.link_token_create_request import LinkTokenCreateRequest
         from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+        from plaid.model.link_token_transactions import LinkTokenTransactions
         from plaid.model.products import Products
 
         products = [Products(p.strip()) for p in settings.plaid_products.split(",") if p.strip()]
@@ -64,6 +65,11 @@ class PlaidClient:
         }
         if settings.plaid_redirect_uri:
             req_kwargs["redirect_uri"] = settings.plaid_redirect_uri
+        if Products("transactions") in products:
+            # Request the maximum history Plaid allows (730 days / 2 years).
+            # Only takes effect for newly-created items; cannot be changed
+            # retroactively for an item that's already linked.
+            req_kwargs["transactions"] = LinkTokenTransactions(days_requested=730)
 
         request = LinkTokenCreateRequest(**req_kwargs)
         response = self._client.link_token_create(request)
@@ -218,6 +224,15 @@ class PlaidClient:
             offset += count
 
         return all_transactions
+
+    def remove_item(self, access_token: str) -> None:
+        if self._mock:
+            return
+
+        from plaid.model.item_remove_request import ItemRemoveRequest
+
+        request = ItemRemoveRequest(access_token=access_token)
+        self._client.item_remove(request)
 
     @staticmethod
     def _normalize_txn(t: dict[str, Any]) -> dict[str, Any]:

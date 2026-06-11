@@ -2,7 +2,16 @@ from datetime import timedelta
 
 from app.core.time import utcnow
 from app.db.session import SessionLocal
-from app.models.models import AccountBalanceSnapshot, Item, SyncRun, SyncState, Transaction
+from app.models.models import (
+    Account,
+    AccountBalanceSnapshot,
+    AnnotationFingerprint,
+    Item,
+    SyncRun,
+    SyncState,
+    Transaction,
+    TransactionAnnotation,
+)
 from app.services.security import encrypt_token
 from app.services.sync_service import SyncService
 
@@ -303,6 +312,127 @@ def test_stale_run_recovery():
         recovered = db.query(SyncRun).filter(SyncRun.id == stale_run_id).first()
         assert recovered.status == "error"
         assert "stale" in recovered.error_summary
+
+
+class RelinkPlaidClient:
+    """Returns the same single transaction every sync_item call (simulates a fresh item re-link)."""
+
+    def get_accounts(self, _access_token):
+        return [
+            {
+                "account_id": "acct-relink",
+                "name": "Checking",
+                "official_name": None,
+                "mask": "4321",
+                "type": "depository",
+                "subtype": "checking",
+                "current_balance": 100.0,
+                "available_balance": 100.0,
+                "iso_currency_code": "USD",
+                "limit": None,
+            }
+        ]
+
+    def sync_transactions(self, _access_token, cursor):
+        return {
+            "added": [
+                {
+                    "transaction_id": "txn-original",
+                    "account_id": "acct-relink",
+                    "date": "2026-04-10",
+                    "amount": 42.50,
+                    "name": "Some Store",
+                    "merchant_name": "Some Store",
+                    "plaid_category_primary": "GENERAL_MERCHANDISE",
+                    "pending": False,
+                }
+            ],
+            "modified": [],
+            "removed": [],
+            "next_cursor": "cursor-1",
+        }
+
+
+class RelinkPlaidClientNewId(RelinkPlaidClient):
+    """Same underlying transaction, but with a new plaid_transaction_id (simulates re-link)."""
+
+    def sync_transactions(self, _access_token, cursor):
+        data = super().sync_transactions(_access_token, cursor)
+        data["added"][0]["transaction_id"] = "txn-relinked"
+        return data
+
+
+def test_annotation_survives_item_removal_and_resync():
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-relink", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        # Initial sync brings in the transaction.
+        SyncService(client=RelinkPlaidClient()).sync_item(db, item.id)
+
+        tx = db.query(Transaction).filter(Transaction.plaid_transaction_id == "txn-original").first()
+        assert tx is not None
+        assert tx.txn_hash is not None
+        assert tx.txn_occurrence == 0
+
+        # Manually annotate it.
+        annotation = TransactionAnnotation(
+            transaction_id=tx.id,
+            user_category="Shopping/Manual",
+            notes="my note",
+            reviewed=True,
+        )
+        db.add(annotation)
+        db.commit()
+
+        # Upsert the fingerprint as the PATCH endpoint would.
+        fingerprint = AnnotationFingerprint(
+            txn_hash=tx.txn_hash,
+            txn_occurrence=tx.txn_occurrence,
+            account_mask="4321",
+            txn_date=tx.date,
+            amount=tx.amount,
+            name=tx.name,
+            user_category="Shopping/Manual",
+            notes="my note",
+            reviewed=True,
+            source_transaction_id=tx.id,
+            applied_transaction_id=tx.id,
+            applied_at=utcnow(),
+        )
+        db.add(fingerprint)
+        db.commit()
+
+        # Simulate item removal: delete the transaction and its annotation,
+        # but the annotation_fingerprints row survives.
+        db.query(TransactionAnnotation).filter(TransactionAnnotation.transaction_id == tx.id).delete()
+        db.query(Transaction).filter(Transaction.id == tx.id).delete()
+        db.query(Account).filter(Account.item_id == item.id).delete()
+        db.commit()
+
+        # Re-sync, simulating the re-linked item producing the same underlying
+        # transaction with a new plaid_transaction_id.
+        SyncService(client=RelinkPlaidClientNewId()).sync_item(db, item.id)
+
+        new_tx = db.query(Transaction).filter(Transaction.plaid_transaction_id == "txn-relinked").first()
+        assert new_tx is not None
+        assert new_tx.txn_hash == tx.txn_hash
+        assert new_tx.txn_occurrence == 0
+
+        new_annotation = (
+            db.query(TransactionAnnotation)
+            .filter(TransactionAnnotation.transaction_id == new_tx.id)
+            .first()
+        )
+        assert new_annotation is not None
+        assert new_annotation.user_category == "Shopping/Manual"
+        assert new_annotation.notes == "my note"
+        assert new_annotation.reviewed is True
+
+        refreshed_fingerprint = db.query(AnnotationFingerprint).filter(AnnotationFingerprint.id == fingerprint.id).first()
+        assert refreshed_fingerprint.applied_transaction_id == new_tx.id
 
 
 def test_balance_snapshots_dedup_within_same_day():
