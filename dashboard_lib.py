@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -192,42 +193,51 @@ def apply_filters(df: pd.DataFrame, start_d, end_d, accounts, exclude_transfers:
     return f
 
 
-def period_bounds(granularity: str, today) -> dict:
-    """Return current/previous period start/end dates for 'monthly' or 'yearly' granularity.
+def period_bounds_n(granularity: str, today, n_periods: int = 4) -> list[dict]:
+    """Return n_periods period dicts for 'monthly' or 'yearly' granularity, most recent first.
 
-    cur_len/prev_len are the day-of-period (day-of-month or day-of-year) for the
-    last day of each period, used as the x-axis range for cumulative charts.
+    Each dict has "start", "end", "len" (day-of-period of the last day, used as
+    the x-axis range for cumulative charts) and "label" (e.g. "Jun 2026" or "2026").
+    The current (i=0) period runs up to `today`; earlier periods run to their
+    natural end (end of month / end of year).
     """
     import calendar
-    from datetime import date, timedelta
 
+    periods = []
     if granularity == "yearly":
-        cur_start = date(today.year, 1, 1)
-        cur_end = today
-        prev_start = date(today.year - 1, 1, 1)
-        try:
-            prev_end = date(today.year - 1, today.month, today.day)
-        except ValueError:
-            # today is Feb 29 and the previous year is not a leap year
-            prev_end = date(today.year - 1, 2, 28)
-        cur_len = cur_end.timetuple().tm_yday
-        prev_len = 366 if calendar.isleap(prev_start.year) else 365
+        for i in range(n_periods):
+            year = today.year - i
+            start = date(year, 1, 1)
+            if i == 0:
+                end = today
+                length = end.timetuple().tm_yday
+            else:
+                end = date(year, 12, 31)
+                length = 366 if calendar.isleap(year) else 365
+            periods.append({"start": start, "end": end, "len": length, "label": str(year)})
     else:
-        cur_start = today.replace(day=1)
-        cur_end = today
-        prev_end = cur_start - timedelta(days=1)
-        prev_start = prev_end.replace(day=1)
-        cur_len = cur_end.day
-        prev_len = calendar.monthrange(prev_start.year, prev_start.month)[1]
-
-    return {
-        "cur_start": cur_start,
-        "cur_end": cur_end,
-        "prev_start": prev_start,
-        "prev_end": prev_end,
-        "cur_len": cur_len,
-        "prev_len": prev_len,
-    }
+        anchor_year, anchor_month = today.year, today.month
+        for i in range(n_periods):
+            month = anchor_month - i
+            year = anchor_year
+            while month <= 0:
+                month += 12
+                year -= 1
+            start = date(year, month, 1)
+            days_in_month = calendar.monthrange(year, month)[1]
+            if i == 0:
+                end = today
+                length = today.day
+            else:
+                end = date(year, month, days_in_month)
+                length = days_in_month
+            periods.append({
+                "start": start,
+                "end": end,
+                "len": length,
+                "label": f"{calendar.month_abbr[month]} {year}",
+            })
+    return periods
 
 
 def cumulative_series(period_df: pd.DataFrame, granularity: str, max_x: int) -> pd.DataFrame:

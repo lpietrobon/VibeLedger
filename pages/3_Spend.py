@@ -14,7 +14,7 @@ from dashboard_lib import (
     apply_filters,
     cumulative_series,
     load_transactions,
-    period_bounds,
+    period_bounds_n,
     render_annotation_editor,
     sidebar_filters,
 )
@@ -125,78 +125,44 @@ def _on_cat_omnibar_change():
 
 _today = date.today()
 
-st.text_input(
-    "Filter",
-    label_visibility="collapsed",
-    placeholder=_HINT,
-    key=f"cat_omnibar_{st.session_state.cat_omnibar_counter}",
-    on_change=_on_cat_omnibar_change,
-)
-
-active = st.session_state.cat_filters
-if active:
-    labels = [flt["label"] for flt in active]
-    pills_col, clear_col = st.columns([11, 1])
-    with pills_col:
-        remaining = st.pills(
-            "Active filters",
-            options=labels,
-            selection_mode="multi",
-            default=labels,
-            label_visibility="collapsed",
-            key="cat_pills",
-        )
-    with clear_col:
-        if st.button("✕ all", key="cat_chip_clear", use_container_width=True):
-            st.session_state.cat_filters.clear()
-            st.rerun()
-
-    remaining_set = set(remaining or [])
-    if remaining_set != set(labels):
-        st.session_state.cat_filters = [flt for flt in active if flt["label"] in remaining_set]
-        st.rerun()
-
 # ── Apply filters ──────────────────────────────────────────────────────────────
 f = _cat_apply_omnibar(f_base)
-spend = f[f["amount"] > 0].copy()
-
-st.metric("Spend", f"${spend['amount'].sum():,.2f}")
+f_period = _cat_apply_omnibar(f_base, skip_dates=True)
+spend_period = f_period[f_period["amount"] > 0].copy()
 
 # ── Spending trends ──────────────────────────────────────────────────────────
 st.subheader("Spending trends")
 granularity = st.radio("Granularity", ["Monthly", "Yearly"], horizontal=True, key="cat_granularity")
 gran = "monthly" if granularity == "Monthly" else "yearly"
-cur_label = "This month" if gran == "monthly" else "This year"
-prev_label = "Last month" if gran == "monthly" else "Last year"
 
-bounds = period_bounds(gran, _today)
+periods = period_bounds_n(gran, _today, n_periods=4)
 
-f_period = _cat_apply_omnibar(f_base, skip_dates=True)
-spend_period = f_period[f_period["amount"] > 0].copy()
+period_spends = []
+for p in periods:
+    p_spend = spend_period[(spend_period["date"] >= p["start"]) & (spend_period["date"] <= p["end"])]
+    period_spends.append(p_spend)
 
-cur_spend = spend_period[
-    (spend_period["date"] >= bounds["cur_start"]) & (spend_period["date"] <= bounds["cur_end"])
-]
-prev_spend = spend_period[
-    (spend_period["date"] >= bounds["prev_start"]) & (spend_period["date"] <= bounds["prev_end"])
-]
+cum_frames = []
+for p, p_spend in zip(periods, period_spends):
+    cum = cumulative_series(p_spend, gran, p["len"])
+    cum["series"] = p["label"]
+    cum_frames.append(cum)
 
-this_cum = cumulative_series(cur_spend, gran, bounds["cur_len"])
-this_cum["series"] = cur_label
-last_cum = cumulative_series(prev_spend, gran, bounds["prev_len"])
-last_cum["series"] = prev_label
-
-combined = pd.concat([this_cum, last_cum], ignore_index=True)
+combined = pd.concat(cum_frames, ignore_index=True)
+labels = [p["label"] for p in periods]
 x_title = "Day of month" if gran == "monthly" else "Day of year"
 fig3 = px.line(
     combined, x="x", y="cumulative", color="series",
     line_dash="series",
-    line_dash_map={cur_label: "solid", prev_label: "dot"},
-    title=f"Cumulative spend: {cur_label.lower()} vs {prev_label.lower()}",
+    line_dash_map={labels[0]: "solid", **{lbl: "dot" for lbl in labels[1:]}},
+    category_orders={"series": labels},
+    title="Cumulative spend",
 )
 fig3.update_layout(xaxis_title=x_title, yaxis_title="Cumulative spend ($)", legend_title=None)
 st.plotly_chart(fig3, use_container_width=True)
 
+cur_spend, prev_spend = period_spends[0], period_spends[1]
+cur_label, prev_label = periods[0]["label"], periods[1]["label"]
 m = pd.concat([cur_spend.assign(bucket=cur_label), prev_spend.assign(bucket=prev_label)], ignore_index=True)
 if not m.empty:
     cmp = m.groupby(["effective_category", "bucket"], as_index=False)["amount"].sum()
@@ -222,7 +188,39 @@ else:
 st.divider()
 
 # ── Transaction samples ───────────────────────────────────────────────────────
-st.subheader("Transaction samples by category")
+st.subheader("Transaction samples")
+
+st.text_input(
+    "Filter",
+    label_visibility="collapsed",
+    placeholder=_HINT,
+    key=f"cat_omnibar_{st.session_state.cat_omnibar_counter}",
+    on_change=_on_cat_omnibar_change,
+)
+
+active = st.session_state.cat_filters
+if active:
+    labels_active = [flt["label"] for flt in active]
+    pills_col, clear_col = st.columns([11, 1])
+    with pills_col:
+        remaining = st.pills(
+            "Active filters",
+            options=labels_active,
+            selection_mode="multi",
+            default=labels_active,
+            label_visibility="collapsed",
+            key="cat_pills",
+        )
+    with clear_col:
+        if st.button("✕ all", key="cat_chip_clear", use_container_width=True):
+            st.session_state.cat_filters.clear()
+            st.rerun()
+
+    remaining_set = set(remaining or [])
+    if remaining_set != set(labels_active):
+        st.session_state.cat_filters = [flt for flt in active if flt["label"] in remaining_set]
+        st.rerun()
+
 if not f.empty:
     cat_pick = st.selectbox("Pick a category", sorted(f["effective_category"].fillna("uncategorized").unique().tolist()))
     samples = f[f["effective_category"].fillna("uncategorized") == cat_pick].sort_values("date", ascending=False).head(200)
