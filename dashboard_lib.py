@@ -156,8 +156,6 @@ def load_transfer_pairs(db_path: str) -> pd.DataFrame:
 
 def sidebar_filters(df: pd.DataFrame):
     """Shared sidebar: DB path, date range, account multiselect, transfer toggle."""
-    from datetime import date, timedelta
-
     st.sidebar.header("Filters")
     db_path = st.sidebar.text_input("DB path", DEFAULT_DB, key="db_path")
 
@@ -165,10 +163,9 @@ def sidebar_filters(df: pd.DataFrame):
         return db_path, None, None, [], True
 
     min_d, max_d = df["date"].min(), df["date"].max()
-    def_start = max(min_d, date.today() - timedelta(days=90))
     start_d, end_d = st.sidebar.date_input(
         "Date range",
-        (def_start, max_d),
+        (min_d, max_d),
         min_value=min_d,
         max_value=max_d,
         key="date_range",
