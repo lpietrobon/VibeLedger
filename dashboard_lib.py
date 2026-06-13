@@ -155,12 +155,19 @@ def load_transfer_pairs(db_path: str) -> pd.DataFrame:
 
 
 def sidebar_filters(df: pd.DataFrame):
-    """Shared sidebar: DB path, date range, account multiselect, transfer toggle."""
+    """Shared sidebar: data filters (exclude transfers, date range, accounts).
+
+    DB path is a technical/connection setting, not a data filter — it's
+    rendered separately by tech_sidebar(), which pages call after all
+    filters (including page-specific ones) to keep it at the bottom.
+    """
     st.sidebar.header("Filters")
-    db_path = st.sidebar.text_input("DB path", DEFAULT_DB, key="db_path")
+    db_path = st.session_state.get("db_path", DEFAULT_DB)
 
     if df.empty:
         return db_path, None, None, [], True
+
+    exclude_transfers = st.sidebar.checkbox("Exclude transfers", value=True, key="excl_xfer")
 
     min_d, max_d = df["date"].min(), df["date"].max()
     start_d, end_d = st.sidebar.date_input(
@@ -174,8 +181,20 @@ def sidebar_filters(df: pd.DataFrame):
     acct_col = "effective_account_name" if "effective_account_name" in df.columns else "account_name"
     accounts = sorted(df[acct_col].fillna("Unknown").unique().tolist())
     selected = st.sidebar.multiselect("Accounts", accounts, default=accounts, key="accounts")
-    exclude_transfers = st.sidebar.checkbox("Exclude transfers", value=True, key="excl_xfer")
+
     return db_path, start_d, end_d, selected, exclude_transfers
+
+
+def tech_sidebar(show_api: bool = True) -> tuple[str, str | None]:
+    """Render DB path (and optionally API base) at the bottom of the sidebar.
+
+    Call this last, after sidebar_filters() and any page-specific filters,
+    so connection settings stay separated from data filters.
+    """
+    st.sidebar.divider()
+    db_path = st.sidebar.text_input("DB path", DEFAULT_DB, key="db_path")
+    api_base = st.sidebar.text_input("API base", DEFAULT_API, key="api_base") if show_api else None
+    return db_path, api_base
 
 
 def apply_filters(df: pd.DataFrame, start_d, end_d, accounts, exclude_transfers: bool) -> pd.DataFrame:

@@ -7,12 +7,12 @@ from datetime import date as dt
 import streamlit as st
 
 from dashboard_lib import (
-    DEFAULT_API,
     DEFAULT_DB,
     apply_filters,
     load_transactions,
     render_annotation_editor,
     sidebar_filters,
+    tech_sidebar,
 )
 
 st.set_page_config(page_title="Transactions – VibeLedger", layout="wide")
@@ -26,7 +26,7 @@ except Exception as e:
 
 # Sidebar: shared coarse scope (date range, accounts, transfer toggle)
 db_path, start_d, end_d, accounts, excl_xfer = sidebar_filters(df)
-api_base = st.sidebar.text_input("API base", DEFAULT_API, key="api_base")
+_, api_base = tech_sidebar()
 
 # Apply shared filters → base frame the omnibar further narrows
 f_base = apply_filters(df, start_d, end_d, accounts, excl_xfer)

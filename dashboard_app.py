@@ -7,6 +7,7 @@ from dashboard_lib import (
     load_transactions,
     load_transfer_pairs,
     sidebar_filters,
+    tech_sidebar,
 )
 
 st.set_page_config(page_title="VibeLedger", layout="wide")
@@ -20,6 +21,7 @@ except Exception as e:
     st.stop()
 
 db_path, start_d, end_d, accounts, excl_xfer = sidebar_filters(df)
+db_path, _ = tech_sidebar(show_api=False)
 
 if df.empty:
     st.warning("No transactions in DB yet. Link an account and sync first.")

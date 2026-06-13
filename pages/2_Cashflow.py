@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from dashboard_lib import apply_filters, load_transactions, sidebar_filters
+from dashboard_lib import apply_filters, load_transactions, sidebar_filters, tech_sidebar
 
 st.set_page_config(page_title="Cashflow", layout="wide")
 st.title("Cashflow")
@@ -14,6 +14,7 @@ except Exception:
     df = load_transactions(DEFAULT_DB)
 
 db_path, start_d, end_d, accounts, excl_xfer = sidebar_filters(df)
+tech_sidebar(show_api=False)
 f = apply_filters(df, start_d, end_d, accounts, excl_xfer)
 
 if f.empty:

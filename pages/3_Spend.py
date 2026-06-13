@@ -9,7 +9,6 @@ import plotly.express as px
 import streamlit as st
 
 from dashboard_lib import (
-    DEFAULT_API,
     DEFAULT_DB,
     apply_filters,
     cumulative_series,
@@ -17,6 +16,7 @@ from dashboard_lib import (
     period_bounds_n,
     render_annotation_editor,
     sidebar_filters,
+    tech_sidebar,
 )
 
 st.set_page_config(page_title="Spend", layout="wide")
@@ -29,13 +29,15 @@ except Exception as e:
     st.stop()
 
 db_path, start_d, end_d, accounts, excl_xfer = sidebar_filters(df)
-api_base = st.sidebar.text_input("API base", DEFAULT_API, key="api_base")
 
 if df.empty:
+    tech_sidebar()
     st.stop()
 
 cats = sorted(df["effective_category"].fillna("uncategorized").unique().tolist())
 selected_cats = st.sidebar.multiselect("Categories", cats, default=cats, key="cats")
+
+_, api_base = tech_sidebar()
 
 f_base = apply_filters(df, start_d, end_d, accounts, excl_xfer)
 f_base = f_base[f_base["effective_category"].fillna("uncategorized").isin(selected_cats)]
