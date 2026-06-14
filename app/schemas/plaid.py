@@ -41,6 +41,11 @@ class PatchAccountRequest(BaseModel):
     nickname: str | None = None
 
 
+class TransferCreateRequest(BaseModel):
+    txn_a_id: int
+    txn_b_id: int
+
+
 class CategoryRuleDraft(BaseModel):
     rank: int = 0
     enabled: bool = True

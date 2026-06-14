@@ -33,6 +33,32 @@ class AnnotationLike(Protocol):
     rule_category: str | None
 
 
+# Canonical Plaid-primary -> friendly category map. Single source of truth,
+# consumed by both the SQL `effective_transactions` view (app/db/schema_patches.py)
+# and the API category expressions (app/api/routes.py). Plaid values not listed
+# here pass through unchanged. Keep this in sync nowhere else — both consumers
+# build their CASE/coalesce from this dict.
+PLAID_FRIENDLY_MAP: dict[str, str] = {
+    "FOOD_AND_DRINK": "FOOD/OTHER",
+    "TRANSPORTATION": "TRANSPORT/OTHER",
+    "GENERAL_MERCHANDISE": "SHOPPING/GENERAL",
+    "GENERAL_SERVICES": "SERVICES/GENERAL",
+    "ENTERTAINMENT": "FUN/ENTERTAINMENT",
+    "TRAVEL": "FUN/TRAVEL",
+    "LOAN_PAYMENTS": "FINANCE/LOANS",
+    "RENT_AND_UTILITIES": "HOUSING/RENT_AND_UTILITIES",
+    "MEDICAL": "HEALTH/MEDICAL",
+    "PERSONAL_CARE": "HEALTH/PERSONAL_CARE",
+}
+
+
+def friendly_category(plaid_primary: str | None) -> str | None:
+    """Map a raw Plaid primary category to its friendly name, or pass through."""
+    if plaid_primary is None:
+        return None
+    return PLAID_FRIENDLY_MAP.get(plaid_primary, plaid_primary)
+
+
 @dataclass(frozen=True)
 class CompiledRule:
     id: int
@@ -71,7 +97,7 @@ def _compile_pattern(pattern: str | None, field_name: str, rule_id: int) -> Patt
         return None
 
     try:
-        return re.compile(pattern)
+        return re.compile(pattern, re.IGNORECASE)
     except re.error as exc:  # invalid pattern is rejected upstream
         raise ValueError(f"Invalid {field_name} for rule_id={rule_id}: {exc}") from exc
 
@@ -178,7 +204,7 @@ def resolve_effective_category(
         return CategoryResolution(category=rule_match.category, rule_id=rule_match.rule_id)
 
     if tx.plaid_category_primary:
-        return CategoryResolution(category=tx.plaid_category_primary, rule_id=None)
+        return CategoryResolution(category=friendly_category(tx.plaid_category_primary), rule_id=None)
 
     return CategoryResolution(category="uncategorized", rule_id=None)
 

@@ -31,7 +31,11 @@ class SyncService:
     def __init__(self, client: PlaidClient | None = None):
         self.client = client or PlaidClient()
 
-    def sync_item(self, db: Session, item_id: int) -> dict:
+    def _guard_in_progress(self, db: Session, item_id: int) -> Item:
+        """Resolve the item, recover stale (>30min) runs, and reject concurrent syncs.
+
+        Shared pre-flight for both ongoing and historical sync. Returns the Item.
+        """
         item = db.query(Item).filter(Item.id == item_id).first()
         if not item:
             raise ValueError("item not found")
@@ -58,6 +62,11 @@ class SyncService:
         )
         if in_progress:
             raise SyncInProgressError("sync already running for this item")
+
+        return item
+
+    def sync_item(self, db: Session, item_id: int) -> dict:
+        item = self._guard_in_progress(db, item_id)
 
         state = db.query(SyncState).filter(SyncState.item_id == item_id).first()
         if not state:
@@ -119,32 +128,7 @@ class SyncService:
         }
 
     def sync_item_historical(self, db: Session, item_id: int, start_date: date, end_date: date) -> dict:
-        item = db.query(Item).filter(Item.id == item_id).first()
-        if not item:
-            raise ValueError("item not found")
-
-        # Recover stale runs (stuck > 30 minutes)
-        stale_cutoff = utcnow() - timedelta(minutes=30)
-        stale_runs = (
-            db.query(SyncRun)
-            .filter(SyncRun.item_id == item_id, SyncRun.status == "running", SyncRun.started_at < stale_cutoff)
-            .all()
-        )
-        for stale in stale_runs:
-            stale.status = "error"
-            stale.finished_at = utcnow()
-            stale.error_summary = "marked stale: exceeded 30-minute timeout"
-            logger.warning("Marked stale SyncRun %d for item %d", stale.id, item_id)
-        if stale_runs:
-            db.flush()
-
-        in_progress = (
-            db.query(SyncRun)
-            .filter(SyncRun.item_id == item_id, SyncRun.status == "running")
-            .first()
-        )
-        if in_progress:
-            raise SyncInProgressError("sync already running for this item")
+        item = self._guard_in_progress(db, item_id)
 
         run = SyncRun(item_id=item_id, status="running", is_historical=True)
         db.add(run)

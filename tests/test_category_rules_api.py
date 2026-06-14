@@ -224,6 +224,31 @@ def test_apply_batch_performance_sanity_on_fixture_dataset():
     assert payload["run_summary"]["duration_ms"] < 3000
 
 
+def test_rule_min_amount_matches_negative_income_via_absolute_value():
+    # Income is negative under Plaid's sign convention; a min_amount rule should
+    # still match it because matching is on absolute value.
+    tx_income = _seed_tx("absamt", "Checking", "tx-absamt", -2000.0, "Paycheck", date(2026, 4, 15), "INCOME")
+
+    with TestClient(app) as client:
+        create_resp = client.post(
+            "/category-rules",
+            json={"rank": 1, "enabled": True, "min_amount": "50", "assigned_category": "big-ticket"},
+            headers=AUTH_HEADERS,
+        )
+        assert create_resp.status_code == 200
+
+        preview = client.post(
+            "/category-rules/preview",
+            json={"scope": {"start_date": "2026-04-01", "end_date": "2026-04-30"}},
+            headers=AUTH_HEADERS,
+        )
+        assert preview.status_code == 200
+        body = preview.json()
+        assert body["would_change_count"] == 1
+        assert body["samples"][0]["transaction_id"] == tx_income
+        assert body["samples"][0]["simulated_effective_category"] == "big-ticket"
+
+
 def test_recompute_all_endpoint():
     _seed_tx("recompute", "Checking", "tx-recompute", 15.00, "Cafe Latte", date(2026, 4, 4))
     with TestClient(app) as client:

@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
 from app.core.time import utcnow
 from app.db.session import SessionLocal
@@ -13,7 +13,8 @@ from app.models.models import (
     TransactionAnnotation,
 )
 from app.services.security import encrypt_token
-from app.services.sync_service import SyncService
+from app.services.sync_service import SyncInProgressError, SyncService
+from app.services.txn_fingerprint import compute_txn_hash
 
 
 class FakePlaidClient:
@@ -433,6 +434,123 @@ def test_annotation_survives_item_removal_and_resync():
 
         refreshed_fingerprint = db.query(AnnotationFingerprint).filter(AnnotationFingerprint.id == fingerprint.id).first()
         assert refreshed_fingerprint.applied_transaction_id == new_tx.id
+
+
+class FakeHistoricalClient:
+    """Client exposing the get_historical_transactions path used by sync_item_historical."""
+
+    def get_accounts(self, _access_token):
+        return [
+            {
+                "account_id": "acct-100",
+                "name": "Checking",
+                "official_name": None,
+                "mask": "1234",
+                "type": "depository",
+                "subtype": "checking",
+                "current_balance": 500.0,
+                "available_balance": 450.0,
+                "iso_currency_code": "USD",
+                "limit": None,
+            }
+        ]
+
+    def get_historical_transactions(self, _access_token, start_date, end_date):
+        return [
+            {
+                "transaction_id": "txn-hist-1",
+                "account_id": "acct-100",
+                "date": "2026-01-15",
+                "amount": 50.0,
+                "name": "Old Shop",
+                "merchant_name": "Old Shop",
+                "plaid_category_primary": "GENERAL_MERCHANDISE",
+                "pending": False,
+            }
+        ]
+
+
+def test_historical_sync_adds_without_advancing_sync_state():
+    service = SyncService(client=FakeHistoricalClient())
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-hist", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        result = service.sync_item_historical(db, item.id, date(2026, 1, 1), date(2026, 1, 31))
+        assert result == {"status": "success", "added": 1, "modified": 0, "removed": 0}
+
+        tx = db.query(Transaction).filter(Transaction.plaid_transaction_id == "txn-hist-1").first()
+        assert tx is not None
+        assert float(tx.amount) == 50.0
+
+        # Historical sync is additive: it does NOT create/advance ongoing SyncState.
+        assert db.query(SyncState).filter(SyncState.item_id == item.id).first() is None
+
+        run = db.query(SyncRun).filter(SyncRun.item_id == item.id).first()
+        assert run.status == "success"
+        assert run.is_historical is True
+        assert run.added_count == 1
+
+
+def test_historical_sync_rejects_concurrent_run():
+    service = SyncService(client=FakeHistoricalClient())
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-hist-busy", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        # A fresh (non-stale) running sync blocks a new historical sync.
+        db.add(SyncRun(item_id=item.id, status="running", started_at=utcnow()))
+        db.commit()
+
+        try:
+            service.sync_item_historical(db, item.id, date(2026, 1, 1), date(2026, 1, 31))
+        except SyncInProgressError:
+            pass
+        else:
+            raise AssertionError("Expected SyncInProgressError")
+
+
+def test_historical_sync_reapplies_annotation_fingerprint():
+    service = SyncService(client=FakeHistoricalClient())
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-hist-fp", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        # Pre-seed a saved fingerprint matching the historical transaction's content hash.
+        txn_hash = compute_txn_hash("1234", date(2026, 1, 15), 50.0, "Old Shop")
+        db.add(
+            AnnotationFingerprint(
+                txn_hash=txn_hash,
+                txn_occurrence=0,
+                account_mask="1234",
+                txn_date=date(2026, 1, 15),
+                amount=50.0,
+                name="Old Shop",
+                user_category="Shopping/Manual",
+                notes="kept across relink",
+                reviewed=True,
+                source_transaction_id=1,
+            )
+        )
+        db.commit()
+
+        service.sync_item_historical(db, item.id, date(2026, 1, 1), date(2026, 1, 31))
+
+        tx = db.query(Transaction).filter(Transaction.plaid_transaction_id == "txn-hist-1").first()
+        annotation = (
+            db.query(TransactionAnnotation)
+            .filter(TransactionAnnotation.transaction_id == tx.id)
+            .first()
+        )
+        assert annotation is not None
+        assert annotation.user_category == "Shopping/Manual"
+        assert annotation.reviewed is True
 
 
 def test_balance_snapshots_dedup_within_same_day():

@@ -1,7 +1,7 @@
 from datetime import date
-from decimal import Decimal
 import re
 from pathlib import Path
+from types import SimpleNamespace
 import logging
 import json
 import os
@@ -10,7 +10,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from sqlalchemy import case, func, or_, text
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -41,11 +41,18 @@ from app.schemas.plaid import (
     CreateConnectSessionRequest,
     PatchAccountRequest,
     PatchAnnotationRequest,
+    TransferCreateRequest,
 )
 from app.services.security import decrypt_token, encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
+from app.services.category_resolver import (
+    PLAID_FRIENDLY_MAP,
+    compile_rules,
+    find_first_matching_rule,
+    resolve_effective_category,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -53,11 +60,21 @@ logger = logging.getLogger(__name__)
 _CONNECT_TUNNEL_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "connect_funnel.sh"
 
 
+def _friendly_plaid_case():
+    """SQL CASE mapping raw Plaid primary -> friendly category, built from the
+    shared PLAID_FRIENDLY_MAP so the API matches the effective_transactions view."""
+    whens = [
+        (Transaction.plaid_category_primary == plaid, friendly)
+        for plaid, friendly in PLAID_FRIENDLY_MAP.items()
+    ]
+    return case(*whens, else_=Transaction.plaid_category_primary)
+
+
 def _effective_category_expr():
     return func.coalesce(
         TransactionAnnotation.user_category,
         TransactionAnnotation.rule_category,
-        Transaction.plaid_category_primary,
+        _friendly_plaid_case(),
         "uncategorized",
     )
 
@@ -533,38 +550,21 @@ def _compiled_regex(pattern: str | None):
         raise HTTPException(status_code=400, detail=f"invalid regex '{pattern}': {e}")
 
 
-def _tx_matches_rule(tx: Transaction, account: Account | None, compiled_rule: dict) -> bool:
-    desc_re = compiled_rule["description_re"]
-    account_re = compiled_rule["account_re"]
-
-    tx_desc = tx.name or ""
-    account_name = (account.name if account else "") or ""
-
-    amount = Decimal(tx.amount)
-    if compiled_rule["min_amount"] is not None and amount < compiled_rule["min_amount"]:
-        return False
-    if compiled_rule["max_amount"] is not None and amount > compiled_rule["max_amount"]:
-        return False
-
-    if account_re and (not account_name or not account_re.search(account_name)):
-        return False
-    if desc_re and (not tx_desc or not desc_re.search(tx_desc)):
-        return False
-    return True
-
-
-def _compile_rule(rule: CategoryRule | dict) -> dict:
-    get = (lambda k: getattr(rule, k)) if not isinstance(rule, dict) else (lambda k: rule.get(k))
-    return {
-        "id": get("id"),
-        "rank": int(get("rank") or 0),
-        "enabled": bool(get("enabled")),
-        "description_re": _compiled_regex(get("description_regex")),
-        "account_re": _compiled_regex(get("account_name_regex")),
-        "min_amount": Decimal(get("min_amount")) if get("min_amount") is not None else None,
-        "max_amount": Decimal(get("max_amount")) if get("max_amount") is not None else None,
-        "assigned_category": get("assigned_category"),
-    }
+def _rule_like(rule):
+    """Adapt a rule dict (preview drafts) to the attribute-based RuleLike the
+    category_resolver expects. ORM CategoryRule instances pass through unchanged."""
+    if isinstance(rule, dict):
+        return SimpleNamespace(
+            id=rule.get("id"),
+            rank=rule.get("rank") or 0,
+            enabled=bool(rule.get("enabled", True)),
+            description_regex=rule.get("description_regex"),
+            account_name_regex=rule.get("account_name_regex"),
+            min_amount=rule.get("min_amount"),
+            max_amount=rule.get("max_amount"),
+            assigned_category=rule.get("assigned_category"),
+        )
+    return rule
 
 
 def _scoped_transactions_query(db: Session, scope):
@@ -605,32 +605,16 @@ def _iter_scoped_transaction_batches(db: Session, scope, batch_size: int):
         yield batch
 
 
-def _effective_category(annotation: TransactionAnnotation | None, fallback: str | None) -> str:
-    if annotation and annotation.user_category:
-        return annotation.user_category
-    if annotation and annotation.rule_category:
-        return annotation.rule_category
-    return fallback or "uncategorized"
+def _current_effective(tx, annotation) -> str:
+    """Effective category from the *stored* state (existing annotation), no re-evaluation."""
+    return resolve_effective_category(tx, annotation, rule_match=None).category
 
 
-def _simulate_rule_stack(rows, compiled_rules: list[dict]):
-    simulated = []
-    for tx, account, annotation in rows:
-        matched_rule = next((r for r in compiled_rules if r["enabled"] and _tx_matches_rule(tx, account, r)), None)
-        current = _effective_category(annotation, tx.plaid_category_primary)
-        simulated_effective = annotation.user_category if annotation and annotation.user_category else (
-            matched_rule["assigned_category"] if matched_rule else (tx.plaid_category_primary or "uncategorized")
-        )
-        simulated.append({
-            "tx": tx,
-            "annotation": annotation,
-            "current_effective_category": current,
-            "simulated_effective_category": simulated_effective,
-            "matched_rule_id": matched_rule["id"] if matched_rule else None,
-            "matched_assigned_category": matched_rule["assigned_category"] if matched_rule else None,
-            "would_change": current != simulated_effective,
-        })
-    return simulated
+def _simulated_effective(tx, annotation, rule_match) -> str:
+    """Effective category if the rule stack were applied now. A manual user_category
+    still wins; otherwise the freshly matched rule (or Plaid fallback) decides."""
+    sim_annotation = annotation if (annotation and annotation.user_category) else None
+    return resolve_effective_category(tx, sim_annotation, rule_match=rule_match).category
 
 
 @router.get("/category-rules")
@@ -651,7 +635,8 @@ def create_category_rule(payload: CategoryRuleCreateRequest, db: Session = Depen
         assigned_category=payload.assigned_category,
         name=payload.name,
     )
-    _compile_rule(rule)
+    _compiled_regex(rule.description_regex)
+    _compiled_regex(rule.account_name_regex)
     db.add(rule)
     db.commit()
     db.refresh(rule)
@@ -668,7 +653,8 @@ def patch_category_rule(rule_id: int, payload: CategoryRulePatchRequest, db: Ses
     for key, value in updates.items():
         setattr(rule, key, value)
 
-    _compile_rule(rule)
+    _compiled_regex(rule.description_regex)
+    _compiled_regex(rule.account_name_regex)
     db.commit()
     db.refresh(rule)
     return _serialize_rule(rule)
@@ -716,26 +702,36 @@ def preview_category_rules(payload: CategoryRulePreviewRequest, db: Session = De
     if draft_rule_payload and (not payload.rule_id or not replaced):
         merged_rules.append({**draft_rule_payload, "id": payload.rule_id})
 
-    compiled_rules = sorted([_compile_rule(r) for r in merged_rules], key=lambda r: (r["rank"], r["id"] or 0))
-    rows = _scoped_transactions(db, payload.scope)
-    simulated = _simulate_rule_stack(rows, compiled_rules)
+    try:
+        compiled_rules = compile_rules([_rule_like(r) for r in merged_rules])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    changed = [s for s in simulated if s["would_change"]]
-    sample = []
-    for row in changed[:payload.sample_limit]:
-        tx = row["tx"]
-        sample.append({
+    rows = _scoped_transactions(db, payload.scope)
+
+    changed = []
+    for tx, account, annotation in rows:
+        match = find_first_matching_rule(compiled_rules, tx=tx, account=account)
+        current = _current_effective(tx, annotation)
+        simulated = _simulated_effective(tx, annotation, match)
+        if current != simulated:
+            changed.append((tx, current, simulated, match.rule_id if match else None))
+
+    sample = [
+        {
             "transaction_id": tx.id,
             "date": str(tx.date),
             "amount": round(float(tx.amount), 2),
             "name": tx.name,
-            "current_effective_category": row["current_effective_category"],
-            "simulated_effective_category": row["simulated_effective_category"],
-            "rule_id": row["matched_rule_id"],
-        })
+            "current_effective_category": current,
+            "simulated_effective_category": simulated,
+            "rule_id": rule_id,
+        }
+        for tx, current, simulated, rule_id in changed[: payload.sample_limit]
+    ]
 
     return {
-        "total_scanned": len(simulated),
+        "total_scanned": len(rows),
         "would_change_count": len(changed),
         "samples": sample,
     }
@@ -751,7 +747,10 @@ def apply_category_rules(payload: CategoryRuleApplyRequest, db: Session = Depend
         .order_by(CategoryRule.rank.asc(), CategoryRule.id.asc())
         .all()
     )
-    compiled_rules = [_compile_rule(rule) for rule in rules]
+    try:
+        compiled_rules = compile_rules([_rule_like(rule) for rule in rules])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     scanned = 0
     matched = 0
@@ -772,19 +771,12 @@ def apply_category_rules(payload: CategoryRuleApplyRequest, db: Session = Depend
                 skipped_manual += 1
                 continue
 
-            matched_rule = next(
-                (rule for rule in compiled_rules if _tx_matches_rule(tx, account, rule)),
-                None,
-            )
+            matched_rule = find_first_matching_rule(compiled_rules, tx=tx, account=account)
             if matched_rule:
                 matched += 1
 
-            current_effective = _effective_category(annotation, tx.plaid_category_primary)
-            simulated_effective = (
-                matched_rule["assigned_category"]
-                if matched_rule
-                else (tx.plaid_category_primary or "uncategorized")
-            )
+            current_effective = _current_effective(tx, annotation)
+            simulated_effective = _simulated_effective(tx, annotation, matched_rule)
             effective_changed = current_effective != simulated_effective
             if effective_changed:
                 changed += 1
@@ -792,8 +784,8 @@ def apply_category_rules(payload: CategoryRuleApplyRequest, db: Session = Depend
             if payload.dry_run:
                 continue
 
-            matched_category = matched_rule["assigned_category"] if matched_rule else None
-            matched_rule_id = matched_rule["id"] if matched_rule else None
+            matched_category = matched_rule.category if matched_rule else None
+            matched_rule_id = matched_rule.rule_id if matched_rule else None
 
             if annotation:
                 annotation_updates.append(
@@ -874,26 +866,14 @@ def _apply_transfer_exclusion(q, include_transfers: bool):
     TransactionAnnotation.is_transfer_override."""
     if include_transfers:
         return q
-    pair_out = db_pair_ids_subquery_out()
-    pair_in = db_pair_ids_subquery_in()
     return q.filter(
-        ~Transaction.id.in_(pair_out),
-        ~Transaction.id.in_(pair_in),
+        ~Transaction.id.in_(select(TransferPair.txn_out_id)),
+        ~Transaction.id.in_(select(TransferPair.txn_in_id)),
         or_(
             TransactionAnnotation.is_transfer_override == False,  # noqa: E712
             TransactionAnnotation.is_transfer_override.is_(None),
         ),
     )
-
-
-def db_pair_ids_subquery_out():
-    from sqlalchemy import select as sa_select
-    return sa_select(TransferPair.txn_out_id)
-
-
-def db_pair_ids_subquery_in():
-    from sqlalchemy import select as sa_select
-    return sa_select(TransferPair.txn_in_id)
 
 
 @router.get("/analytics/monthly-spend")
@@ -1050,16 +1030,11 @@ def transfers_list(
 
 @router.post("/transfers")
 def transfers_create(
-    payload: dict,
+    payload: TransferCreateRequest,
     db: Session = Depends(get_db),
 ):
     try:
-        txn_a_id = int(payload["txn_a_id"])
-        txn_b_id = int(payload["txn_b_id"])
-    except (KeyError, TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="txn_a_id and txn_b_id required")
-    try:
-        pair = transfer_detector.manual_pair(db, txn_a_id, txn_b_id)
+        pair = transfer_detector.manual_pair(db, payload.txn_a_id, payload.txn_b_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"id": pair.id, "status": "paired"}

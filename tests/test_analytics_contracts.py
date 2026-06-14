@@ -93,8 +93,8 @@ def test_category_spend_includes_unannotated_transactions():
         r = client.get("/analytics/category-spend", headers=AUTH_HEADERS)
     assert r.status_code == 200
     by_cat = {row["category"]: row["spend"] for row in r.json()}
-    assert by_cat["FOOD_AND_DRINK"] == 600.0
-    assert by_cat["RENT_AND_UTILITIES"] == 500.0
+    assert by_cat["FOOD/OTHER"] == 600.0
+    assert by_cat["HOUSING/RENT_AND_UTILITIES"] == 500.0
     assert by_cat.get("INCOME", 0) == 0
 
 
@@ -109,7 +109,7 @@ def test_category_spend_prefers_annotation_over_plaid():
         r = client.get("/analytics/category-spend", headers=AUTH_HEADERS)
     by_cat = {row["category"]: row["spend"] for row in r.json()}
     assert by_cat["groceries"] == 400.0
-    assert by_cat["FOOD_AND_DRINK"] == 200.0
+    assert by_cat["FOOD/OTHER"] == 200.0
 
 
 def test_category_spend_reflects_rule_apply_outcomes():

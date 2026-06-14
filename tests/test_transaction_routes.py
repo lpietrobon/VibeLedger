@@ -65,7 +65,8 @@ def test_transaction_filter_matches_unannotated_plaid_category():
     _seed_transaction("i-un", "a-un", "tx-untagged", date(2026, 4, 5), 30.0, "Uber", plaid_category="TRANSPORTATION")
 
     with TestClient(app) as client:
-        r = client.get("/transactions", params={"category": "TRANSPORTATION"}, headers=AUTH_HEADERS)
+        # Plaid TRANSPORTATION surfaces under its friendly category name.
+        r = client.get("/transactions", params={"category": "TRANSPORT/OTHER"}, headers=AUTH_HEADERS)
     assert r.status_code == 200
     assert [row["plaid_transaction_id"] for row in r.json()["items"]] == ["tx-untagged"]
 

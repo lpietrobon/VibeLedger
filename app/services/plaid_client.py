@@ -188,7 +188,7 @@ class PlaidClient:
             # Mock implementation for historical transactions
             return [
                 {
-                    "transaction_id": f"txn-mock-hist-001",
+                    "transaction_id": "txn-mock-hist-001",
                     "account_id": "acct-001",
                     "date": "2026-01-01",
                     "amount": 50.00,
