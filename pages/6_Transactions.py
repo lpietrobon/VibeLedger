@@ -9,6 +9,7 @@ import streamlit as st
 from dashboard_lib import (
     DEFAULT_DB,
     apply_filters,
+    compact_page,
     load_transactions,
     render_annotation_editor,
     sidebar_filters,
@@ -16,6 +17,7 @@ from dashboard_lib import (
 )
 
 st.set_page_config(page_title="Transactions – VibeLedger", layout="wide")
+compact_page()
 st.title("Transactions")
 
 try:
@@ -201,6 +203,7 @@ if selected_rows:
         "merchant_name_override": row.get("merchant_name_override"),
         "notes": row.get("notes"),
         "reviewed": row.get("reviewed", False),
+        "refund_status": row.get("refund_status"),
     }
     all_cats = sorted({c for c in df["effective_category"].fillna("uncategorized").unique().tolist() if type(c) is str})
     render_annotation_editor(txn_id, current, api_base, key_prefix="tx_", categories=all_cats)

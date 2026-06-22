@@ -179,6 +179,40 @@ def test_merchant_name_on_transaction_immutable_after_annotation_patch():
         assert tx.merchant_name == "Starbucks"
 
 
+def test_manual_refund_classification_roundtrip():
+    tx_id = _seed_transaction(
+        "item-refund-manual",
+        "acct-refund-manual",
+        "tx-refund-manual",
+        date(2026, 5, 3),
+        -42.0,
+        "Merchant credit",
+        plaid_category="GENERAL_MERCHANDISE",
+    )
+
+    with TestClient(app) as client:
+        marked = client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"refund_status": "confirmed"},
+            headers=AUTH_HEADERS,
+        )
+        assert marked.status_code == 200
+
+        row = client.get("/transactions", headers=AUTH_HEADERS).json()["items"][0]
+        assert row["refund_status"] == "confirmed"
+        assert row["refund_reason"] == "Manual classification"
+
+        automatic = client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"refund_status": "auto"},
+            headers=AUTH_HEADERS,
+        )
+        assert automatic.status_code == 200
+
+        row = client.get("/transactions", headers=AUTH_HEADERS).json()["items"][0]
+        assert row["refund_status"] is None
+
+
 def test_merchant_name_override_clear_with_empty_string():
     tx_id = _seed_transaction("item-mo3", "acct-mo3", "tx-mo3", date(2026, 5, 3), 9.0, "CAFE", merchant_name="Cafe Raw")
 

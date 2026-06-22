@@ -1,13 +1,15 @@
 import pandas as pd
 import streamlit as st
 
-from dashboard_lib import DEFAULT_API, DEFAULT_DB, api_patch, extract_error_message, load_accounts
+from dashboard_lib import DEFAULT_API, DEFAULT_DB, api_patch, compact_page, extract_error_message, load_accounts
 
 st.set_page_config(page_title="Accounts", layout="wide")
+compact_page()
 st.title("Accounts Summary")
 
-db_path = st.sidebar.text_input("DB path", DEFAULT_DB, key="db_path")
-api_base = st.sidebar.text_input("API base", DEFAULT_API, key="api_base")
+with st.sidebar.expander("Connection settings", expanded=False):
+    db_path = st.text_input("DB path", DEFAULT_DB, key="db_path")
+    api_base = st.text_input("API base", DEFAULT_API, key="api_base")
 
 try:
     accounts = load_accounts(db_path)

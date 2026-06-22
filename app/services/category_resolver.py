@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from decimal import Decimal
@@ -11,6 +12,7 @@ class TransactionLike(Protocol):
     name: str | None
     merchant_name: str | None
     plaid_category_primary: str | None
+    raw_json: str | None
 
 
 class AccountLike(Protocol):
@@ -51,9 +53,23 @@ PLAID_FRIENDLY_MAP: dict[str, str] = {
     "PERSONAL_CARE": "HEALTH/PERSONAL_CARE",
 }
 
+PLAID_DETAILED_FRIENDLY_MAP: dict[str, str] = {
+    "RENT_AND_UTILITIES_INTERNET_AND_CABLE": "HOUSING/UTILITIES",
+}
 
-def friendly_category(plaid_primary: str | None) -> str | None:
+
+def detailed_category(raw_json: str | None) -> str | None:
+    try:
+        personal_finance_category = json.loads(raw_json or "{}").get("personal_finance_category") or {}
+    except (TypeError, ValueError):
+        return None
+    return personal_finance_category.get("detailed")
+
+
+def friendly_category(plaid_primary: str | None, plaid_detailed: str | None = None) -> str | None:
     """Map a raw Plaid primary category to its friendly name, or pass through."""
+    if plaid_detailed in PLAID_DETAILED_FRIENDLY_MAP:
+        return PLAID_DETAILED_FRIENDLY_MAP[plaid_detailed]
     if plaid_primary is None:
         return None
     return PLAID_FRIENDLY_MAP.get(plaid_primary, plaid_primary)
@@ -204,7 +220,13 @@ def resolve_effective_category(
         return CategoryResolution(category=rule_match.category, rule_id=rule_match.rule_id)
 
     if tx.plaid_category_primary:
-        return CategoryResolution(category=friendly_category(tx.plaid_category_primary), rule_id=None)
+        return CategoryResolution(
+            category=friendly_category(
+                tx.plaid_category_primary,
+                detailed_category(getattr(tx, "raw_json", None)),
+            ),
+            rule_id=None,
+        )
 
     return CategoryResolution(category="uncategorized", rule_id=None)
 

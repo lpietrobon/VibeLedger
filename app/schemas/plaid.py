@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +36,7 @@ class PatchAnnotationRequest(BaseModel):
     merchant_name_override: str | None = None
     notes: str | None = None
     reviewed: bool | None = None
+    refund_status: Literal["confirmed", "not_refund", "auto"] | None = None
 
 
 class PatchAccountRequest(BaseModel):

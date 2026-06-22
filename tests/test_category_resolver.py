@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from decimal import Decimal
+import json
 
 import pytest
 
@@ -16,6 +17,7 @@ class Tx:
     name: str | None
     merchant_name: str | None
     plaid_category_primary: str | None
+    raw_json: str | None = None
 
 
 @dataclass
@@ -128,6 +130,25 @@ def test_effective_category_precedence_manual_rule_plaid_uncategorized():
     )
     assert uncategorized.category == "uncategorized"
     assert uncategorized.rule_id is None
+
+
+def test_detailed_internet_category_maps_to_housing_utilities():
+    tx = Tx(
+        amount=Decimal("79.44"),
+        name="SONIC.NET",
+        merchant_name="Sonic Internet",
+        plaid_category_primary="RENT_AND_UTILITIES",
+        raw_json=json.dumps(
+            {
+                "personal_finance_category": {
+                    "primary": "RENT_AND_UTILITIES",
+                    "detailed": "RENT_AND_UTILITIES_INTERNET_AND_CABLE",
+                }
+            }
+        ),
+    )
+    resolved = resolve_effective_category(tx, annotation=None, rule_match=None)
+    assert resolved.category == "HOUSING/UTILITIES"
 
 
 def test_invalid_regex_is_rejected():

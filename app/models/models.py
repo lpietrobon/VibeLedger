@@ -88,6 +88,11 @@ class TransactionAnnotation(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     is_transfer_override: Mapped[bool] = mapped_column(Boolean, default=False)
+    refund_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    refund_match_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transactions.id"), nullable=True, index=True
+    )
+    refund_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     merchant_name_override: Mapped[str | None] = mapped_column(String(255), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -110,6 +115,7 @@ class AnnotationFingerprint(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
     is_transfer_override: Mapped[bool] = mapped_column(Boolean, default=False)
+    refund_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     source_transaction_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"))
     applied_transaction_id: Mapped[int | None] = mapped_column(ForeignKey("transactions.id"), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

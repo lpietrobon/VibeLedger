@@ -13,12 +13,14 @@ from dashboard_lib import (
     api_get,
     api_patch,
     api_post,
+    compact_page,
     extract_error_message,
     load_accounts,
     load_transactions,
 )
 
 st.set_page_config(page_title="Rules", layout="wide")
+compact_page()
 st.title("Category rules")
 st.caption("Click a rule to edit it. Use the editor panel below to create or modify rules.")
 
@@ -141,8 +143,9 @@ def _reset_editor():
     st.session_state["rule_name"] = ""
 
 
-db_path = st.sidebar.text_input("DB path", DEFAULT_DB, key="db_path")
-api_base = st.sidebar.text_input("API base", DEFAULT_API, key="api_base")
+with st.sidebar.expander("Connection settings", expanded=False):
+    db_path = st.text_input("DB path", DEFAULT_DB, key="db_path")
+    api_base = st.text_input("API base", DEFAULT_API, key="api_base")
 
 try:
     txns = load_transactions(db_path)

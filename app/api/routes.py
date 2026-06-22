@@ -47,7 +47,9 @@ from app.services.security import decrypt_token, encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
+from app.services.refund_detector import classify_refunds
 from app.services.category_resolver import (
+    PLAID_DETAILED_FRIENDLY_MAP,
     PLAID_FRIENDLY_MAP,
     compile_rules,
     find_first_matching_rule,
@@ -67,7 +69,21 @@ def _friendly_plaid_case():
         (Transaction.plaid_category_primary == plaid, friendly)
         for plaid, friendly in PLAID_FRIENDLY_MAP.items()
     ]
-    return case(*whens, else_=Transaction.plaid_category_primary)
+    detailed_whens = [
+        (
+            func.json_extract(
+                Transaction.raw_json,
+                "$.personal_finance_category.detailed",
+            ) == plaid,
+            friendly,
+        )
+        for plaid, friendly in PLAID_DETAILED_FRIENDLY_MAP.items()
+    ]
+    detailed_case = case(*detailed_whens, else_=None)
+    return func.coalesce(
+        detailed_case,
+        case(*whens, else_=Transaction.plaid_category_primary),
+    )
 
 
 def _effective_category_expr():
@@ -279,6 +295,15 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
     txn_ids = [t.id for t in db.query(Transaction.id).filter(Transaction.item_id == item_id)]
 
     if txn_ids:
+        db.query(TransactionAnnotation).filter(
+            TransactionAnnotation.refund_match_transaction_id.in_(txn_ids)
+        ).update(
+            {
+                TransactionAnnotation.refund_match_transaction_id: None,
+                TransactionAnnotation.refund_reason: None,
+            },
+            synchronize_session=False,
+        )
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id.in_(txn_ids), TransferPair.txn_in_id.in_(txn_ids))
         ).delete(synchronize_session=False)
@@ -411,6 +436,9 @@ def list_transactions(
                 "effective_category": resolved_category,
                 "category_source": resolved_source,
                 "rule_id": a.rule_id if (a and resolved_source == "rule") else None,
+                "refund_status": a.refund_status if a else None,
+                "refund_match_transaction_id": a.refund_match_transaction_id if a else None,
+                "refund_reason": a.refund_reason if a else None,
                 "annotation": {
                     "user_category": a.user_category if a else None,
                     "merchant_name_override": a.merchant_name_override if a else None,
@@ -446,6 +474,15 @@ def patch_annotation(transaction_id: int, payload: PatchAnnotationRequest, db: S
         annotation.notes = payload.notes
     if payload.reviewed is not None:
         annotation.reviewed = payload.reviewed
+    if payload.refund_status is not None:
+        if payload.refund_status == "auto":
+            annotation.refund_status = None
+            annotation.refund_match_transaction_id = None
+            annotation.refund_reason = None
+        else:
+            annotation.refund_status = payload.refund_status
+            annotation.refund_match_transaction_id = None
+            annotation.refund_reason = "Manual classification"
 
     if tx.txn_hash is not None:
         account = db.query(Account).filter(Account.id == tx.account_id).first()
@@ -474,11 +511,14 @@ def patch_annotation(transaction_id: int, payload: PatchAnnotationRequest, db: S
         fingerprint.notes = annotation.notes
         fingerprint.reviewed = annotation.reviewed
         fingerprint.is_transfer_override = annotation.is_transfer_override
+        fingerprint.refund_status = annotation.refund_status
         fingerprint.source_transaction_id = tx.id
         fingerprint.applied_transaction_id = tx.id
         fingerprint.applied_at = utcnow()
 
     db.commit()
+    if payload.refund_status == "auto":
+        classify_refunds(db)
     return {"status": "ok", "transaction_id": transaction_id}
 
 
@@ -505,6 +545,7 @@ def list_annotation_fingerprints(
             "notes": f.notes,
             "reviewed": f.reviewed,
             "is_transfer_override": f.is_transfer_override,
+            "refund_status": f.refund_status,
             "source_transaction_id": f.source_transaction_id,
             "applied_transaction_id": f.applied_transaction_id,
             "updated_at": f.updated_at,
@@ -876,6 +917,15 @@ def _apply_transfer_exclusion(q, include_transfers: bool):
     )
 
 
+def _is_refund_expr():
+    return TransactionAnnotation.refund_status.in_(["confirmed", "likely"])
+
+
+@router.post("/refunds/detect")
+def refunds_detect(db: Session = Depends(get_db)):
+    return classify_refunds(db)
+
+
 @router.get("/analytics/monthly-spend")
 def monthly_spend(
     db: Session = Depends(get_db),
@@ -887,7 +937,11 @@ def monthly_spend(
     q = (
         db.query(
             month_col,
-            func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)),
+            func.sum(case(
+                (_is_refund_expr(), Transaction.amount),
+                (Transaction.amount > 0, Transaction.amount),
+                else_=0,
+            )),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
@@ -911,7 +965,11 @@ def category_spend(
     q = (
         db.query(
             effective_category,
-            func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)),
+            func.sum(case(
+                (_is_refund_expr(), Transaction.amount),
+                (Transaction.amount > 0, Transaction.amount),
+                else_=0,
+            )),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
@@ -935,8 +993,22 @@ def cashflow_trend(
     q = (
         db.query(
             month_col,
-            func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)).label("expenses"),
-            func.sum(case((Transaction.amount < 0, -Transaction.amount), else_=0)).label("income"),
+            func.sum(case(
+                (_is_refund_expr(), Transaction.amount),
+                (Transaction.amount > 0, Transaction.amount),
+                else_=0,
+            )).label("expenses"),
+            func.sum(case(
+                (
+                    (Transaction.amount < 0)
+                    & or_(
+                        TransactionAnnotation.refund_status.is_(None),
+                        ~TransactionAnnotation.refund_status.in_(["confirmed", "likely"]),
+                    ),
+                    -Transaction.amount,
+                ),
+                else_=0,
+            )).label("income"),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )

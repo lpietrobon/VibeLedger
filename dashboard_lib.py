@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -19,6 +19,35 @@ import streamlit as st
 DEFAULT_DB = os.environ.get("VIBELEDGER_DB", str(Path.home() / ".vibeledger" / "vibeledger.db"))
 DEFAULT_API = os.environ.get("VIBELEDGER_API", "http://127.0.0.1:8000")
 ENV_FILE = Path(__file__).resolve().parent / ".env"
+
+
+def compact_page() -> None:
+    """Apply shared compact spacing, especially on phone-sized screens."""
+    st.markdown(
+        """
+        <style>
+        .block-container { padding-top: 2.2rem; padding-bottom: 2rem; }
+        h1 { font-size: 1.85rem; margin: 0 0 .35rem; }
+        h2 { font-size: 1.35rem; margin: .9rem 0 .3rem; }
+        h3 { margin: .7rem 0 .25rem; }
+        [data-testid="stSidebar"] .block-container { padding-top: 1rem; }
+        [data-testid="stHeader"] { height: 2.4rem; background: transparent; }
+        @media (max-width: 768px) {
+            .block-container { padding: .55rem .7rem 1.25rem; max-width: 100%; }
+            h1 { font-size: 1.45rem; line-height: 1.15; margin-bottom: .2rem; }
+            h2 { font-size: 1.15rem; line-height: 1.2; margin: .55rem 0 .2rem; }
+            h3 { font-size: 1rem; margin: .45rem 0 .15rem; }
+            [data-testid="stVerticalBlock"] { gap: .5rem; }
+            [data-testid="stMetric"] { padding: .25rem 0; }
+            [data-testid="stPlotlyChart"] { margin-top: -.35rem; }
+            div[data-testid="stForm"] { padding: .65rem; }
+            .stCaptionContainer { margin-bottom: .15rem; }
+            button { min-height: 2.5rem; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def api_token() -> str | None:
@@ -170,13 +199,34 @@ def sidebar_filters(df: pd.DataFrame):
     exclude_transfers = st.sidebar.checkbox("Exclude transfers", value=True, key="excl_xfer")
 
     min_d, max_d = df["date"].min(), df["date"].max()
-    start_d, end_d = st.sidebar.date_input(
-        "Date range",
-        (min_d, max_d),
-        min_value=min_d,
-        max_value=max_d,
-        key="date_range",
+    period = st.sidebar.selectbox(
+        "Period",
+        [
+            "All time",
+            "This month",
+            "Last month",
+            "Last 30 days",
+            "Last 90 days",
+            "This year",
+            "Last year",
+            "Custom range",
+        ],
+        key="date_period",
     )
+    if period == "Custom range":
+        custom_range = st.sidebar.date_input(
+            "Date range",
+            (min_d, max_d),
+            min_value=min_d,
+            max_value=max_d,
+            key="custom_date_range",
+        )
+        if isinstance(custom_range, (tuple, list)) and len(custom_range) == 2:
+            start_d, end_d = custom_range
+        else:
+            start_d = end_d = custom_range[0] if isinstance(custom_range, (tuple, list)) else custom_range
+    else:
+        start_d, end_d = resolve_date_period(period, date.today(), min_d, max_d)
 
     acct_col = "effective_account_name" if "effective_account_name" in df.columns else "account_name"
     accounts = sorted(df[acct_col].fillna("Unknown").unique().tolist())
@@ -192,21 +242,77 @@ def tech_sidebar(show_api: bool = True) -> tuple[str, str | None]:
     so connection settings stay separated from data filters.
     """
     st.sidebar.divider()
-    db_path = st.sidebar.text_input("DB path", DEFAULT_DB, key="db_path")
-    api_base = st.sidebar.text_input("API base", DEFAULT_API, key="api_base") if show_api else None
+    with st.sidebar.expander("Connection settings", expanded=False):
+        db_path = st.text_input("DB path", DEFAULT_DB, key="db_path")
+        api_base = st.text_input("API base", DEFAULT_API, key="api_base") if show_api else None
     return db_path, api_base
 
 
-def apply_filters(df: pd.DataFrame, start_d, end_d, accounts, exclude_transfers: bool) -> pd.DataFrame:
+def resolve_date_period(period: str, today: date, min_d: date, max_d: date) -> tuple[date, date]:
+    """Resolve a sidebar period preset without discarding comparison history."""
+    if period == "This month":
+        return today.replace(day=1), today
+    if period == "Last month":
+        end = today.replace(day=1) - timedelta(days=1)
+        return end.replace(day=1), end
+    if period == "Last 30 days":
+        return today - timedelta(days=29), today
+    if period == "Last 90 days":
+        return today - timedelta(days=89), today
+    if period == "This year":
+        return date(today.year, 1, 1), today
+    if period == "Last year":
+        return date(today.year - 1, 1, 1), date(today.year - 1, 12, 31)
+    return min_d, max_d
+
+
+def apply_scope_filters(df: pd.DataFrame, accounts, exclude_transfers: bool) -> pd.DataFrame:
+    """Apply non-date filters, preserving history for comparison charts."""
     f = df.copy()
-    if start_d is not None:
-        f = f[(f["date"] >= start_d) & (f["date"] <= end_d)]
     if accounts:
         acct_col = "effective_account_name" if "effective_account_name" in f.columns else "account_name"
         f = f[f[acct_col].fillna("Unknown").isin(accounts)]
     if exclude_transfers and "is_transfer" in f.columns:
         f = f[~f["is_transfer"]]
     return f
+
+
+def apply_date_filter(df: pd.DataFrame, start_d, end_d) -> pd.DataFrame:
+    f = df.copy()
+    if start_d is not None:
+        f = f[(f["date"] >= start_d) & (f["date"] <= end_d)]
+    return f
+
+
+def apply_filters(df: pd.DataFrame, start_d, end_d, accounts, exclude_transfers: bool) -> pd.DataFrame:
+    return apply_date_filter(
+        apply_scope_filters(df, accounts, exclude_transfers),
+        start_d,
+        end_d,
+    )
+
+
+def spend_transactions(df: pd.DataFrame) -> pd.DataFrame:
+    """Expense-side rows, including negative refunds that reduce spend."""
+    is_refund = (
+        df["is_refund"].fillna(0).astype(bool)
+        if "is_refund" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+    return df[(df["amount"] > 0) | is_refund].copy()
+
+
+def add_cashflow_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Add signed expense and positive income columns with refunds netted to spend."""
+    out = df.copy()
+    is_refund = (
+        out["is_refund"].fillna(0).astype(bool)
+        if "is_refund" in out.columns
+        else pd.Series(False, index=out.index)
+    )
+    out["expense"] = out["amount"].where((out["amount"] > 0) | is_refund, 0)
+    out["income"] = (-out["amount"]).where((out["amount"] < 0) & ~is_refund, 0)
+    return out
 
 
 def period_bounds_n(granularity: str, today, n_periods: int = 4) -> list[dict]:
@@ -333,6 +439,22 @@ def render_annotation_editor(
         )
         notes_val = st.text_area("Notes", value=current.get("notes") or "")
         reviewed_val = st.checkbox("Reviewed", value=bool(current.get("reviewed", False)))
+        refund_options = {
+            "Automatic": "auto",
+            "Confirmed refund": "confirmed",
+            "Not a refund": "not_refund",
+        }
+        current_refund = current.get("refund_status")
+        refund_label = {
+            "confirmed": "Confirmed refund",
+            "not_refund": "Not a refund",
+        }.get(current_refund, "Automatic")
+        refund_choice = st.selectbox(
+            "Refund classification",
+            options=list(refund_options),
+            index=list(refund_options).index(refund_label),
+            help="Automatic preserves high-confidence matching; manual choices override it.",
+        )
         submitted = st.form_submit_button("Save")
 
     if submitted:
@@ -341,6 +463,7 @@ def render_annotation_editor(
             "merchant_name_override": merchant_val.strip() or None,
             "notes": notes_val.strip() or None,
             "reviewed": reviewed_val,
+            "refund_status": refund_options[refund_choice],
         }
         resp = api_patch(f"/transactions/{txn_id}/annotation", json=payload, base=api_base)
         if resp.ok:

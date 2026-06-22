@@ -1,10 +1,18 @@
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
-from dashboard_lib import apply_filters, load_transactions, sidebar_filters, tech_sidebar
+from dashboard_lib import (
+    add_cashflow_columns,
+    apply_filters,
+    compact_page,
+    load_transactions,
+    sidebar_filters,
+    tech_sidebar,
+)
 
 st.set_page_config(page_title="Cashflow", layout="wide")
+compact_page()
 st.title("Cashflow")
 
 try:
@@ -21,10 +29,8 @@ if f.empty:
     st.warning("No transactions in this window.")
     st.stop()
 
-f = f.copy()
+f = add_cashflow_columns(f)
 f["month"] = pd.to_datetime(f["date"]).dt.strftime("%Y-%m")
-f["expense"] = f["amount"].clip(lower=0)
-f["income"] = (-f["amount"]).clip(lower=0)
 
 monthly = f.groupby("month", as_index=False).agg(
     expense=("expense", "sum"),
@@ -32,12 +38,47 @@ monthly = f.groupby("month", as_index=False).agg(
 )
 monthly["net"] = monthly["income"] - monthly["expense"]
 
-long = monthly.melt(id_vars=["month"], value_vars=["income", "expense"], var_name="kind", value_name="amount")
-fig = px.bar(long, x="month", y="amount", color="kind", barmode="group", title="Monthly income vs expense")
+fig = go.Figure()
+fig.add_trace(
+    go.Scatter(
+        x=monthly["month"],
+        y=monthly["income"],
+        name="Income",
+        mode="lines",
+        fill="tozeroy",
+        fillcolor="rgba(44, 160, 44, 0.6)",
+        line={"color": "#2ca02c", "width": 2},
+    )
+)
+fig.add_trace(
+    go.Scatter(
+        x=monthly["month"],
+        y=-monthly["expense"],
+        name="Expenses",
+        mode="lines",
+        fill="tozeroy",
+        fillcolor="rgba(214, 39, 40, 0.6)",
+        line={"color": "#d62728", "width": 2},
+    )
+)
+fig.add_trace(
+    go.Scatter(
+        x=monthly["month"],
+        y=monthly["net"],
+        name="Net cashflow",
+        mode="lines+markers",
+        line={"color": "#1f77b4", "width": 4},
+    )
+)
+fig.update_layout(
+    title="Monthly cashflow",
+    hovermode="x unified",
+    legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "left", "x": 0},
+    xaxis_title="Month",
+    yaxis_title="Cashflow ($)",
+    yaxis={"tickprefix": "$", "zeroline": True, "zerolinecolor": "rgba(80, 80, 80, 0.6)"},
+)
 st.plotly_chart(fig, use_container_width=True)
-
-fig2 = px.line(monthly, x="month", y="net", markers=True, title="Net cashflow")
-st.plotly_chart(fig2, use_container_width=True)
 
 st.subheader("Monthly detail")
 show = monthly.copy()

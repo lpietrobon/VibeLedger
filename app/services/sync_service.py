@@ -16,6 +16,7 @@ from app.models.models import (
     TransactionAnnotation,
 )
 from app.services.plaid_client import PlaidClient
+from app.services.refund_detector import classify_refunds
 from app.services.security import decrypt_token
 from app.services.transfer_detector import detect_candidates
 from app.services.txn_fingerprint import compute_txn_hash
@@ -118,6 +119,7 @@ class SyncService:
             if new_pairs:
                 db.commit()
                 logger.info("Transfer detection after sync: %d new pair(s) found", len(new_pairs))
+        classify_refunds(db)
 
         return {
             "status": "success",
@@ -168,6 +170,7 @@ class SyncService:
             if new_pairs:
                 db.commit()
                 logger.info("Transfer detection after historical sync: %d new pair(s) found", len(new_pairs))
+        classify_refunds(db)
 
         return {
             "status": "success",
@@ -321,6 +324,7 @@ class SyncService:
             notes=fingerprint.notes,
             reviewed=fingerprint.reviewed,
             is_transfer_override=fingerprint.is_transfer_override,
+            refund_status=fingerprint.refund_status,
         )
         db.add(annotation)
 

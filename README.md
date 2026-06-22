@@ -106,7 +106,7 @@ A Streamlit multipage app provides a consolidated view:
 Run locally:
 
 ```bash
-streamlit run dashboard_app.py --server.baseUrlPath /vibeledger/dash
+streamlit run Spend.py --server.baseUrlPath /vibeledger/dash
 ```
 
 The dashboard reads SQLite directly for read paths and calls the FastAPI endpoints for writes (detect, pair, confirm, unpair). It loads the bearer token inline from `.env` so no extra config is needed when run on the same host as the API.
@@ -180,7 +180,7 @@ Type=simple
 User=<your-user>
 WorkingDirectory=/path/to/VibeLedger
 EnvironmentFile=/path/to/VibeLedger/.env
-ExecStart=/path/to/VibeLedger/.venv/bin/streamlit run dashboard_app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true --server.baseUrlPath /vibeledger/dash --browser.gatherUsageStats false
+ExecStart=/path/to/VibeLedger/.venv/bin/streamlit run Spend.py --server.address 127.0.0.1 --server.port 8501 --server.headless true --server.baseUrlPath /vibeledger/dash --browser.gatherUsageStats false
 Restart=on-failure
 RestartSec=5
 

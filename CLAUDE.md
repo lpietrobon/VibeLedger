@@ -85,13 +85,18 @@ app/
     txn_fingerprint.py         # Content hash for transactions (account mask + date + amount + name)
     scheduler.py               # Background scheduled sync loop
     transfer_detector.py       # Heuristic pair-match for double-entry transfers
-dashboard_app.py             # Streamlit entry page (overview + shared filters)
+    refund_detector.py         # High-confidence refund matching + manual override support
+Spend.py                     # Streamlit entry page and spending analysis
 dashboard_lib.py             # Cached SQLite loaders + HTTP helpers for mutations
 pages/
+  0_Transfers.py             # Review queue: confirm/unpair, manual pairing
   1_Accounts.py              # Balances grouped by type, net worth estimate
-  2_Cashflow.py              # Monthly income vs expense, net trend
-  3_Categories.py            # Top categories, MoM/YoY trends, samples + annotation
-  4_Transfers.py             # Review queue: confirm/unpair, manual pairing
+  2_Cashflow.py              # Income, expenses, and net cashflow trend
+  3_Cashflow_Sankey.py       # Income allocation into top-level category buckets
+  4_Experimental.py          # Month-over-month movers and calendar heatmap
+  5_Rules.py                 # Category rule management
+  6_Transactions.py          # Transaction browsing and annotation
+  7_Debt_and_Cash_Runway.py  # Placeholder for debt payoff and runway planning
 scripts/
   connect_funnel.sh          # Tailscale Funnel automation for connect flow
   backup_db.sh               # SQLite backup (cron-friendly, 30-day retention)
@@ -117,10 +122,12 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 - `GET /transactions` — supports `start_date`, `end_date`, `category`, `limit`, `offset`.
 - `PATCH /transactions/{id}/annotation` — set `user_category`, `merchant_name_override`, `notes`, `reviewed`. Also upserts an `annotation_fingerprints` row keyed by the transaction's content hash, so the annotation survives item removal/re-link.
 - `GET /annotations/fingerprints?unapplied_only=true` — list saved annotation fingerprints, optionally only those not currently matched to a live transaction.
+- `POST /refunds/detect` — recompute automatic refund matches. Exact same-account, amount, and transaction-name matches become `likely`; Plaid refund codes become `confirmed`. Manual `confirmed`/`not_refund` choices override detection.
 
 **Analytics:**
 - `GET /analytics/monthly-spend`, `/category-spend`, `/cashflow-trend` — support `start_date`/`end_date`; exclude transfer-paired/`is_transfer_override` transactions by default (`?include_transfers=true` for raw numbers).
 - `GET /analytics/accounts-summary` — balances by type + net worth.
+- Confirmed/likely refunds reduce their expense category instead of being counted as income.
 
 **Transfers (double-entry reconciliation):**
 - `POST /transfers/detect` — pairs unpaired opposite-sign transactions on different accounts within `window_days` (default 3). Idempotent.
@@ -140,3 +147,4 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 - **Tailscale-only networking.** App binds to localhost; never bind `0.0.0.0`.
 - **Connect flow** uses short-lived sessions (20min TTL, 256-bit tokens) so `/connect/complete` can be unauthenticated.
 - **Annotation fingerprints**: manual annotations are keyed by a content hash (account mask + date + amount + name) independent of `transaction_id`, so they survive transaction deletion/re-sync (e.g. item re-link).
+- **Detailed Plaid category mapping**: `RENT_AND_UTILITIES_INTERNET_AND_CABLE` maps to `HOUSING/UTILITIES` before the broader primary-category fallback.

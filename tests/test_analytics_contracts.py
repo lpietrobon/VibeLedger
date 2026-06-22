@@ -87,6 +87,39 @@ def test_cashflow_trend_splits_income_and_expenses():
     assert data["2026-04"]["net"] == 700.0
 
 
+def test_refund_reduces_spend_instead_of_counting_as_income():
+    _seed_ledger()
+    with SessionLocal() as db:
+        account = db.query(Account).filter(Account.plaid_account_id == "a-analytics").one()
+        item = db.query(Item).filter(Item.plaid_item_id == "i-analytics").one()
+        refund = Transaction(
+            plaid_transaction_id="tx-refund",
+            account_id=account.id,
+            item_id=item.id,
+            date=date(2026, 3, 15),
+            amount=-200.0,
+            name="Coffee refund",
+            plaid_category_primary="FOOD_AND_DRINK",
+            pending=False,
+        )
+        db.add(refund)
+        db.flush()
+        db.add(TransactionAnnotation(transaction_id=refund.id, refund_status="likely"))
+        db.commit()
+
+    with TestClient(app) as client:
+        monthly = client.get("/analytics/monthly-spend", headers=AUTH_HEADERS).json()
+        cashflow = client.get("/analytics/cashflow-trend", headers=AUTH_HEADERS).json()
+        categories = client.get("/analytics/category-spend", headers=AUTH_HEADERS).json()
+
+    assert {row["month"]: row["spend"] for row in monthly}["2026-03"] == 400.0
+    march = {row["month"]: row for row in cashflow}["2026-03"]
+    assert march["expenses"] == 400.0
+    assert march["income"] == 1000.0
+    assert march["net"] == 600.0
+    assert {row["category"]: row["spend"] for row in categories}["FOOD/OTHER"] == 400.0
+
+
 def test_category_spend_includes_unannotated_transactions():
     _seed_ledger()
     with TestClient(app) as client:

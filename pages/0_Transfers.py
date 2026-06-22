@@ -6,18 +6,21 @@ from dashboard_lib import (
     DEFAULT_DB,
     api_delete,
     api_post,
+    compact_page,
     load_transactions,
     load_transfer_pairs,
 )
 
 st.set_page_config(page_title="Transfers", layout="wide")
+compact_page()
 st.title("Transfer reconciliation")
 st.caption(
     "Auto-matched pairs excluded from cashflow/category totals. Confirm the good ones; unpair the bad ones."
 )
 
-db_path = st.sidebar.text_input("DB path", DEFAULT_DB, key="db_path")
-api_base = st.sidebar.text_input("API base", DEFAULT_API, key="api_base")
+with st.sidebar.expander("Connection settings", expanded=False):
+    db_path = st.text_input("DB path", DEFAULT_DB, key="db_path")
+    api_base = st.text_input("API base", DEFAULT_API, key="api_base")
 
 colA, colB = st.columns([1, 3])
 with colA:

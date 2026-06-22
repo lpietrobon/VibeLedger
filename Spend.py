@@ -10,16 +10,20 @@ import streamlit as st
 
 from dashboard_lib import (
     DEFAULT_DB,
-    apply_filters,
+    apply_date_filter,
+    apply_scope_filters,
+    compact_page,
     cumulative_series,
     load_transactions,
     period_bounds_n,
     render_annotation_editor,
     sidebar_filters,
+    spend_transactions,
     tech_sidebar,
 )
 
 st.set_page_config(page_title="Spend", layout="wide")
+compact_page()
 st.title("Spend")
 
 try:
@@ -39,17 +43,11 @@ selected_cats = st.sidebar.multiselect("Categories", cats, default=cats, key="ca
 
 _, api_base = tech_sidebar()
 
-f_base = apply_filters(df, start_d, end_d, accounts, excl_xfer)
-f_base = f_base[f_base["effective_category"].fillna("uncategorized").isin(selected_cats)]
-
 # ── Omnibar ────────────────────────────────────────────────────────────────────
 _HINT = "e.g.  whole foods  ·  >500  ·  from:2026-05  ·  to:2026-05-31  ·  account:checking"
 
 if "cat_filters" not in st.session_state:
-    month_str = date.today().strftime("%Y-%m")
-    st.session_state.cat_filters = [
-        {"type": "date_from", "value": month_str, "label": f"from {month_str}"}
-    ]
+    st.session_state.cat_filters = []
 
 
 def _cat_parse_and_add(raw: str) -> None:
@@ -125,16 +123,26 @@ def _on_cat_omnibar_change():
         st.session_state.cat_omnibar_counter += 1
 
 
-_today = date.today()
+_today = min(date.today(), end_d) if end_d else date.today()
 
 # ── Apply filters ──────────────────────────────────────────────────────────────
+comparison_base = apply_scope_filters(df, accounts, excl_xfer)
+comparison_base = comparison_base[
+    comparison_base["effective_category"].fillna("uncategorized").isin(selected_cats)
+]
+f_base = apply_date_filter(comparison_base, start_d, end_d)
 f = _cat_apply_omnibar(f_base)
-f_period = _cat_apply_omnibar(f_base, skip_dates=True)
-spend_period = f_period[f_period["amount"] > 0].copy()
+f_period = _cat_apply_omnibar(comparison_base, skip_dates=True)
+spend_period = spend_transactions(f_period)
 
 # ── Spending trends ──────────────────────────────────────────────────────────
-st.subheader("Spending trends")
-granularity = st.radio("Granularity", ["Monthly", "Yearly"], horizontal=True, key="cat_granularity")
+granularity = st.radio(
+    "Granularity",
+    ["Monthly", "Yearly"],
+    horizontal=True,
+    key="cat_granularity",
+    label_visibility="collapsed",
+)
 gran = "monthly" if granularity == "Monthly" else "yearly"
 
 periods = period_bounds_n(gran, _today, n_periods=4)
@@ -186,6 +194,75 @@ if not m.empty:
     st.plotly_chart(fig2, use_container_width=True)
 else:
     st.caption("No data for the current or previous period in the filtered range.")
+
+# ── Category and merchant trends ─────────────────────────────────────────────
+st.subheader("Category and merchant trends")
+dimension_label, dimension_control = st.columns([1, 5])
+with dimension_label:
+    st.markdown("**Breakdown**")
+with dimension_control:
+    trend_dimension = st.radio(
+        "Break down by",
+        ["Category", "Merchant"],
+        horizontal=True,
+        key="spend_trend_dimension",
+        label_visibility="collapsed",
+    )
+trend_top_n = st.slider("Top series", 3, 12, 6, key="spend_trend_top_n")
+
+trend_source = spend_transactions(f)
+trend_source["month"] = pd.to_datetime(trend_source["date"]).dt.to_period("M").astype(str)
+if trend_dimension == "Category":
+    trend_source["series"] = (
+        trend_source["effective_category"]
+        .fillna("Uncategorized")
+        .astype(str)
+        .str.split("/")
+        .str[0]
+        .str.strip()
+        .replace("", "Uncategorized")
+    )
+else:
+    trend_source["series"] = trend_source["effective_merchant"].fillna("Unknown")
+
+if trend_source.empty:
+    st.caption("No spending data in the filtered range.")
+else:
+    top_series = (
+        trend_source.groupby("series")["amount"]
+        .sum()
+        .abs()
+        .nlargest(trend_top_n)
+        .index
+    )
+    trend = (
+        trend_source[trend_source["series"].isin(top_series)]
+        .groupby(["month", "series"], as_index=False)["amount"]
+        .sum()
+    )
+    month_series_grid = pd.MultiIndex.from_product(
+        [sorted(trend["month"].unique()), top_series],
+        names=["month", "series"],
+    )
+    trend = (
+        trend.set_index(["month", "series"])
+        .reindex(month_series_grid, fill_value=0)
+        .reset_index()
+    )
+    fig_trend = px.area(
+        trend,
+        x="month",
+        y="amount",
+        color="series",
+        title=f"Monthly spend by {'category bucket' if trend_dimension == 'Category' else 'merchant'}",
+    )
+    fig_trend.update_layout(
+        xaxis_title="Month",
+        yaxis_title="Spend ($)",
+        legend_title=None,
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig_trend, use_container_width=True)
 
 st.divider()
 
@@ -260,6 +337,7 @@ if not f.empty:
             "merchant_name_override": sel_row.get("merchant_name_override"),
             "notes": sel_row.get("notes"),
             "reviewed": sel_row.get("reviewed", False),
+            "refund_status": sel_row.get("refund_status"),
         }
         all_cats = sorted({c for c in f_base["effective_category"].fillna("uncategorized").unique().tolist() if type(c) is str})
         render_annotation_editor(txn_id, current, api_base, key_prefix="cat_", categories=all_cats)

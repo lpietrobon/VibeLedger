@@ -83,6 +83,31 @@ def apply_patches(engine: Engine) -> None:
                 "ADD COLUMN merchant_name_override VARCHAR(255)"
             ))
 
+    if not _has_column(engine, "transaction_annotations", "refund_status"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE transaction_annotations ADD COLUMN refund_status VARCHAR(32)"
+            ))
+
+    if not _has_column(engine, "transaction_annotations", "refund_match_transaction_id"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE transaction_annotations "
+                "ADD COLUMN refund_match_transaction_id INTEGER REFERENCES transactions(id)"
+            ))
+
+    if not _has_column(engine, "transaction_annotations", "refund_reason"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE transaction_annotations ADD COLUMN refund_reason VARCHAR(255)"
+            ))
+
+    if not _has_column(engine, "annotation_fingerprints", "refund_status"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE annotation_fingerprints ADD COLUMN refund_status VARCHAR(32)"
+            ))
+
     if not _has_column(engine, "accounts", "nickname"):
         with engine.begin() as conn:
             conn.execute(text(
@@ -118,10 +143,14 @@ def apply_patches(engine: Engine) -> None:
     # definitions. Recreated on every startup (safe: views hold no data). The
     # Plaid->friendly category CASE is generated from the shared PLAID_FRIENDLY_MAP
     # (app/services/category_resolver.py) so the view and the API agree.
-    from app.services.category_resolver import PLAID_FRIENDLY_MAP
+    from app.services.category_resolver import PLAID_DETAILED_FRIENDLY_MAP, PLAID_FRIENDLY_MAP
 
     friendly_when = "".join(
         f"WHEN '{plaid}' THEN '{friendly}' " for plaid, friendly in PLAID_FRIENDLY_MAP.items()
+    )
+    detailed_friendly_when = "".join(
+        f"WHEN '{plaid}' THEN '{friendly}' "
+        for plaid, friendly in PLAID_DETAILED_FRIENDLY_MAP.items()
     )
     with engine.begin() as conn:
         conn.execute(text("DROP VIEW IF EXISTS effective_transactions"))
@@ -138,15 +167,29 @@ def apply_patches(engine: Engine) -> None:
                 t.merchant_name,
                 t.pending,
                 t.plaid_category_primary,
-                COALESCE(ta.user_category, ta.rule_category, CASE t.plaid_category_primary
+                json_extract(t.raw_json, '$.personal_finance_category.detailed')
+                    AS plaid_category_detailed,
+                COALESCE(ta.user_category, ta.rule_category,
+                    CASE json_extract(t.raw_json, '$.personal_finance_category.detailed')
+                        {detailed_friendly_when}
+                        ELSE NULL
+                    END,
+                    CASE t.plaid_category_primary
                     {friendly_when}
                     ELSE t.plaid_category_primary
-                END, 'uncategorized') AS effective_category,
+                    END,
+                    'uncategorized'
+                ) AS effective_category,
                 COALESCE(ta.merchant_name_override, t.merchant_name)
                     AS effective_merchant,
                 COALESCE(a.nickname, a.name || ' \xb7\xb7' || a.mask)
                     AS effective_account_name,
                 COALESCE(ta.is_transfer_override, 0) AS is_transfer_override,
+                ta.refund_status,
+                ta.refund_match_transaction_id,
+                ta.refund_reason,
+                CASE WHEN ta.refund_status IN ('confirmed', 'likely') THEN 1 ELSE 0 END
+                    AS is_refund,
                 ta.merchant_name_override,
                 ta.user_category,
                 ta.rule_category,
@@ -204,6 +247,13 @@ def apply_patches(engine: Engine) -> None:
             conn.execute(text(
                 "CREATE INDEX ix_transaction_annotations_rule_id "
                 "ON transaction_annotations(rule_id)"
+            ))
+
+    if not _has_index(engine, "transaction_annotations", "ix_transaction_annotations_refund_match_transaction_id"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX ix_transaction_annotations_refund_match_transaction_id "
+                "ON transaction_annotations(refund_match_transaction_id)"
             ))
 
     if not _has_index(engine, "category_decision_events", "ix_category_decision_events_transaction_changed_at"):
