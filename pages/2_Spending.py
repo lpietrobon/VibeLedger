@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import calendar
-import re
 from datetime import date
 
 import pandas as pd
@@ -12,334 +10,369 @@ from dashboard_lib import (
     DEFAULT_DB,
     apply_date_filter,
     apply_scope_filters,
+    apply_transaction_filter_tokens,
     compact_page,
     cumulative_series,
     load_transactions,
+    parse_transaction_filter_query,
     period_bounds_n,
-    render_app_navigation,
     render_annotation_editor,
+    render_app_navigation,
     sidebar_filters,
     spend_transactions,
+    spending_period_summary,
     tech_sidebar,
 )
 
 st.set_page_config(page_title="Spending", layout="wide")
 compact_page()
 render_app_navigation()
-st.title("Spend")
+st.title("Spending")
 
 try:
     df = load_transactions(st.session_state.get("db_path") or DEFAULT_DB)
-except Exception as e:
-    st.error(f"Failed to load DB: {e}")
+except Exception as exc:
+    st.error(f"Failed to load DB: {exc}")
     st.stop()
 
-db_path, start_d, end_d, accounts, excl_xfer = sidebar_filters(df)
+db_path, start_d, end_d, accounts, exclude_transfers = sidebar_filters(df)
 
 if df.empty:
     tech_sidebar()
     st.stop()
 
-cats = sorted(df["effective_category"].fillna("uncategorized").unique().tolist())
-selected_cats = st.sidebar.multiselect("Categories", cats, default=cats, key="cats")
-
+categories = sorted(df["effective_category"].fillna("Uncategorized").unique().tolist())
+selected_categories = st.sidebar.multiselect(
+    "Categories",
+    categories,
+    default=categories,
+    key="spend_categories",
+)
 _, api_base = tech_sidebar()
 
-# ── Omnibar ────────────────────────────────────────────────────────────────────
-_HINT = "e.g.  whole foods  ·  >500  ·  from:2026-05  ·  to:2026-05-31  ·  account:checking"
+if "spend_filters" not in st.session_state:
+    st.session_state.spend_filters = []
+if "spend_search_counter" not in st.session_state:
+    st.session_state.spend_search_counter = 0
 
-if "cat_filters" not in st.session_state:
-    st.session_state.cat_filters = []
-
-
-def _cat_parse_and_add(raw: str) -> None:
-    tokens = raw.strip().split()
-    text_parts: list[str] = []
-    for token in tokens:
-        if m := re.match(r"^(?:cat|category):(.+)$", token, re.I):
-            st.session_state.cat_filters.append(
-                {"type": "category", "value": m.group(1), "label": f"cat: {m.group(1)}"}
-            )
-        elif m := re.match(r"^(?:amount:)?[>≥](\d+(?:\.\d+)?)$", token):
-            v = float(m.group(1))
-            st.session_state.cat_filters.append({"type": "amount_min", "value": v, "label": f"≥ ${v:,.0f}"})
-        elif m := re.match(r"^(?:amount:)?[<≤](\d+(?:\.\d+)?)$", token):
-            v = float(m.group(1))
-            st.session_state.cat_filters.append({"type": "amount_max", "value": v, "label": f"≤ ${v:,.0f}"})
-        elif m := re.match(r"^from:(\d{4}-\d{2}(?:-\d{2})?)$", token, re.I):
-            st.session_state.cat_filters.append({"type": "date_from", "value": m.group(1), "label": f"from {m.group(1)}"})
-        elif m := re.match(r"^to:(\d{4}-\d{2}(?:-\d{2})?)$", token, re.I):
-            st.session_state.cat_filters.append({"type": "date_to", "value": m.group(1), "label": f"to {m.group(1)}"})
-        elif m := re.match(r"^account:(.+)$", token, re.I):
-            st.session_state.cat_filters.append({"type": "account", "value": m.group(1), "label": f"account: {m.group(1)}"})
-        else:
-            text_parts.append(token)
-    if text_parts:
-        text_val = " ".join(text_parts)
-        st.session_state.cat_filters.append({"type": "text", "value": text_val, "label": f'"{text_val}"'})
-
-
-def _cat_apply_omnibar(base_df: pd.DataFrame, skip_dates: bool = False) -> pd.DataFrame:
-    f = base_df.copy()
-    for filt in st.session_state.cat_filters:
-        ft, fv = filt["type"], filt["value"]
-        if skip_dates and ft in ("date_from", "date_to"):
-            continue
-        if ft == "text":
-            term = fv.lower()
-            f = f[
-                f["name"].fillna("").str.lower().str.contains(term, regex=False)
-                | f["effective_merchant"].fillna("").str.lower().str.contains(term, regex=False)
-            ]
-        elif ft == "amount_min":
-            f = f[f["amount"] >= fv]
-        elif ft == "amount_max":
-            f = f[f["amount"] <= fv]
-        elif ft == "category":
-            prefix = fv.lower() + "/"
-            f = f[
-                (f["effective_category"].fillna("").str.lower() == fv.lower())
-                | f["effective_category"].fillna("").str.lower().str.startswith(prefix)
-            ]
-        elif ft == "date_from":
-            parts = list(map(int, fv.split("-")))
-            boundary = date(*parts) if len(parts) == 3 else date(parts[0], parts[1], 1)
-            f = f[f["date"] >= boundary]
-        elif ft == "date_to":
-            parts = list(map(int, fv.split("-")))
-            boundary = date(*parts) if len(parts) == 3 else date(parts[0], parts[1], calendar.monthrange(parts[0], parts[1])[1])
-            f = f[f["date"] <= boundary]
-        elif ft == "account":
-            f = f[f["account_name"].fillna("").str.lower().str.contains(fv.lower(), regex=False)]
-    return f
-
-
-if "cat_omnibar_counter" not in st.session_state:
-    st.session_state.cat_omnibar_counter = 0
-
-
-def _on_cat_omnibar_change():
-    raw = st.session_state.get(f"cat_omnibar_{st.session_state.cat_omnibar_counter}", "").strip()
-    if raw:
-        _cat_parse_and_add(raw)
-        st.session_state.cat_omnibar_counter += 1
-
-
-_today = min(date.today(), end_d) if end_d else date.today()
-
-# ── Apply filters ──────────────────────────────────────────────────────────────
-comparison_base = apply_scope_filters(df, accounts, excl_xfer)
+comparison_base = apply_scope_filters(df, accounts, exclude_transfers)
 comparison_base = comparison_base[
-    comparison_base["effective_category"].fillna("uncategorized").isin(selected_cats)
+    comparison_base["effective_category"].fillna("Uncategorized").isin(selected_categories)
 ]
-f_base = apply_date_filter(comparison_base, start_d, end_d)
-f = _cat_apply_omnibar(f_base)
-f_period = _cat_apply_omnibar(comparison_base, skip_dates=True)
-spend_period = spend_transactions(f_period)
-
-# ── Spending trends ──────────────────────────────────────────────────────────
-granularity = st.radio(
-    "Granularity",
-    ["Monthly", "Yearly"],
-    horizontal=True,
-    key="cat_granularity",
-    label_visibility="collapsed",
+selected_window = apply_date_filter(comparison_base, start_d, end_d)
+filtered_window = apply_transaction_filter_tokens(selected_window, st.session_state.spend_filters)
+comparison_window = apply_transaction_filter_tokens(
+    comparison_base,
+    st.session_state.spend_filters,
+    skip_dates=True,
 )
-gran = "monthly" if granularity == "Monthly" else "yearly"
 
-periods = period_bounds_n(gran, _today, n_periods=4)
-
-period_spends = []
-for p in periods:
-    p_spend = spend_period[(spend_period["date"] >= p["start"]) & (spend_period["date"] <= p["end"])]
-    period_spends.append(p_spend)
-
-cum_frames = []
-for p, p_spend in zip(periods, period_spends):
-    cum = cumulative_series(p_spend, gran, p["len"])
-    cum["series"] = p["label"]
-    cum_frames.append(cum)
-
-combined = pd.concat(cum_frames, ignore_index=True)
-labels = [p["label"] for p in periods]
-x_title = "Day of month" if gran == "monthly" else "Day of year"
-fig3 = px.line(
-    combined, x="x", y="cumulative", color="series",
-    line_dash="series",
-    line_dash_map={labels[0]: "solid", **{lbl: "dot" for lbl in labels[1:]}},
-    category_orders={"series": labels},
-    title="Cumulative spend",
-)
-fig3.update_layout(xaxis_title=x_title, yaxis_title="Cumulative spend ($)", legend_title=None)
-st.plotly_chart(fig3, use_container_width=True)
-
-cur_spend, prev_spend = period_spends[0], period_spends[1]
-cur_label, prev_label = periods[0]["label"], periods[1]["label"]
-m = pd.concat([cur_spend.assign(bucket=cur_label), prev_spend.assign(bucket=prev_label)], ignore_index=True)
-if not m.empty:
-    cmp = m.groupby(["effective_category", "bucket"], as_index=False)["amount"].sum()
-    # Order categories by combined spend so the biggest are at the top
-    order = (
-        cmp.groupby("effective_category", as_index=False)["amount"].sum()
-        .sort_values("amount", ascending=True)
-        .tail(12)["effective_category"]
-        .tolist()
-    )
-    cmp = cmp[cmp["effective_category"].isin(order)]
-    fig2 = px.bar(
-        cmp, x="amount", y="effective_category", color="bucket",
-        barmode="group", orientation="h",
-        category_orders={"effective_category": order, "bucket": [cur_label, prev_label]},
-        title=f"{cur_label} vs {prev_label} by category",
-    )
-    fig2.update_layout(yaxis_title=None, xaxis_title="Spend", legend_title=None)
-    st.plotly_chart(fig2, use_container_width=True)
-else:
-    st.caption("No data for the current or previous period in the filtered range.")
-
-# ── Category and merchant trends ─────────────────────────────────────────────
-st.subheader("Category and merchant trends")
-dimension_label, dimension_control = st.columns([1, 5])
-with dimension_label:
-    st.markdown("**Breakdown**")
-with dimension_control:
-    trend_dimension = st.radio(
-        "Break down by",
-        ["Category", "Merchant"],
-        horizontal=True,
-        key="spend_trend_dimension",
+anchor = min(date.today(), end_d) if end_d else date.today()
+control_col, context_col = st.columns([2, 5])
+with control_col:
+    granularity_label = st.segmented_control(
+        "Period",
+        ["Monthly", "Yearly"],
+        default="Monthly",
         label_visibility="collapsed",
+        key="spend_granularity",
     )
-trend_top_n = st.slider("Top series", 3, 12, 6, key="spend_trend_top_n")
+with context_col:
+    st.caption("Compare the current period with recent history; use sidebar filters to change scope.")
 
-trend_source = spend_transactions(f)
-trend_source["month"] = pd.to_datetime(trend_source["date"]).dt.to_period("M").astype(str)
-if trend_dimension == "Category":
-    trend_source["series"] = (
-        trend_source["effective_category"]
-        .fillna("Uncategorized")
-        .astype(str)
-        .str.split("/")
-        .str[0]
-        .str.strip()
-        .replace("", "Uncategorized")
-    )
+granularity = "yearly" if granularity_label == "Yearly" else "monthly"
+periods = period_bounds_n(granularity, anchor, n_periods=4)
+all_spend = spend_transactions(comparison_window)
+period_spends = [
+    all_spend[(all_spend["date"] >= period["start"]) & (all_spend["date"] <= period["end"])]
+    for period in periods
+]
+
+current_period = periods[0]
+if granularity == "yearly":
+    period_total_days = date(anchor.year, 12, 31).timetuple().tm_yday
 else:
-    trend_source["series"] = trend_source["effective_merchant"].fillna("Unknown")
+    period_total_days = pd.Period(current_period["start"], freq="M").days_in_month
 
-if trend_source.empty:
-    st.caption("No spending data in the filtered range.")
-else:
-    top_series = (
-        trend_source.groupby("series")["amount"]
-        .sum()
-        .abs()
-        .nlargest(trend_top_n)
-        .index
-    )
-    trend = (
-        trend_source[trend_source["series"].isin(top_series)]
-        .groupby(["month", "series"], as_index=False)["amount"]
-        .sum()
-    )
-    month_series_grid = pd.MultiIndex.from_product(
-        [sorted(trend["month"].unique()), top_series],
-        names=["month", "series"],
-    )
-    trend = (
-        trend.set_index(["month", "series"])
-        .reindex(month_series_grid, fill_value=0)
-        .reset_index()
-    )
-    fig_trend = px.area(
-        trend,
-        x="month",
-        y="amount",
-        color="series",
-        title=f"Monthly spend by {'category bucket' if trend_dimension == 'Category' else 'merchant'}",
-    )
-    fig_trend.update_layout(
-        xaxis_title="Month",
-        yaxis_title="Spend ($)",
-        legend_title=None,
-        hovermode="x unified",
-    )
-    st.plotly_chart(fig_trend, use_container_width=True)
+summary = spending_period_summary(
+    period_spends[0],
+    period_spends[1],
+    elapsed_days=current_period["len"],
+    total_days=period_total_days,
+)
+change_text = (
+    f"{summary['change_pct']:+.1f}% vs {periods[1]['label']}"
+    if summary["change_pct"] is not None
+    else f"No {periods[1]['label']} comparison"
+)
+driver = summary["top_driver"] or {"category": "No spending", "amount": 0.0}
 
-st.divider()
-
-# ── Transaction samples ───────────────────────────────────────────────────────
-st.subheader("Transaction samples")
-
-st.text_input(
-    "Filter",
-    label_visibility="collapsed",
-    placeholder=_HINT,
-    key=f"cat_omnibar_{st.session_state.cat_omnibar_counter}",
-    on_change=_on_cat_omnibar_change,
+st.markdown(
+    f"""
+    <style>
+    .spend-summary-grid {{
+        display:grid;
+        grid-template-columns:repeat(4,minmax(0,1fr));
+        gap:.7rem;
+        margin:.2rem 0 .8rem;
+    }}
+    .spend-summary-card {{
+        border:1px solid rgba(128,128,128,.22);
+        border-radius:.7rem;
+        padding:.65rem .75rem;
+        min-width:0;
+    }}
+    .spend-summary-label {{font-size:.78rem;opacity:.72}}
+    .spend-summary-value {{font-size:1.4rem;font-weight:650;line-height:1.2;overflow:hidden;text-overflow:ellipsis}}
+    .spend-summary-note {{font-size:.72rem;opacity:.68;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+    @media(max-width:768px) {{
+        .spend-summary-grid {{grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem}}
+        .spend-summary-card {{padding:.5rem .6rem}}
+        .spend-summary-value {{font-size:1.15rem}}
+    }}
+    </style>
+    <div class="spend-summary-grid">
+      <div class="spend-summary-card"><div class="spend-summary-label">{periods[0]['label']} spend</div><div class="spend-summary-value">${summary['total']:,.0f}</div></div>
+      <div class="spend-summary-card"><div class="spend-summary-label">Period change</div><div class="spend-summary-value">${summary['change']:+,.0f}</div><div class="spend-summary-note">{change_text}</div></div>
+      <div class="spend-summary-card"><div class="spend-summary-label">Projected pace</div><div class="spend-summary-value">${summary['projection']:,.0f}</div><div class="spend-summary-note">At the current daily pace</div></div>
+      <div class="spend-summary-card"><div class="spend-summary-label">Top driver</div><div class="spend-summary-value">{driver['category']}</div><div class="spend-summary-note">${driver['amount']:,.0f}</div></div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-active = st.session_state.cat_filters
-if active:
-    labels_active = [flt["label"] for flt in active]
-    pills_col, clear_col = st.columns([11, 1])
-    with pills_col:
+cumulative_frames = []
+for period, period_spend in zip(periods, period_spends):
+    cumulative = cumulative_series(period_spend, granularity, period["len"])
+    cumulative["series"] = period["label"]
+    cumulative_frames.append(cumulative)
+
+combined = pd.concat(cumulative_frames, ignore_index=True)
+labels = [period["label"] for period in periods]
+primary_chart = px.line(
+    combined,
+    x="x",
+    y="cumulative",
+    color="series",
+    line_dash="series",
+    line_dash_map={labels[0]: "solid", **{label: "dot" for label in labels[1:]}},
+    category_orders={"series": labels},
+    title="Cumulative spending pace",
+)
+primary_chart.update_layout(
+    xaxis_title="Day of month" if granularity == "monthly" else "Day of year",
+    yaxis_title="Spend ($)",
+    legend_title=None,
+    hovermode="x unified",
+    margin={"l": 10, "r": 10, "t": 50, "b": 10},
+)
+st.plotly_chart(primary_chart, width="stretch")
+
+drivers_tab, trends_tab = st.tabs(["Drivers", "Advanced trends"])
+
+with drivers_tab:
+    current_label, previous_label = periods[0]["label"], periods[1]["label"]
+    comparison = pd.concat(
+        [
+            period_spends[0].assign(period=current_label),
+            period_spends[1].assign(period=previous_label),
+        ],
+        ignore_index=True,
+    )
+    if comparison.empty:
+        st.caption("No category comparison is available.")
+    else:
+        comparison["category"] = (
+            comparison["effective_category"]
+            .fillna("Uncategorized")
+            .astype(str)
+            .str.split("/")
+            .str[0]
+            .str.strip()
+            .replace("", "Uncategorized")
+        )
+        category_comparison = (
+            comparison.groupby(["category", "period"], as_index=False)["amount"].sum()
+        )
+        order = (
+            category_comparison.groupby("category")["amount"]
+            .sum()
+            .nlargest(10)
+            .sort_values()
+            .index.tolist()
+        )
+        category_comparison = category_comparison[
+            category_comparison["category"].isin(order)
+        ]
+        driver_chart = px.bar(
+            category_comparison,
+            x="amount",
+            y="category",
+            color="period",
+            barmode="group",
+            orientation="h",
+            category_orders={
+                "category": order,
+                "period": [current_label, previous_label],
+            },
+            title=f"{current_label} vs {previous_label}",
+        )
+        driver_chart.update_layout(
+            xaxis_title="Spend",
+            yaxis_title=None,
+            legend_title=None,
+            margin={"l": 10, "r": 10, "t": 50, "b": 10},
+        )
+        st.plotly_chart(driver_chart, width="stretch")
+
+with trends_tab:
+    option_col, count_col = st.columns(2)
+    with option_col:
+        trend_dimension = st.segmented_control(
+            "Break down by",
+            ["Category", "Merchant"],
+            default="Category",
+            key="spend_trend_dimension",
+        )
+    with count_col:
+        trend_top_n = st.slider("Top series", 3, 10, 5, key="spend_trend_top_n")
+
+    trend_source = spend_transactions(filtered_window).copy()
+    trend_source["month"] = pd.to_datetime(trend_source["date"]).dt.to_period("M").astype(str)
+    if trend_dimension == "Merchant":
+        trend_source["series"] = trend_source["effective_merchant"].fillna("Unknown")
+    else:
+        trend_source["series"] = (
+            trend_source["effective_category"]
+            .fillna("Uncategorized")
+            .astype(str)
+            .str.split("/")
+            .str[0]
+            .str.strip()
+            .replace("", "Uncategorized")
+        )
+
+    if trend_source.empty:
+        st.caption("No spending data in the selected window.")
+    else:
+        top_series = trend_source.groupby("series")["amount"].sum().nlargest(trend_top_n).index
+        trend = (
+            trend_source[trend_source["series"].isin(top_series)]
+            .groupby(["month", "series"], as_index=False)["amount"]
+            .sum()
+        )
+        trend_chart = px.line(
+            trend,
+            x="month",
+            y="amount",
+            color="series",
+            markers=True,
+            title=f"Monthly spending by {trend_dimension.lower()}",
+        )
+        trend_chart.update_layout(
+            xaxis_title="Month",
+            yaxis_title="Spend ($)",
+            legend_title=None,
+            hovermode="x unified",
+            margin={"l": 10, "r": 10, "t": 50, "b": 10},
+        )
+        st.plotly_chart(trend_chart, width="stretch")
+
+with st.expander("Transaction samples and annotation", expanded=False):
+    def on_spend_search_submit() -> None:
+        key = f"spend_search_{st.session_state.spend_search_counter}"
+        raw = st.session_state.get(key, "").strip()
+        if raw:
+            st.session_state.spend_filters.extend(parse_transaction_filter_query(raw))
+            st.session_state.spend_search_counter += 1
+
+    st.text_input(
+        "Search transaction samples",
+        label_visibility="collapsed",
+        placeholder="Merchant or filters: cat:Food  >500  from:2026-05",
+        key=f"spend_search_{st.session_state.spend_search_counter}",
+        on_change=on_spend_search_submit,
+    )
+
+    active_filters = st.session_state.spend_filters
+    if active_filters:
+        labels_active = [item["label"] for item in active_filters]
         remaining = st.pills(
             "Active filters",
             options=labels_active,
             selection_mode="multi",
             default=labels_active,
             label_visibility="collapsed",
-            key="cat_pills",
+            key="spend_filter_pills",
         )
-    with clear_col:
-        if st.button("✕ all", key="cat_chip_clear", use_container_width=True):
-            st.session_state.cat_filters.clear()
+        remaining_set = set(remaining or [])
+        if remaining_set != set(labels_active):
+            st.session_state.spend_filters = [
+                item for item in active_filters if item["label"] in remaining_set
+            ]
             st.rerun()
 
-    remaining_set = set(remaining or [])
-    if remaining_set != set(labels_active):
-        st.session_state.cat_filters = [flt for flt in active if flt["label"] in remaining_set]
-        st.rerun()
-
-if not f.empty:
-    cat_pick = st.selectbox("Pick a category", sorted(f["effective_category"].fillna("uncategorized").unique().tolist()))
-    samples = f[f["effective_category"].fillna("uncategorized") == cat_pick].sort_values("date", ascending=False).head(200)
-
-    display_cols = ["date", "amount", "effective_account_name", "effective_merchant", "name", "effective_category"]
-    available = [c for c in display_cols if c in samples.columns]
-    event = st.dataframe(
-        samples[available].reset_index(drop=True),
-        use_container_width=True,
-        hide_index=True,
-        key="cat_samples_table",
-        on_select="rerun",
-        selection_mode="single-row",
-        column_config={
-            "date": st.column_config.DateColumn("date", width="small"),
-            "amount": st.column_config.NumberColumn("amount", width="small", format="$%.2f"),
-            "effective_account_name": st.column_config.TextColumn("account", width="medium"),
-            "effective_merchant": st.column_config.TextColumn("merchant", width="medium"),
-            "name": st.column_config.TextColumn("name", width=None),
-            "effective_category": st.column_config.TextColumn("category", width="medium"),
-        },
+    samples_source = apply_transaction_filter_tokens(
+        selected_window,
+        st.session_state.spend_filters,
     )
-    st.caption("Click a row to annotate it.")
-
-    selected_rows = (event.selection or {}).get("rows", [])
-    if selected_rows:
-        row_idx = selected_rows[0]
-        sel_row = samples.iloc[row_idx]
-        txn_id = int(sel_row["id"])
-        st.divider()
-        merchant_display = sel_row.get("effective_merchant") or sel_row.get("name", "")
-        st.subheader(f"Annotate: {merchant_display}  ·  {sel_row['date']}  ·  ${float(sel_row['amount']):,.2f}")
-        current = {
-            "user_category": sel_row.get("user_category"),
-            "merchant_name_override": sel_row.get("merchant_name_override"),
-            "notes": sel_row.get("notes"),
-            "reviewed": sel_row.get("reviewed", False),
-            "refund_status": sel_row.get("refund_status"),
-        }
-        all_cats = sorted({c for c in f_base["effective_category"].fillna("uncategorized").unique().tolist() if type(c) is str})
-        render_annotation_editor(txn_id, current, api_base, key_prefix="cat_", categories=all_cats)
+    if samples_source.empty:
+        st.caption("No transactions match the current filters.")
+    else:
+        sample_category = st.selectbox(
+            "Category",
+            sorted(samples_source["effective_category"].fillna("Uncategorized").unique().tolist()),
+            key="spend_sample_category",
+        )
+        samples = (
+            samples_source[
+                samples_source["effective_category"].fillna("Uncategorized") == sample_category
+            ]
+            .sort_values("date", ascending=False)
+            .head(100)
+            .reset_index(drop=True)
+        )
+        available = [
+            column
+            for column in [
+                "date",
+                "amount",
+                "effective_merchant",
+                "effective_account_name",
+                "effective_category",
+            ]
+            if column in samples.columns
+        ]
+        event = st.dataframe(
+            samples[available],
+            width="stretch",
+            height=360,
+            hide_index=True,
+            key="spend_samples_table",
+            on_select="rerun",
+            selection_mode="single-row",
+            column_config={
+                "date": st.column_config.DateColumn("Date", width="small"),
+                "amount": st.column_config.NumberColumn("Amount", width="small", format="$%.2f"),
+                "effective_merchant": st.column_config.TextColumn("Merchant"),
+                "effective_account_name": st.column_config.TextColumn("Account"),
+                "effective_category": st.column_config.TextColumn("Category"),
+            },
+        )
+        selected_rows = (event.selection or {}).get("rows", [])
+        if selected_rows:
+            row = samples.iloc[selected_rows[0]]
+            st.subheader(str(row.get("effective_merchant") or row.get("name") or "Transaction"))
+            render_annotation_editor(
+                int(row["id"]),
+                {
+                    "user_category": row.get("user_category"),
+                    "merchant_name_override": row.get("merchant_name_override"),
+                    "notes": row.get("notes"),
+                    "reviewed": row.get("reviewed", False),
+                    "refund_status": row.get("refund_status"),
+                },
+                api_base,
+                key_prefix="spend_",
+                categories=categories,
+            )

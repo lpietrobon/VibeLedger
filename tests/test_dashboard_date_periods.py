@@ -2,8 +2,13 @@ from datetime import date
 
 import pandas as pd
 
-from dashboard_lib import overview_period_summary, resolve_date_period
-from dashboard_lib import apply_transaction_filter_tokens, parse_transaction_filter_query
+from dashboard_lib import (
+    apply_transaction_filter_tokens,
+    overview_period_summary,
+    parse_transaction_filter_query,
+    resolve_date_period,
+    spending_period_summary,
+)
 
 
 MIN_DATE = date(2024, 1, 1)
@@ -124,3 +129,31 @@ def test_transaction_filter_query_parses_and_applies_common_filters():
     result = apply_transaction_filter_tokens(df, practical_filters)
 
     assert result["date"].tolist() == [date(2026, 6, 5)]
+
+
+def test_spending_period_summary_includes_projection_and_top_driver():
+    current = pd.DataFrame(
+        [
+            {"amount": 100.0, "effective_category": "Food/Groceries"},
+            {"amount": 50.0, "effective_category": "Fun/Events"},
+        ]
+    )
+    previous = pd.DataFrame(
+        [{"amount": 120.0, "effective_category": "Food/Groceries"}]
+    )
+
+    result = spending_period_summary(
+        current,
+        previous,
+        elapsed_days=15,
+        total_days=30,
+    )
+
+    assert result == {
+        "total": 150.0,
+        "previous_total": 120.0,
+        "change": 30.0,
+        "change_pct": 25.0,
+        "projection": 300.0,
+        "top_driver": {"category": "Food", "amount": 100.0},
+    }

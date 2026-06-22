@@ -458,6 +458,54 @@ def overview_period_summary(
     }
 
 
+def spending_period_summary(
+    current: pd.DataFrame,
+    previous: pd.DataFrame,
+    *,
+    elapsed_days: int,
+    total_days: int,
+) -> dict:
+    """Summarize period spend, comparison, pace projection, and top category."""
+    current_total = float(current["amount"].sum()) if not current.empty else 0.0
+    previous_total = float(previous["amount"].sum()) if not previous.empty else 0.0
+    projection = current_total
+    if elapsed_days > 0 and total_days > elapsed_days:
+        projection = current_total / elapsed_days * total_days
+
+    top_driver = None
+    if not current.empty:
+        category = (
+            current["effective_category"]
+            .fillna("Uncategorized")
+            .astype(str)
+            .str.split("/")
+            .str[0]
+            .str.strip()
+            .replace("", "Uncategorized")
+        )
+        totals = (
+            current.assign(summary_category=category)
+            .groupby("summary_category")["amount"]
+            .sum()
+            .sort_values(ascending=False)
+        )
+        if not totals.empty:
+            top_driver = {"category": str(totals.index[0]), "amount": float(totals.iloc[0])}
+
+    return {
+        "total": current_total,
+        "previous_total": previous_total,
+        "change": current_total - previous_total,
+        "change_pct": (
+            (current_total - previous_total) / previous_total * 100
+            if previous_total
+            else None
+        ),
+        "projection": projection,
+        "top_driver": top_driver,
+    }
+
+
 def period_bounds_n(granularity: str, today, n_periods: int = 4) -> list[dict]:
     """Return n_periods period dicts for 'monthly' or 'yearly' granularity, most recent first.
 
