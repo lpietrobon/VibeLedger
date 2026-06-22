@@ -13,6 +13,7 @@ from dashboard_lib import (
     apply_scope_filters,
     compact_page,
     load_transactions,
+    render_app_navigation,
     sidebar_filters,
     spend_transactions,
     tech_sidebar,
@@ -20,6 +21,7 @@ from dashboard_lib import (
 
 st.set_page_config(page_title="Experimental", layout="wide")
 compact_page()
+render_app_navigation()
 st.title("Experimental")
 st.caption("Early-stage views for finding changes and spending patterns.")
 

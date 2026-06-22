@@ -1,6 +1,8 @@
 from datetime import date
 
-from dashboard_lib import resolve_date_period
+import pandas as pd
+
+from dashboard_lib import overview_period_summary, resolve_date_period
 
 
 MIN_DATE = date(2024, 1, 1)
@@ -43,3 +45,45 @@ def test_year_periods():
         date(2025, 1, 1),
         date(2025, 12, 31),
     )
+
+
+def test_overview_period_summary_compares_spend_and_nets_cashflow():
+    df = pd.DataFrame(
+        [
+            {
+                "date": date(2026, 6, 5),
+                "amount": 120.0,
+                "effective_category": "Food/Groceries",
+                "is_refund": False,
+            },
+            {
+                "date": date(2026, 6, 10),
+                "amount": -500.0,
+                "effective_category": "Income/Salary",
+                "is_refund": False,
+            },
+            {
+                "date": date(2026, 5, 8),
+                "amount": 80.0,
+                "effective_category": "Food/Dining",
+                "is_refund": False,
+            },
+        ]
+    )
+
+    result = overview_period_summary(
+        df,
+        date(2026, 6, 1),
+        date(2026, 6, 30),
+        date(2026, 5, 1),
+        date(2026, 5, 31),
+    )
+
+    assert result == {
+        "spend": 120.0,
+        "previous_spend": 80.0,
+        "spend_change": 40.0,
+        "income": 500.0,
+        "net": 380.0,
+        "top_driver": {"category": "Food", "amount": 120.0},
+    }

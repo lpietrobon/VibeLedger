@@ -17,10 +17,12 @@ from dashboard_lib import (
     extract_error_message,
     load_accounts,
     load_transactions,
+    render_app_navigation,
 )
 
 st.set_page_config(page_title="Rules", layout="wide")
 compact_page()
+render_app_navigation()
 st.title("Category rules")
 st.caption("Click a rule to edit it. Use the editor panel below to create or modify rules.")
 

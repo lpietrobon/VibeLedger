@@ -50,6 +50,22 @@ def compact_page() -> None:
     )
 
 
+def render_app_navigation() -> None:
+    """Render task-based navigation and keep operational tools secondary."""
+    with st.sidebar:
+        st.markdown("### VibeLedger")
+        st.page_link("Spend.py", label="Overview", icon=":material/home:")
+        st.page_link("pages/6_Transactions.py", label="Transactions", icon=":material/receipt_long:")
+        st.page_link("pages/2_Spending.py", label="Spending", icon=":material/donut_small:")
+        st.page_link("pages/2_Cashflow.py", label="Cashflow", icon=":material/swap_vert:")
+        st.page_link("pages/1_Accounts.py", label="Accounts", icon=":material/account_balance:")
+        with st.expander("More", expanded=False):
+            st.page_link("pages/3_Cashflow_Sankey.py", label="Flow")
+            st.page_link("pages/0_Transfers.py", label="Transfers")
+            st.page_link("pages/5_Rules.py", label="Rules")
+            st.page_link("pages/4_Experimental.py", label="Experimental")
+
+
 def api_token() -> str | None:
     tok = os.environ.get("VIBELEDGER_API_TOKEN")
     if tok:
@@ -313,6 +329,52 @@ def add_cashflow_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["expense"] = out["amount"].where((out["amount"] > 0) | is_refund, 0)
     out["income"] = (-out["amount"]).where((out["amount"] < 0) & ~is_refund, 0)
     return out
+
+
+def overview_period_summary(
+    df: pd.DataFrame,
+    current_start: date,
+    current_end: date,
+    previous_start: date,
+    previous_end: date,
+) -> dict:
+    """Return current/previous spend, income, net, and top spending driver."""
+    scoped = add_cashflow_columns(df)
+    current = scoped[(scoped["date"] >= current_start) & (scoped["date"] <= current_end)]
+    previous = scoped[(scoped["date"] >= previous_start) & (scoped["date"] <= previous_end)]
+
+    current_spend = float(current["expense"].sum())
+    previous_spend = float(previous["expense"].sum())
+    current_income = float(current["income"].sum())
+    current_net = current_income - current_spend
+
+    top_driver = None
+    if not current.empty:
+        category = (
+            current.assign(
+                overview_category=current["effective_category"]
+                .fillna("Uncategorized")
+                .astype(str)
+                .str.split("/")
+                .str[0]
+                .str.strip()
+                .replace("", "Uncategorized")
+            )
+            .groupby("overview_category")["expense"]
+            .sum()
+            .sort_values(ascending=False)
+        )
+        if not category.empty and float(category.iloc[0]) > 0:
+            top_driver = {"category": str(category.index[0]), "amount": float(category.iloc[0])}
+
+    return {
+        "spend": current_spend,
+        "previous_spend": previous_spend,
+        "spend_change": current_spend - previous_spend,
+        "income": current_income,
+        "net": current_net,
+        "top_driver": top_driver,
+    }
 
 
 def period_bounds_n(granularity: str, today, n_periods: int = 4) -> list[dict]:

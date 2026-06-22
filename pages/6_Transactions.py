@@ -11,6 +11,7 @@ from dashboard_lib import (
     apply_filters,
     compact_page,
     load_transactions,
+    render_app_navigation,
     render_annotation_editor,
     sidebar_filters,
     tech_sidebar,
@@ -18,6 +19,7 @@ from dashboard_lib import (
 
 st.set_page_config(page_title="Transactions – VibeLedger", layout="wide")
 compact_page()
+render_app_navigation()
 st.title("Transactions")
 
 try:

@@ -10,6 +10,7 @@ from dashboard_lib import (
     apply_filters,
     compact_page,
     load_transactions,
+    render_app_navigation,
     sidebar_filters,
     spend_transactions,
     tech_sidebar,
@@ -17,6 +18,7 @@ from dashboard_lib import (
 
 st.set_page_config(page_title="Cashflow Sankey", layout="wide")
 compact_page()
+render_app_navigation()
 st.title("Cashflow Sankey")
 st.caption("See how income flows through top-level spending buckets into individual categories.")
 

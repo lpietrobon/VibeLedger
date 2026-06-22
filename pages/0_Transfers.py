@@ -9,10 +9,12 @@ from dashboard_lib import (
     compact_page,
     load_transactions,
     load_transfer_pairs,
+    render_app_navigation,
 )
 
 st.set_page_config(page_title="Transfers", layout="wide")
 compact_page()
+render_app_navigation()
 st.title("Transfer reconciliation")
 st.caption(
     "Auto-matched pairs excluded from cashflow/category totals. Confirm the good ones; unpair the bad ones."

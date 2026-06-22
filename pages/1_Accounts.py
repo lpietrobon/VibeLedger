@@ -1,10 +1,19 @@
 import pandas as pd
 import streamlit as st
 
-from dashboard_lib import DEFAULT_API, DEFAULT_DB, api_patch, compact_page, extract_error_message, load_accounts
+from dashboard_lib import (
+    DEFAULT_API,
+    DEFAULT_DB,
+    api_patch,
+    compact_page,
+    extract_error_message,
+    load_accounts,
+    render_app_navigation,
+)
 
 st.set_page_config(page_title="Accounts", layout="wide")
 compact_page()
+render_app_navigation()
 st.title("Accounts Summary")
 
 with st.sidebar.expander("Connection settings", expanded=False):

@@ -7,12 +7,14 @@ from dashboard_lib import (
     apply_filters,
     compact_page,
     load_transactions,
+    render_app_navigation,
     sidebar_filters,
     tech_sidebar,
 )
 
 st.set_page_config(page_title="Cashflow", layout="wide")
 compact_page()
+render_app_navigation()
 st.title("Cashflow")
 
 try:

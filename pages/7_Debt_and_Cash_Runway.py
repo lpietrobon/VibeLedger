@@ -1,9 +1,10 @@
 import streamlit as st
 
-from dashboard_lib import compact_page
+from dashboard_lib import compact_page, render_app_navigation
 
 st.set_page_config(page_title="Debt and Cash Runway", layout="wide")
 compact_page()
+render_app_navigation()
 st.title("Debt and cash runway")
 st.info("TODO — this page is a placeholder while the underlying model and goals are designed.")
 
