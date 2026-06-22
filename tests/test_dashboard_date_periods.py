@@ -3,6 +3,7 @@ from datetime import date
 import pandas as pd
 
 from dashboard_lib import overview_period_summary, resolve_date_period
+from dashboard_lib import apply_transaction_filter_tokens, parse_transaction_filter_query
 
 
 MIN_DATE = date(2024, 1, 1)
@@ -87,3 +88,39 @@ def test_overview_period_summary_compares_spend_and_nets_cashflow():
         "net": 380.0,
         "top_driver": {"category": "Food", "amount": 120.0},
     }
+
+
+def test_transaction_filter_query_parses_and_applies_common_filters():
+    filters = parse_transaction_filter_query("coffee cat:Food >10 to:2026-06 uncat")
+    assert [item["type"] for item in filters] == [
+        "category",
+        "amount_min",
+        "date_to",
+        "uncategorized",
+        "text",
+    ]
+
+    df = pd.DataFrame(
+        [
+            {
+                "date": date(2026, 6, 5),
+                "amount": 12.0,
+                "name": "Coffee shop",
+                "effective_merchant": "Coffee",
+                "effective_category": "Food/Dining",
+                "effective_account_name": "Checking",
+            },
+            {
+                "date": date(2026, 7, 5),
+                "amount": 12.0,
+                "name": "Coffee shop",
+                "effective_merchant": "Coffee",
+                "effective_category": "Food/Dining",
+                "effective_account_name": "Checking",
+            },
+        ]
+    )
+    practical_filters = [item for item in filters if item["type"] != "uncategorized"]
+    result = apply_transaction_filter_tokens(df, practical_filters)
+
+    assert result["date"].tolist() == [date(2026, 6, 5)]

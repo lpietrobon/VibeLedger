@@ -7,6 +7,8 @@ logic are exercised end-to-end.
 from __future__ import annotations
 
 import os
+import calendar
+import re
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
@@ -306,6 +308,85 @@ def apply_filters(df: pd.DataFrame, start_d, end_d, accounts, exclude_transfers:
         start_d,
         end_d,
     )
+
+
+def parse_transaction_filter_query(raw: str) -> list[dict]:
+    """Parse the power-user transaction query into reusable filter tokens."""
+    filters: list[dict] = []
+    text_parts: list[str] = []
+    for token in raw.strip().split():
+        if match := re.match(r"^(?:cat|category):(.+)$", token, re.I):
+            filters.append({"type": "category", "value": match.group(1), "label": f"cat: {match.group(1)}"})
+        elif match := re.match(r"^(?:amount:)?[>≥](\d+(?:\.\d+)?)$", token):
+            value = float(match.group(1))
+            filters.append({"type": "amount_min", "value": value, "label": f"≥ ${value:,.0f}"})
+        elif match := re.match(r"^(?:amount:)?[<≤](\d+(?:\.\d+)?)$", token):
+            value = float(match.group(1))
+            filters.append({"type": "amount_max", "value": value, "label": f"≤ ${value:,.0f}"})
+        elif match := re.match(r"^from:(\d{4}-\d{2}(?:-\d{2})?)$", token, re.I):
+            filters.append({"type": "date_from", "value": match.group(1), "label": f"from {match.group(1)}"})
+        elif match := re.match(r"^to:(\d{4}-\d{2}(?:-\d{2})?)$", token, re.I):
+            filters.append({"type": "date_to", "value": match.group(1), "label": f"to {match.group(1)}"})
+        elif match := re.match(r"^account:(.+)$", token, re.I):
+            filters.append({"type": "account", "value": match.group(1), "label": f"account: {match.group(1)}"})
+        elif re.match(r"^uncat(?:egorized)?$", token, re.I):
+            filters.append({"type": "uncategorized", "value": True, "label": "uncategorized only"})
+        else:
+            text_parts.append(token)
+    if text_parts:
+        text_value = " ".join(text_parts)
+        filters.append({"type": "text", "value": text_value, "label": f'"{text_value}"'})
+    return filters
+
+
+def apply_transaction_filter_tokens(
+    df: pd.DataFrame,
+    filters: list[dict],
+    *,
+    skip_dates: bool = False,
+) -> pd.DataFrame:
+    """Apply parsed transaction filters consistently across dashboard pages."""
+    filtered = df.copy()
+    for item in filters:
+        filter_type, value = item["type"], item["value"]
+        if skip_dates and filter_type in {"date_from", "date_to"}:
+            continue
+        if filter_type == "text":
+            term = str(value).lower()
+            filtered = filtered[
+                filtered["name"].fillna("").str.lower().str.contains(term, regex=False)
+                | filtered["effective_merchant"].fillna("").str.lower().str.contains(term, regex=False)
+            ]
+        elif filter_type == "category":
+            category = str(value).lower()
+            category_values = filtered["effective_category"].fillna("").str.lower()
+            filtered = filtered[(category_values == category) | category_values.str.startswith(category + "/")]
+        elif filter_type == "amount_min":
+            filtered = filtered[filtered["amount"] >= value]
+        elif filter_type == "amount_max":
+            filtered = filtered[filtered["amount"] <= value]
+        elif filter_type == "date_from":
+            parts = [int(part) for part in str(value).split("-")]
+            boundary = date(*parts) if len(parts) == 3 else date(parts[0], parts[1], 1)
+            filtered = filtered[filtered["date"] >= boundary]
+        elif filter_type == "date_to":
+            parts = [int(part) for part in str(value).split("-")]
+            boundary = (
+                date(*parts)
+                if len(parts) == 3
+                else date(parts[0], parts[1], calendar.monthrange(parts[0], parts[1])[1])
+            )
+            filtered = filtered[filtered["date"] <= boundary]
+        elif filter_type == "account":
+            account_col = "effective_account_name" if "effective_account_name" in filtered.columns else "account_name"
+            filtered = filtered[
+                filtered[account_col].fillna("").str.lower().str.contains(str(value).lower(), regex=False)
+            ]
+        elif filter_type == "uncategorized":
+            filtered = filtered[
+                filtered["effective_category"].fillna("uncategorized").str.lower().eq("uncategorized")
+            ]
+    return filtered
 
 
 def spend_transactions(df: pd.DataFrame) -> pd.DataFrame:

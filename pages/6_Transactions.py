@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import calendar
-import re
-from datetime import date as dt
-
 import streamlit as st
 
 from dashboard_lib import (
     DEFAULT_DB,
+    api_patch,
     apply_filters,
+    apply_transaction_filter_tokens,
     compact_page,
+    extract_error_message,
     load_transactions,
-    render_app_navigation,
+    parse_transaction_filter_query,
     render_annotation_editor,
+    render_app_navigation,
     sidebar_filters,
     tech_sidebar,
 )
@@ -23,191 +23,238 @@ render_app_navigation()
 st.title("Transactions")
 
 try:
-    df = load_transactions(DEFAULT_DB)
-except Exception as e:
-    st.error(f"Could not load transactions: {e}")
+    df = load_transactions(st.session_state.get("db_path") or DEFAULT_DB)
+except Exception as exc:
+    st.error(f"Could not load transactions: {exc}")
     st.stop()
 
-# Sidebar: shared coarse scope (date range, accounts, transfer toggle)
-db_path, start_d, end_d, accounts, excl_xfer = sidebar_filters(df)
+db_path, start_d, end_d, accounts, exclude_transfers = sidebar_filters(df)
 _, api_base = tech_sidebar()
+base = apply_filters(df, start_d, end_d, accounts, exclude_transfers)
 
-# Apply shared filters → base frame the omnibar further narrows
-f_base = apply_filters(df, start_d, end_d, accounts, excl_xfer)
-
-# ── Omnibar state ─────────────────────────────────────────────────────────────
 if "tx_filters" not in st.session_state:
     st.session_state.tx_filters = []
-
-_HINT = (
-    "e.g.  radio gatsby  ·  cat:Food  ·  >500  ·  <50  ·  "
-    "from:2026-03  ·  to:2026-05  ·  account:checking  ·  uncat"
-)
+if "tx_search_counter" not in st.session_state:
+    st.session_state.tx_search_counter = 0
 
 
-def _parse_and_add(raw: str) -> None:
-    tokens = raw.strip().split()
-    text_parts: list[str] = []
-    for token in tokens:
-        if m := re.match(r"^(?:cat|category):(.+)$", token, re.I):
-            st.session_state.tx_filters.append(
-                {"type": "category", "value": m.group(1), "label": f"cat: {m.group(1)}"}
-            )
-        elif m := re.match(r"^(?:amount:)?[>≥](\d+(?:\.\d+)?)$", token):
-            v = float(m.group(1))
-            st.session_state.tx_filters.append(
-                {"type": "amount_min", "value": v, "label": f"≥ ${v:,.0f}"}
-            )
-        elif m := re.match(r"^(?:amount:)?[<≤](\d+(?:\.\d+)?)$", token):
-            v = float(m.group(1))
-            st.session_state.tx_filters.append(
-                {"type": "amount_max", "value": v, "label": f"≤ ${v:,.0f}"}
-            )
-        elif m := re.match(r"^from:(\d{4}-\d{2}(?:-\d{2})?)$", token, re.I):
-            st.session_state.tx_filters.append(
-                {"type": "date_from", "value": m.group(1), "label": f"from {m.group(1)}"}
-            )
-        elif m := re.match(r"^to:(\d{4}-\d{2}(?:-\d{2})?)$", token, re.I):
-            st.session_state.tx_filters.append(
-                {"type": "date_to", "value": m.group(1), "label": f"to {m.group(1)}"}
-            )
-        elif m := re.match(r"^account:(.+)$", token, re.I):
-            st.session_state.tx_filters.append(
-                {"type": "account", "value": m.group(1), "label": f"account: {m.group(1)}"}
-            )
-        elif re.match(r"^uncat(?:egorized)?$", token, re.I):
-            st.session_state.tx_filters.append(
-                {"type": "uncategorized", "value": True, "label": "uncategorized only"}
-            )
-        else:
-            text_parts.append(token)
-    if text_parts:
-        text_val = " ".join(text_parts)
-        st.session_state.tx_filters.append(
-            {"type": "text", "value": text_val, "label": f'"{text_val}"'}
-        )
-
-
-def _apply_omnibar(base_df):
-    f = base_df.copy()
-    for filt in st.session_state.tx_filters:
-        ft, fv = filt["type"], filt["value"]
-        if ft == "text":
-            term = fv.lower()
-            f = f[
-                f["name"].fillna("").str.lower().str.contains(term, regex=False)
-                | f["effective_merchant"].fillna("").str.lower().str.contains(term, regex=False)
-            ]
-        elif ft == "category":
-            prefix = fv.lower() + "/"
-            f = f[
-                (f["effective_category"].fillna("").str.lower() == fv.lower())
-                | f["effective_category"].fillna("").str.lower().str.startswith(prefix)
-            ]
-        elif ft == "amount_min":
-            f = f[f["amount"] >= fv]
-        elif ft == "amount_max":
-            f = f[f["amount"] <= fv]
-        elif ft == "date_from":
-            parts = list(map(int, fv.split("-")))
-            boundary = dt(*parts) if len(parts) == 3 else dt(parts[0], parts[1], 1)
-            f = f[f["date"] >= boundary]
-        elif ft == "date_to":
-            parts = list(map(int, fv.split("-")))
-            boundary = dt(*parts) if len(parts) == 3 else dt(parts[0], parts[1], calendar.monthrange(parts[0], parts[1])[1])
-            f = f[f["date"] <= boundary]
-        elif ft == "account":
-            f = f[f["account_name"].fillna("").str.lower().str.contains(fv.lower(), regex=False)]
-        elif ft == "uncategorized":
-            f = f[f["effective_category"].fillna("uncategorized") == "uncategorized"]
-    return f
-
-
-# ── Omnibar UI ────────────────────────────────────────────────────────────────
-if "omnibar_counter" not in st.session_state:
-    st.session_state.omnibar_counter = 0
-
-
-def _on_omnibar_change():
-    raw = st.session_state.get(f"omnibar_{st.session_state.omnibar_counter}", "").strip()
+def on_search_submit() -> None:
+    key = f"tx_search_{st.session_state.tx_search_counter}"
+    raw = st.session_state.get(key, "").strip()
     if raw:
-        _parse_and_add(raw)
-        st.session_state.omnibar_counter += 1
+        st.session_state.tx_filters.extend(parse_transaction_filter_query(raw))
+        st.session_state.tx_search_counter += 1
 
 
-st.text_input(
-    "Search",
-    label_visibility="collapsed",
-    placeholder=_HINT,
-    key=f"omnibar_{st.session_state.omnibar_counter}",
-    on_change=_on_omnibar_change,
-)
+search_col, filter_col = st.columns([5, 1])
+with search_col:
+    st.text_input(
+        "Search transactions",
+        label_visibility="collapsed",
+        placeholder="Search merchant or use filters: cat:Food  >500  from:2026-05  uncat",
+        key=f"tx_search_{st.session_state.tx_search_counter}",
+        on_change=on_search_submit,
+    )
 
-# Active filter chips — st.pills renders as native chip elements.
-# Deselecting a chip (clicking it) removes that filter.
-active = st.session_state.tx_filters
-if active:
-    labels = [f["label"] for f in active]
-    pills_col, clear_col = st.columns([11, 1])
-    with pills_col:
+with filter_col:
+    with st.popover("Filters", use_container_width=True):
+        review_filter = st.selectbox(
+            "Review status",
+            ["All", "Needs review", "Reviewed"],
+            key="tx_review_filter",
+        )
+        category_values = (
+            base["effective_category"]
+            .fillna("Uncategorized")
+            .astype(str)
+            .str.split("/")
+            .str[0]
+            .str.strip()
+            .replace("", "Uncategorized")
+        )
+        category_filter = st.selectbox(
+            "Category",
+            ["All"] + sorted(category_values.unique().tolist()),
+            key="tx_category_filter",
+        )
+        minimum_amount = st.number_input(
+            "Minimum amount",
+            min_value=0.0,
+            value=0.0,
+            step=25.0,
+            key="tx_min_amount",
+        )
+        compact_columns = st.checkbox("Compact columns", value=True, key="tx_compact_columns")
+
+active_filters = st.session_state.tx_filters
+if active_filters:
+    labels = [item["label"] for item in active_filters]
+    pill_col, clear_col = st.columns([5, 1])
+    with pill_col:
         remaining = st.pills(
             "Active filters",
             options=labels,
             selection_mode="multi",
             default=labels,
             label_visibility="collapsed",
+            key="tx_filter_pills",
         )
     with clear_col:
-        if st.button("✕ all", key="chip_clear", use_container_width=True):
+        if st.button("Clear", key="tx_clear_filters", use_container_width=True):
             st.session_state.tx_filters.clear()
             st.rerun()
 
     remaining_set = set(remaining or [])
     if remaining_set != set(labels):
-        st.session_state.tx_filters = [f for f in active if f["label"] in remaining_set]
+        st.session_state.tx_filters = [
+            item for item in active_filters if item["label"] in remaining_set
+        ]
         st.rerun()
 
-# ── Apply omnibar filters and show table ─────────────────────────────────────
-f = _apply_omnibar(f_base)
-st.caption(f"{len(f):,} transactions  —  click a row to annotate")
+filtered = apply_transaction_filter_tokens(base, st.session_state.tx_filters)
+if review_filter == "Needs review":
+    filtered = filtered[~filtered["reviewed"].fillna(False).astype(bool)]
+elif review_filter == "Reviewed":
+    filtered = filtered[filtered["reviewed"].fillna(False).astype(bool)]
+if category_filter != "All":
+    categories = (
+        filtered["effective_category"]
+        .fillna("Uncategorized")
+        .astype(str)
+        .str.split("/")
+        .str[0]
+        .str.strip()
+        .replace("", "Uncategorized")
+    )
+    filtered = filtered[categories == category_filter]
+if minimum_amount > 0:
+    filtered = filtered[filtered["amount"].abs() >= minimum_amount]
 
-display_cols = ["date", "amount", "effective_merchant", "name", "effective_account_name", "effective_category", "category_source"]
-available = [c for c in display_cols if c in f.columns]
+filtered = filtered.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
 
-event = st.dataframe(
-    f[available].reset_index(drop=True),
-    use_container_width=True,
-    hide_index=True,
-    key="tx_table",
-    on_select="rerun",
-    selection_mode="single-row",
-    column_config={
-        "date": st.column_config.DateColumn("date", width="small"),
-        "amount": st.column_config.NumberColumn("amount", width="small", format="$%.2f"),
-        "effective_merchant": st.column_config.TextColumn("merchant", width="medium"),
-        "name": st.column_config.TextColumn("name", width=None),
-        "effective_account_name": st.column_config.TextColumn("account", width="medium"),
-        "effective_category": st.column_config.TextColumn("category", width="medium"),
-        "category_source": st.column_config.TextColumn("source", width="small"),
-    },
-)
+# Detail is the first DOM column so it stacks above the list on phones after a
+# selection, while the wider transaction list remains the dominant desktop pane.
+detail_col, list_col = st.columns([2, 3], gap="medium")
+with list_col:
+    st.caption(f"{len(filtered):,} transactions · select one to edit or several for bulk actions")
+    compact_display = ["date", "effective_merchant", "effective_category", "amount"]
+    detailed_display = [
+        "date",
+        "amount",
+        "effective_merchant",
+        "name",
+        "effective_account_name",
+        "effective_category",
+        "category_source",
+    ]
+    display_columns = compact_display if compact_columns else detailed_display
+    available = [column for column in display_columns if column in filtered.columns]
 
-# ── Annotation panel ──────────────────────────────────────────────────────────
-selected_rows = (event.selection or {}).get("rows", [])
-if selected_rows:
-    row = f.iloc[selected_rows[0]]
-    txn_id = int(row["id"])
-    st.divider()
-    merchant_display = row.get("effective_merchant") or row.get("name", "")
-    st.subheader(f"Annotate: {merchant_display}  ·  {row['date']}  ·  ${float(row['amount']):,.2f}")
-    current = {
-        "user_category": row.get("user_category"),
-        "merchant_name_override": row.get("merchant_name_override"),
-        "notes": row.get("notes"),
-        "reviewed": row.get("reviewed", False),
-        "refund_status": row.get("refund_status"),
-    }
-    all_cats = sorted({c for c in df["effective_category"].fillna("uncategorized").unique().tolist() if type(c) is str})
-    render_annotation_editor(txn_id, current, api_base, key_prefix="tx_", categories=all_cats)
-else:
-    st.info("Click a row to annotate it.")
+    event = st.dataframe(
+        filtered[available],
+        width="stretch",
+        height=460,
+        hide_index=True,
+        key="tx_table",
+        on_select="rerun",
+        selection_mode="multi-row",
+        column_config={
+            "date": st.column_config.DateColumn("Date", width="small"),
+            "amount": st.column_config.NumberColumn("Amount", width="small", format="$%.2f"),
+            "effective_merchant": st.column_config.TextColumn("Merchant", width="medium"),
+            "name": st.column_config.TextColumn("Description"),
+            "effective_account_name": st.column_config.TextColumn("Account", width="medium"),
+            "effective_category": st.column_config.TextColumn("Category", width="medium"),
+            "category_source": st.column_config.TextColumn("Source", width="small"),
+        },
+    )
+
+selected_indexes = (event.selection or {}).get("rows", [])
+selected_rows = filtered.iloc[selected_indexes] if selected_indexes else filtered.iloc[0:0]
+if len(selected_rows) == 1:
+    st.session_state.tx_selected_id = int(selected_rows.iloc[0]["id"])
+
+with detail_col:
+    if len(selected_rows) > 1:
+        st.subheader(f"Bulk edit · {len(selected_rows)} selected")
+        st.caption("Apply one focused change across the selected transactions.")
+        bulk_category = st.selectbox(
+            "Category override",
+            ["(no category change)"]
+            + sorted(
+                {
+                    str(value)
+                    for value in df["effective_category"].fillna("Uncategorized").tolist()
+                    if value
+                }
+            ),
+            key="tx_bulk_category",
+        )
+        bulk_review = st.selectbox(
+            "Review status",
+            ["Mark reviewed", "Mark not reviewed"],
+            key="tx_bulk_review",
+        )
+        if st.button("Apply to selected", type="primary", use_container_width=True):
+            failures = []
+            for transaction_id in selected_rows["id"].astype(int).tolist():
+                payload = {"reviewed": bulk_review == "Mark reviewed"}
+                if bulk_category != "(no category change)":
+                    payload["user_category"] = bulk_category
+                response = api_patch(
+                    f"/transactions/{transaction_id}/annotation",
+                    json=payload,
+                    base=api_base,
+                )
+                if not response.ok:
+                    failures.append(
+                        f"#{transaction_id}: {response.status_code} {extract_error_message(response)}"
+                    )
+            if failures:
+                st.error("Some updates failed: " + "; ".join(failures[:5]))
+            else:
+                st.success(f"Updated {len(selected_rows)} transactions.")
+                st.cache_data.clear()
+                st.rerun()
+    else:
+        selected_id = st.session_state.get("tx_selected_id")
+        selected_match = filtered[filtered["id"] == selected_id] if selected_id else filtered.iloc[0:0]
+        if selected_match.empty:
+            st.subheader("Transaction detail")
+            st.info("Select a transaction to review or edit it.")
+        else:
+            row = selected_match.iloc[0]
+            merchant = row.get("effective_merchant") or row.get("name") or "Transaction"
+            st.subheader(str(merchant))
+            st.caption(
+                f"{row['date']} · ${float(row['amount']):,.2f} · "
+                f"{row.get('effective_account_name') or row.get('account_name') or 'Unknown account'}"
+            )
+            st.markdown(f"**Category:** {row.get('effective_category') or 'Uncategorized'}")
+            if row.get("name") and row.get("name") != merchant:
+                st.caption(str(row.get("name")))
+
+            current = {
+                "user_category": row.get("user_category"),
+                "merchant_name_override": row.get("merchant_name_override"),
+                "notes": row.get("notes"),
+                "reviewed": row.get("reviewed", False),
+                "refund_status": row.get("refund_status"),
+            }
+            all_categories = sorted(
+                {
+                    str(value)
+                    for value in df["effective_category"].fillna("Uncategorized").tolist()
+                    if value
+                }
+            )
+            render_annotation_editor(
+                int(row["id"]),
+                current,
+                api_base,
+                key_prefix="tx_",
+                categories=all_categories,
+            )
+            if st.button("Clear selection", use_container_width=True):
+                st.session_state.pop("tx_selected_id", None)
+                st.rerun()
