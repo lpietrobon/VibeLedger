@@ -17,6 +17,23 @@ import pandas as pd
 import requests
 import streamlit as st
 
+# Pure analytical helpers live in analytics_lib (no Streamlit dependency, so they
+# unit-test without the dashboard extra). Re-exported here so pages keep a single
+# import surface.
+from analytics_lib import (  # noqa: F401
+    category_color,
+    category_color_map,
+    category_icon,
+    category_root,
+    cashflow_headline,
+    detect_anomalies,
+    detect_recurring,
+    net_worth_headline,
+    net_worth_timeseries,
+    spending_headline,
+    upcoming_bills,
+)
+
 
 DEFAULT_DB = os.environ.get("VIBELEDGER_DB", str(Path.home() / ".vibeledger" / "vibeledger.db"))
 DEFAULT_API = os.environ.get("VIBELEDGER_API", "http://127.0.0.1:8000")
@@ -57,15 +74,37 @@ def render_app_navigation() -> None:
     with st.sidebar:
         st.markdown("### VibeLedger")
         st.page_link("Spend.py", label="Overview", icon=":material/home:")
+        # Inbox-zero review badge: appears only while something needs a look, and
+        # disappears when the queue is empty (the daily "cleared it" payoff).
+        count = review_count(st.session_state.get("db_path") or DEFAULT_DB)
+        if count:
+            st.page_link(
+                "pages/6_Transactions.py",
+                label=f"{count} to review",
+                icon=":material/priority_high:",
+            )
         st.page_link("pages/6_Transactions.py", label="Transactions", icon=":material/receipt_long:")
         st.page_link("pages/2_Spending.py", label="Spending", icon=":material/donut_small:")
         st.page_link("pages/2_Cashflow.py", label="Cashflow", icon=":material/swap_vert:")
+        st.page_link("pages/8_Recurring.py", label="Recurring", icon=":material/event_repeat:")
         st.page_link("pages/1_Accounts.py", label="Accounts", icon=":material/account_balance:")
         with st.expander("More", expanded=False):
             st.page_link("pages/3_Cashflow_Sankey.py", label="Flow")
             st.page_link("pages/0_Transfers.py", label="Transfers")
             st.page_link("pages/5_Rules.py", label="Rules")
             st.page_link("pages/4_Experimental.py", label="Experimental")
+
+
+@st.cache_data(ttl=60)
+def review_count(db_path: str) -> int:
+    """Number of transactions currently flagged as anomalies (drives the nav badge)."""
+    try:
+        df = load_transactions(db_path)
+        if df.empty:
+            return 0
+        return int(len(detect_anomalies(df, detect_recurring(df))))
+    except Exception:
+        return 0
 
 
 def api_token() -> str | None:
@@ -199,6 +238,40 @@ def load_transfer_pairs(db_path: str) -> pd.DataFrame:
     finally:
         conn.close()
     return df
+
+
+@st.cache_data(ttl=60)
+def load_balance_snapshots(db_path: str) -> pd.DataFrame:
+    """Daily per-account balance snapshots written by each sync."""
+    conn = sqlite3.connect(db_path)
+    try:
+        df = pd.read_sql_query(
+            """
+            SELECT account_id, as_of_date, current_balance, available_balance
+            FROM account_balance_snapshots
+            ORDER BY as_of_date
+            """,
+            conn,
+        )
+    except Exception:
+        # Table may not exist on a very old DB; treat as no history.
+        return pd.DataFrame(columns=["account_id", "as_of_date", "current_balance", "available_balance"])
+    finally:
+        conn.close()
+    return df
+
+
+def md_dollars(text: str) -> str:
+    r"""Escape '$' for st.markdown, which otherwise reads a '$...$' pair as LaTeX math."""
+    return text.replace("$", r"\$")
+
+
+def is_dark_theme() -> bool:
+    """Best-effort read of the configured Streamlit theme, for chart palettes."""
+    try:
+        return (st.get_option("theme.base") or "light").lower() == "dark"
+    except Exception:
+        return False
 
 
 def sidebar_filters(df: pd.DataFrame):

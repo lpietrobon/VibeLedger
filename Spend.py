@@ -7,14 +7,22 @@ import pandas as pd
 import streamlit as st
 
 from dashboard_lib import (
+    DEFAULT_API,
     DEFAULT_DB,
+    api_patch,
+    category_icon,
     compact_page,
+    detect_anomalies,
+    detect_recurring,
+    extract_error_message,
     load_accounts,
     load_transactions,
+    md_dollars,
     overview_period_summary,
     render_app_navigation,
     spend_transactions,
     tech_sidebar,
+    upcoming_bills,
 )
 
 st.set_page_config(page_title="VibeLedger Overview", layout="wide")
@@ -101,6 +109,20 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Plain-language takeaway — every screen leads with a sentence, not just numbers.
+_headline_bits = [f"This month you've spent ${summary['spend']:,.0f}"]
+if spend_delta_pct is not None:
+    _dir = "more" if summary["spend_change"] >= 0 else "less"
+    _headline_bits.append(f"${abs(summary['spend_change']):,.0f} {_dir} than last month")
+if summary["top_driver"]:
+    _headline_bits.append(f"led by {summary['top_driver']['category'].title()}")
+_headline_bits.append(f"net cashflow ${summary['net']:,.0f}")
+st.markdown("#### " + md_dollars(" · ".join(_headline_bits)) + ".")
+
+recurring = detect_recurring(transactions)
+anomalies = detect_anomalies(transactions, recurring)
+api_base = st.session_state.get("api_base") or DEFAULT_API
+
 left, right = st.columns([3, 2])
 with left:
     st.subheader("What changed")
@@ -151,8 +173,10 @@ with left:
     else:
         for row in movers.itertuples():
             st.markdown(
-                f"**{row.category}** · ${row.current:,.0f} "
-                f"({'+' if row.change >= 0 else '−'}${abs(row.change):,.0f})"
+                md_dollars(
+                    f"**{row.category}** · ${row.current:,.0f} "
+                    f"({'+' if row.change >= 0 else '−'}${abs(row.change):,.0f})"
+                )
             )
 
     if summary["top_driver"]:
@@ -163,16 +187,47 @@ with left:
 
 with right:
     st.subheader("Needs attention")
-    needs_review = transactions[
-        (~transactions["is_transfer"])
-        & (~transactions["reviewed"].fillna(False).astype(bool))
-    ].sort_values("date", ascending=False)
-    uncategorized = transactions[
-        transactions["effective_category"].fillna("uncategorized").str.lower().eq("uncategorized")
-    ]
-    st.metric("Unreviewed transactions", f"{len(needs_review):,}")
-    st.metric("Uncategorized transactions", f"{len(uncategorized):,}")
-    st.page_link("pages/6_Transactions.py", label="Review transactions", icon=":material/arrow_forward:")
+    if anomalies.empty:
+        st.success("Nothing unusual — you're all caught up.")
+    else:
+        st.caption(f"{len(anomalies)} transaction(s) worth a look — routine spend is left alone.")
+        for anomaly in anomalies.head(5).itertuples():
+            info_col, action_col = st.columns([5, 1])
+            with info_col:
+                st.markdown(
+                    f":material/{category_icon(anomaly.category)}: {md_dollars(anomaly.message)}  \n"
+                    f"<span style='opacity:.6;font-size:.78rem'>{anomaly.date:%b %-d}</span>",
+                    unsafe_allow_html=True,
+                )
+            with action_col:
+                if st.button("OK", key=f"anom_ok_{anomaly.id}", help="Mark reviewed — clears it"):
+                    resp = api_patch(
+                        f"/transactions/{anomaly.id}/annotation",
+                        json={"reviewed": True},
+                        base=api_base,
+                    )
+                    if resp.ok:
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(extract_error_message(resp))
+        st.page_link("pages/6_Transactions.py", label="Review all", icon=":material/arrow_forward:")
+
+    bills = upcoming_bills(recurring, today, horizon_days=14)
+    if not bills.empty:
+        st.subheader("Upcoming bills")
+        st.caption("Next 14 days, from detected recurring charges.")
+        for bill in bills.head(6).itertuples():
+            st.markdown(
+                md_dollars(
+                    f":material/{category_icon(bill.category)}: **{bill.merchant}** — "
+                    f"${bill.last_amount:,.0f}"
+                )
+                + "  \n"
+                f"<span style='opacity:.6;font-size:.78rem'>~{bill.next_date:%b %-d}</span>",
+                unsafe_allow_html=True,
+            )
+        st.page_link("pages/8_Recurring.py", label="All recurring", icon=":material/arrow_forward:")
 
 st.subheader("Recent transactions")
 recent = transactions[~transactions["is_transfer"]].sort_values("date", ascending=False).head(8)

@@ -8,7 +8,9 @@ from dashboard_lib import (
     DEFAULT_DB,
     add_cashflow_columns,
     apply_filters,
+    category_color,
     compact_page,
+    is_dark_theme,
     load_transactions,
     render_app_navigation,
     sidebar_filters,
@@ -179,12 +181,17 @@ if savings_idx is not None:
     values.append(savings)
     colors.append("rgba(31, 119, 180, 0.45)")
 
+# Spending buckets (and their expanded children) wear their stable app-wide
+# category color, so "Food" is the same hue here as on every other page.
+dark = is_dark_theme()
 node_colors = ["#2ca02c"]
 node_colors.extend(["#8fd18f"] * len(visible_income_totals))
 if deficit_idx is not None:
     node_colors.append("#d62728")
-node_colors.extend(["#9467bd"] * len(bucket_totals))
-node_colors.extend(["#c5a3de"] * len(visible_category_totals))
+node_colors.extend([category_color(bucket, dark) for bucket in bucket_totals.index])
+node_colors.extend(
+    [category_color(row.bucket, dark) for row in visible_category_totals.itertuples(index=False)]
+)
 if savings_idx is not None:
     node_colors.append("#1f77b4")
 

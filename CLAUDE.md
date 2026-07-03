@@ -86,17 +86,21 @@ app/
     scheduler.py               # Background scheduled sync loop
     transfer_detector.py       # Heuristic pair-match for double-entry transfers
     refund_detector.py         # High-confidence refund matching + manual override support
-Spend.py                     # Streamlit entry page and spending analysis
-dashboard_lib.py             # Cached SQLite loaders + HTTP helpers for mutations
+Spend.py                     # Streamlit entry/overview: headline, anomaly review, upcoming bills
+dashboard_lib.py             # Cached SQLite loaders + HTTP helpers + Streamlit rendering glue
+analytics_lib.py             # Pure (Streamlit-free) analytics: category colors/icons, recurring
+                             #   detection, anomaly detection, net worth series, chart headlines
 pages/
   0_Transfers.py             # Review queue: confirm/unpair, manual pairing
-  1_Accounts.py              # Balances grouped by type, net worth estimate
+  1_Accounts.py              # Balances by type + net worth over time (from balance snapshots)
   2_Cashflow.py              # Income, expenses, and net cashflow trend
+  2_Spending.py              # Spending pace, drivers, and category/merchant trends
   3_Cashflow_Sankey.py       # Income allocation into top-level category buckets
   4_Experimental.py          # Month-over-month movers and calendar heatmap
   5_Rules.py                 # Category rule management
   6_Transactions.py          # Transaction browsing and annotation
   7_Debt_and_Cash_Runway.py  # Placeholder for debt payoff and runway planning
+  8_Recurring.py             # Recurring/subscription detection, upcoming bills, price changes
 scripts/
   connect_funnel.sh          # Tailscale Funnel automation for connect flow
   backup_db.sh               # SQLite backup (cron-friendly, 30-day retention)
@@ -138,6 +142,13 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 - Reads SQLite directly (cached, fast); writes go through the FastAPI endpoints (auth/validation/transfer logic stay centralized).
 - Date range pickers default to the last 90 days even though more history may be loaded — widen the range to see older data.
 - Restart after changes: `systemctl --user restart vibeledger-dash`.
+- **Derived analytics live in `analytics_lib.py`** (pure pandas, no Streamlit → unit-tested directly):
+  - **Category identity**: `category_color`/`category_icon` pin each top-level category to one hue (validated colorblind-safe palette) + Material icon, used across every chart/list. `md_dollars()` in `dashboard_lib` escapes `$` for `st.markdown` (a `$…$` pair renders as LaTeX otherwise).
+  - **Recurring detection** (`detect_recurring`/`upcoming_bills`): groups by merchant, finds regular cadence (weekly→yearly), flags subscription price hikes. Surfaced on the Overview and the Recurring page. Pure heuristic, no stored table.
+  - **Anomaly review** (`detect_anomalies`): the "needs attention" surface — NOT a confirm-everything queue. Flags only price increases, per-merchant amount outliers, category mismatches, and large uncategorized charges, and only for *unreviewed* rows. Marking a txn `reviewed` (the "OK" button → `PATCH .../annotation`) clears it and the nav badge. Add a new signal = add one block; nothing to migrate.
+  - **Net worth over time** (`net_worth_timeseries`): forward-fills the per-account `account_balance_snapshots` (written by every sync) into a daily assets−liabilities series on the Accounts page.
+  - **Chart headlines**: `spending_headline`/`cashflow_headline`/`net_worth_headline` turn each chart's own numbers into one plain-language sentence above it.
+- Page render is covered headlessly by `tests/test_dashboard_pages_smoke.py` (Streamlit `AppTest` against a seeded temp DB).
 
 ## Key design decisions
 

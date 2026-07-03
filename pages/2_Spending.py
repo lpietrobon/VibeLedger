@@ -11,15 +11,19 @@ from dashboard_lib import (
     apply_date_filter,
     apply_scope_filters,
     apply_transaction_filter_tokens,
+    category_color_map,
     compact_page,
     cumulative_series,
+    is_dark_theme,
     load_transactions,
+    md_dollars,
     parse_transaction_filter_query,
     period_bounds_n,
     render_annotation_editor,
     render_app_navigation,
     sidebar_filters,
     spend_transactions,
+    spending_headline,
     spending_period_summary,
     tech_sidebar,
 )
@@ -141,6 +145,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.markdown("#### " + md_dollars(spending_headline(summary, periods[0]["label"], periods[1]["label"])))
+
 cumulative_frames = []
 for period, period_spend in zip(periods, period_spends):
     cumulative = cumulative_series(period_spend, granularity, period["len"])
@@ -261,11 +267,19 @@ with trends_tab:
             .groupby(["month", "series"], as_index=False)["amount"]
             .sum()
         )
+        # Category series get their stable app-wide colors; merchants fall back to
+        # the default sequence (they have no fixed identity color).
+        color_map = (
+            category_color_map(top_series, is_dark_theme())
+            if trend_dimension == "Category"
+            else None
+        )
         trend_chart = px.line(
             trend,
             x="month",
             y="amount",
             color="series",
+            color_discrete_map=color_map,
             markers=True,
             title=f"Monthly spending by {trend_dimension.lower()}",
         )

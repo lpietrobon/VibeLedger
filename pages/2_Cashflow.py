@@ -5,8 +5,10 @@ import streamlit as st
 from dashboard_lib import (
     add_cashflow_columns,
     apply_filters,
+    cashflow_headline,
     compact_page,
     load_transactions,
+    md_dollars,
     render_app_navigation,
     sidebar_filters,
     tech_sidebar,
@@ -39,6 +41,8 @@ monthly = f.groupby("month", as_index=False).agg(
     income=("income", "sum"),
 )
 monthly["net"] = monthly["income"] - monthly["expense"]
+
+st.markdown("#### " + md_dollars(cashflow_headline(monthly)))
 
 fig = go.Figure()
 fig.add_trace(
