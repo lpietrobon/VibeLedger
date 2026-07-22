@@ -39,6 +39,10 @@ class PatchAnnotationRequest(BaseModel):
     refund_status: Literal["confirmed", "not_refund", "auto"] | None = None
 
 
+class BatchPatchAnnotationRequest(PatchAnnotationRequest):
+    transaction_ids: list[int] = Field(..., min_length=1, max_length=500)
+
+
 class PatchAccountRequest(BaseModel):
     nickname: str | None = None
 

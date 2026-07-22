@@ -4,6 +4,7 @@ import calendar
 from datetime import date, timedelta
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from dashboard_lib import (
@@ -103,7 +104,7 @@ st.markdown(
 
 left, right = st.columns([3, 2])
 with left:
-    st.subheader("What changed")
+    st.subheader("Spending change")
     current_spend = spend_transactions(
         transactions[
             (transactions["date"] >= current_start)
@@ -138,6 +139,62 @@ with left:
             .rename(columns={"amount": value_name})
         )
 
+    current_label = f"{calendar.month_abbr[current_start.month]} {current_start.year}"
+    previous_label = f"{calendar.month_abbr[previous_start.month]} {previous_start.year}"
+    spend_comparison = pd.concat(
+        [
+            current_spend.assign(period=current_label),
+            previous_spend.assign(period=previous_label),
+        ],
+        ignore_index=True,
+    )
+    if spend_comparison.empty:
+        st.caption("No current or previous month spending to compare yet.")
+    else:
+        spend_comparison["category"] = (
+            spend_comparison["effective_category"]
+            .fillna("Uncategorized")
+            .astype(str)
+            .str.split("/")
+            .str[0]
+            .str.strip()
+            .replace("", "Uncategorized")
+        )
+        category_comparison = (
+            spend_comparison.groupby(["category", "period"], as_index=False)["amount"].sum()
+        )
+        order = (
+            category_comparison.groupby("category")["amount"]
+            .sum()
+            .nlargest(12)
+            .sort_values()
+            .index.tolist()
+        )
+        category_comparison = category_comparison[
+            category_comparison["category"].isin(order)
+        ]
+        spend_chart = px.bar(
+            category_comparison,
+            x="amount",
+            y="category",
+            color="period",
+            barmode="group",
+            orientation="h",
+            category_orders={
+                "category": order,
+                "period": [current_label, previous_label],
+            },
+            title=f"{current_label} vs {previous_label} by category",
+        )
+        spend_chart.update_layout(
+            xaxis_title="Spend",
+            yaxis_title=None,
+            legend_title=None,
+            margin={"l": 10, "r": 10, "t": 50, "b": 10},
+            hovermode="y unified",
+        )
+        st.plotly_chart(spend_chart, width="stretch")
+
     movers = category_totals(current_spend, "current").merge(
         category_totals(previous_spend, "previous"),
         on="category",
@@ -146,18 +203,11 @@ with left:
     movers["change"] = movers["current"] - movers["previous"]
     movers = movers.sort_values("change", ascending=False).head(5)
 
-    if movers.empty:
-        st.caption("No spending changes to show yet.")
-    else:
-        for row in movers.itertuples():
-            st.markdown(
-                f"**{row.category}** · ${row.current:,.0f} "
-                f"({'+' if row.change >= 0 else '−'}${abs(row.change):,.0f})"
-            )
-
     if summary["top_driver"]:
         driver = summary["top_driver"]
         st.caption(f"Top current-month driver: {driver['category']} at ${driver['amount']:,.0f}.")
+    elif movers.empty:
+        st.caption("No spending changes to show yet.")
 
     st.page_link("pages/2_Spending.py", label="Explore spending", icon=":material/arrow_forward:")
 

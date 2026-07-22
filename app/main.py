@@ -1,7 +1,10 @@
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.routes import router
@@ -47,3 +50,18 @@ if settings.allowed_hosts:
 
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts.split(","))
 app.include_router(router)
+
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+FRONTEND_INDEX = FRONTEND_DIST / "index.html"
+
+if FRONTEND_INDEX.exists():
+    app.mount(
+        "/frontend/assets",
+        StaticFiles(directory=FRONTEND_DIST / "assets"),
+        name="frontend-assets",
+    )
+
+    @app.get("/frontend", include_in_schema=False)
+    @app.get("/frontend/{_:path}", include_in_schema=False)
+    def frontend_app() -> FileResponse:
+        return FileResponse(FRONTEND_INDEX)

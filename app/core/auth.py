@@ -5,7 +5,14 @@ from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
-_EXEMPT_PREFIXES = ("/health", "/connect/start", "/connect/complete", "/docs", "/openapi.json")
+_EXEMPT_PREFIXES = (
+    "/health",
+    "/connect/start",
+    "/connect/complete",
+    "/docs",
+    "/openapi.json",
+    "/frontend",
+)
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):

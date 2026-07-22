@@ -32,6 +32,7 @@ from app.models.models import (
     TransferPair,
 )
 from app.schemas.plaid import (
+    BatchPatchAnnotationRequest,
     CategoryRuleApplyRequest,
     CategoryRuleCreateRequest,
     CategoryRulePatchRequest,
@@ -83,6 +84,13 @@ def _friendly_plaid_case():
     return func.coalesce(
         detailed_case,
         case(*whens, else_=Transaction.plaid_category_primary),
+    )
+
+
+def _plaid_detailed_category_expr():
+    return func.json_extract(
+        Transaction.raw_json,
+        "$.personal_finance_category.detailed",
     )
 
 
@@ -397,12 +405,23 @@ def list_transactions(
 ):
     effective_category = _effective_category_expr().label("effective_category")
     category_source = _category_source_expr().label("category_source")
+    effective_merchant = _effective_merchant_expr().label("effective_merchant")
+    effective_account_name = _effective_account_name_expr().label("effective_account_name")
+    plaid_category_detailed = _plaid_detailed_category_expr().label("plaid_category_detailed")
+    plaid_category_friendly = _friendly_plaid_case().label("plaid_category_friendly")
 
     base = db.query(
         Transaction,
         TransactionAnnotation,
         effective_category,
         category_source,
+        effective_merchant,
+        effective_account_name,
+        plaid_category_detailed,
+        plaid_category_friendly,
+    ).join(
+        Account,
+        Account.id == Transaction.account_id,
     ).outerjoin(
         TransactionAnnotation,
         Transaction.id == TransactionAnnotation.transaction_id,
@@ -432,7 +451,12 @@ def list_transactions(
                 "amount": round(float(t.amount), 2),
                 "name": t.name,
                 "merchant_name": t.merchant_name,
+                "effective_merchant": resolved_merchant,
+                "effective_account_name": resolved_account_name,
                 "pending": t.pending,
+                "plaid_category_primary": t.plaid_category_primary,
+                "plaid_category_detailed": plaid_detailed,
+                "plaid_category_friendly": plaid_friendly,
                 "effective_category": resolved_category,
                 "category_source": resolved_source,
                 "rule_id": a.rule_id if (a and resolved_source == "rule") else None,
@@ -446,7 +470,16 @@ def list_transactions(
                     "reviewed": a.reviewed if a else False,
                 },
             }
-            for t, a, resolved_category, resolved_source in rows
+            for (
+                t,
+                a,
+                resolved_category,
+                resolved_source,
+                resolved_merchant,
+                resolved_account_name,
+                plaid_detailed,
+                plaid_friendly,
+            ) in rows
         ],
     }
 
@@ -457,21 +490,50 @@ def patch_annotation(transaction_id: int, payload: PatchAnnotationRequest, db: S
     if not tx:
         raise HTTPException(status_code=404, detail="transaction not found")
 
+    _apply_annotation_payload(db, tx, payload)
+
+    db.commit()
+    if payload.refund_status == "auto":
+        classify_refunds(db)
+    return {"status": "ok", "transaction_id": transaction_id}
+
+
+@router.patch("/transactions/annotations/batch")
+def patch_annotations_batch(payload: BatchPatchAnnotationRequest, db: Session = Depends(get_db)):
+    transaction_ids = list(dict.fromkeys(payload.transaction_ids))
+    rows = db.query(Transaction).filter(Transaction.id.in_(transaction_ids)).all()
+    found_ids = {tx.id for tx in rows}
+    missing_ids = [tx_id for tx_id in transaction_ids if tx_id not in found_ids]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail={"missing_transaction_ids": missing_ids})
+
+    for tx in rows:
+        _apply_annotation_payload(db, tx, payload)
+
+    db.commit()
+    if payload.refund_status == "auto":
+        classify_refunds(db)
+    return {"status": "ok", "transaction_ids": transaction_ids, "updated": len(rows)}
+
+
+def _apply_annotation_payload(db: Session, tx: Transaction, payload: PatchAnnotationRequest) -> TransactionAnnotation:
     annotation = (
         db.query(TransactionAnnotation)
-        .filter(TransactionAnnotation.transaction_id == transaction_id)
+        .filter(TransactionAnnotation.transaction_id == tx.id)
         .first()
     )
     if not annotation:
-        annotation = TransactionAnnotation(transaction_id=transaction_id)
+        annotation = TransactionAnnotation(transaction_id=tx.id)
         db.add(annotation)
 
-    if payload.user_category is not None:
-        annotation.user_category = payload.user_category
-    if payload.merchant_name_override is not None:
+    fields_set = payload.model_fields_set
+
+    if "user_category" in fields_set:
+        annotation.user_category = payload.user_category or None
+    if "merchant_name_override" in fields_set:
         annotation.merchant_name_override = payload.merchant_name_override or None
-    if payload.notes is not None:
-        annotation.notes = payload.notes
+    if "notes" in fields_set:
+        annotation.notes = payload.notes or None
     if payload.reviewed is not None:
         annotation.reviewed = payload.reviewed
     if payload.refund_status is not None:
@@ -516,10 +578,7 @@ def patch_annotation(transaction_id: int, payload: PatchAnnotationRequest, db: S
         fingerprint.applied_transaction_id = tx.id
         fingerprint.applied_at = utcnow()
 
-    db.commit()
-    if payload.refund_status == "auto":
-        classify_refunds(db)
-    return {"status": "ok", "transaction_id": transaction_id}
+    return annotation
 
 
 @router.get("/annotations/fingerprints")
@@ -1038,6 +1097,8 @@ def accounts_summary(db: Session = Depends(get_db)):
         by_type.setdefault(a.type or "other", []).append({
             "id": a.id,
             "name": a.name,
+            "display_name": a.nickname or a.name,
+            "nickname": a.nickname,
             "mask": a.mask,
             "subtype": a.subtype,
             "current_balance": round(bal, 2),

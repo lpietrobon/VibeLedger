@@ -1,4 +1,5 @@
 from datetime import date
+import json
 
 from fastapi.testclient import TestClient
 
@@ -9,7 +10,17 @@ from app.services.security import encrypt_token
 from tests.conftest import AUTH_HEADERS
 
 
-def _seed_transaction(item_plaid_id: str, account_plaid_id: str, tx_plaid_id: str, tx_date: date, amount: float, name: str, plaid_category: str | None = None, merchant_name: str | None = None):
+def _seed_transaction(
+    item_plaid_id: str,
+    account_plaid_id: str,
+    tx_plaid_id: str,
+    tx_date: date,
+    amount: float,
+    name: str,
+    plaid_category: str | None = None,
+    merchant_name: str | None = None,
+    raw_json: str | None = None,
+):
     with SessionLocal() as db:
         item = Item(plaid_item_id=item_plaid_id, access_token_encrypted=encrypt_token("tok"), status="active")
         db.add(item)
@@ -28,6 +39,7 @@ def _seed_transaction(item_plaid_id: str, account_plaid_id: str, tx_plaid_id: st
             name=name,
             merchant_name=merchant_name,
             plaid_category_primary=plaid_category,
+            raw_json=raw_json,
             pending=False,
         )
         db.add(tx)
@@ -69,6 +81,154 @@ def test_transaction_filter_matches_unannotated_plaid_category():
         r = client.get("/transactions", params={"category": "TRANSPORT/OTHER"}, headers=AUTH_HEADERS)
     assert r.status_code == 200
     assert [row["plaid_transaction_id"] for row in r.json()["items"]] == ["tx-untagged"]
+
+
+def test_user_category_override_can_be_cleared_with_null_or_empty_string():
+    tx_id = _seed_transaction(
+        "item-clear-cat",
+        "acct-clear-cat",
+        "tx-clear-cat",
+        date(2026, 4, 7),
+        22.0,
+        "Corner Market",
+        plaid_category="GENERAL_MERCHANDISE",
+    )
+
+    with TestClient(app) as client:
+        set_resp = client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"user_category": "FOOD/GROCERIES"},
+            headers=AUTH_HEADERS,
+        )
+        assert set_resp.status_code == 200
+
+        cleared_null = client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"user_category": None},
+            headers=AUTH_HEADERS,
+        )
+        assert cleared_null.status_code == 200
+
+        row = client.get(
+            "/transactions",
+            params={"start_date": "2026-04-07", "end_date": "2026-04-07"},
+            headers=AUTH_HEADERS,
+        ).json()["items"][0]
+        assert row["annotation"]["user_category"] is None
+        assert row["effective_category"] == "SHOPPING/GENERAL"
+        assert row["category_source"] == "plaid"
+
+        reset_resp = client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"user_category": "FOOD/DINING"},
+            headers=AUTH_HEADERS,
+        )
+        assert reset_resp.status_code == 200
+
+        cleared_empty = client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"user_category": ""},
+            headers=AUTH_HEADERS,
+        )
+        assert cleared_empty.status_code == 200
+
+        row = client.get(
+            "/transactions",
+            params={"start_date": "2026-04-07", "end_date": "2026-04-07"},
+            headers=AUTH_HEADERS,
+        ).json()["items"][0]
+        assert row["annotation"]["user_category"] is None
+        assert row["effective_category"] == "SHOPPING/GENERAL"
+        assert row["category_source"] == "plaid"
+
+
+def test_batch_annotation_patch_only_updates_fields_present_in_payload():
+    tx_a = _seed_transaction(
+        "item-batch-a",
+        "acct-batch-a",
+        "tx-batch-a",
+        date(2026, 4, 9),
+        31.0,
+        "Batch A",
+        plaid_category="DINING",
+    )
+    tx_b = _seed_transaction(
+        "item-batch-b",
+        "acct-batch-b",
+        "tx-batch-b",
+        date(2026, 4, 9),
+        42.0,
+        "Batch B",
+        plaid_category="GENERAL_MERCHANDISE",
+    )
+
+    with TestClient(app) as client:
+        seed_a = client.patch(
+            f"/transactions/{tx_a}/annotation",
+            json={"notes": "keep a", "merchant_name_override": "Merchant A"},
+            headers=AUTH_HEADERS,
+        )
+        seed_b = client.patch(
+            f"/transactions/{tx_b}/annotation",
+            json={"notes": "keep b", "merchant_name_override": "Merchant B"},
+            headers=AUTH_HEADERS,
+        )
+        assert seed_a.status_code == 200
+        assert seed_b.status_code == 200
+
+        batch = client.patch(
+            "/transactions/annotations/batch",
+            json={"transaction_ids": [tx_a, tx_b], "user_category": "BUSINESS/TOOLS", "reviewed": True},
+            headers=AUTH_HEADERS,
+        )
+        assert batch.status_code == 200
+        assert batch.json()["updated"] == 2
+
+        rows = client.get(
+            "/transactions",
+            params={"start_date": "2026-04-09", "end_date": "2026-04-09"},
+            headers=AUTH_HEADERS,
+        ).json()["items"]
+
+    by_id = {row["id"]: row for row in rows}
+    assert by_id[tx_a]["annotation"]["user_category"] == "BUSINESS/TOOLS"
+    assert by_id[tx_a]["annotation"]["reviewed"] is True
+    assert by_id[tx_a]["annotation"]["notes"] == "keep a"
+    assert by_id[tx_a]["annotation"]["merchant_name_override"] == "Merchant A"
+    assert by_id[tx_b]["annotation"]["user_category"] == "BUSINESS/TOOLS"
+    assert by_id[tx_b]["annotation"]["reviewed"] is True
+    assert by_id[tx_b]["annotation"]["notes"] == "keep b"
+    assert by_id[tx_b]["annotation"]["merchant_name_override"] == "Merchant B"
+
+
+def test_batch_annotation_patch_rejects_missing_transaction_without_partial_update():
+    tx_id = _seed_transaction(
+        "item-batch-missing",
+        "acct-batch-missing",
+        "tx-batch-missing",
+        date(2026, 4, 10),
+        18.0,
+        "Batch Missing",
+        plaid_category="DINING",
+    )
+
+    with TestClient(app) as client:
+        batch = client.patch(
+            "/transactions/annotations/batch",
+            json={"transaction_ids": [tx_id, 999999], "user_category": "SHOULD/NOT_APPLY"},
+            headers=AUTH_HEADERS,
+        )
+        assert batch.status_code == 404
+        assert batch.json()["detail"] == {"missing_transaction_ids": [999999]}
+
+        row = client.get(
+            "/transactions",
+            params={"start_date": "2026-04-10", "end_date": "2026-04-10"},
+            headers=AUTH_HEADERS,
+        ).json()["items"][0]
+
+    assert row["annotation"]["user_category"] is None
+    assert row["effective_category"] == "DINING"
 
 
 def test_transaction_pagination():
@@ -142,6 +302,46 @@ def test_transactions_include_effective_category_source_and_rule_id_contract():
     assert uncategorized_row["rule_id"] is None
 
     assert rule_id is not None
+
+
+def test_transactions_include_bank_category_contract_separate_from_effective_category():
+    tx_id = _seed_transaction(
+        "item-bank-cat",
+        "acct-bank-cat",
+        "tx-bank-cat",
+        date(2026, 4, 8),
+        77.0,
+        "Sonic Internet",
+        plaid_category="RENT_AND_UTILITIES",
+        raw_json=json.dumps(
+            {
+                "personal_finance_category": {
+                    "primary": "RENT_AND_UTILITIES",
+                    "detailed": "RENT_AND_UTILITIES_INTERNET_AND_CABLE",
+                }
+            }
+        ),
+    )
+
+    with TestClient(app) as client:
+        client.patch(
+            f"/transactions/{tx_id}/annotation",
+            json={"user_category": "HOUSING"},
+            headers=AUTH_HEADERS,
+        )
+        r = client.get(
+            "/transactions",
+            params={"start_date": "2026-04-08", "end_date": "2026-04-08"},
+            headers=AUTH_HEADERS,
+        )
+
+    assert r.status_code == 200
+    row = r.json()["items"][0]
+    assert row["plaid_category_primary"] == "RENT_AND_UTILITIES"
+    assert row["plaid_category_detailed"] == "RENT_AND_UTILITIES_INTERNET_AND_CABLE"
+    assert row["plaid_category_friendly"] == "HOUSING/UTILITIES"
+    assert row["effective_category"] == "HOUSING"
+    assert row["category_source"] == "manual"
 
 
 def test_merchant_name_override_patch_and_roundtrip():

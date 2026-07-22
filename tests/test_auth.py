@@ -40,3 +40,9 @@ def test_connect_complete_exempt_from_auth():
     with TestClient(app) as client:
         r = client.post("/connect/complete", json={"session_token": "bad", "public_token": "pub"})
     assert r.status_code == 400  # invalid session, not 401
+
+
+def test_frontend_exempt_from_auth_when_built():
+    with TestClient(app) as client:
+        r = client.get("/frontend")
+    assert r.status_code != 401
