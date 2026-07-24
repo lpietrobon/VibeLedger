@@ -107,7 +107,8 @@ pages/
   8_Recurring.py             # Subscriptions & recurring payments review (reads /analytics/recurring)
   9_Add_Account.py           # Launch Plaid Link to connect a new bank account, then sync
 analytics/                   # Standalone ad-hoc plotting scripts (not part of the dashboard app)
-frontend/                    # Optional React/Vite SPA; built dist/ is mounted at /frontend if present
+frontend/                    # Mobile-first React/Vite app (at parity with Streamlit for daily flows);
+                             #   thin client — all analytics come from /analytics/* endpoints. See frontend/README.md.
 scripts/
   connect_funnel.sh          # Tailscale Funnel automation for connect flow
   backup_db.sh               # SQLite backup (cron-friendly, 30-day retention)
@@ -139,6 +140,10 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 - `GET /analytics/monthly-spend`, `/category-spend`, `/cashflow-trend` — support `start_date`/`end_date`; exclude transfer-paired/`is_transfer_override` transactions by default (`?include_transfers=true` for raw numbers).
 - `GET /analytics/accounts-summary` — balances by type + net worth.
 - `GET /analytics/recurring` — detected subscriptions/recurring payments grouped by merchant, with cadence (weekly/biweekly/monthly/quarterly/yearly), average amount, next expected date, monthly/annual estimates, and `active`/`inactive` status. Supports `start_date`/`end_date`, `status`, `min_monthly`. Excludes transfers and refunds; detection logic is deterministic (`app/services/recurring_detector.py`).
+- `GET /analytics/overview` — one-shot Overview summary (net worth, current/previous month spend/income/net, needs-attention counts). Backs the React Overview screen.
+- `GET /analytics/spending-summary?granularity=monthly|yearly` — period total, comparison, projection, top driver, and per-category diff.
+- `GET /analytics/cumulative-spend?granularity=monthly|yearly` — cumulative spend pace for the current period vs the prior three.
+- These three consolidate what the React client used to compute in the browser, so money math stays server-side (single source of truth). `GET /transactions` also accepts `q=` for server-side name/merchant/category search.
 - Confirmed/likely refunds reduce their expense category instead of being counted as income.
 
 **Transfers (double-entry reconciliation):**

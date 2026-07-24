@@ -26,7 +26,7 @@ import {
   getCategoryComparison,
   getTransactions,
 } from "@/lib/api/client";
-import { CATEGORY_COLORS } from "@/lib/api/mock-data";
+import { CATEGORY_COLORS } from "@/lib/api/theme";
 import { formatCurrency, formatMonth } from "@/lib/format";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");

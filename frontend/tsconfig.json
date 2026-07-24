@@ -28,11 +28,7 @@
     "src/components/layout/**/*.tsx",
     "src/lib/api/**/*.ts",
     "src/lib/format.ts",
-    "src/routes/accounts.tsx",
-    "src/routes/index.tsx",
-    "src/routes/more.tsx",
-    "src/routes/spending.tsx",
-    "src/routes/transactions.tsx"
+    "src/routes/**/*.tsx"
   ],
   "references": []
 }

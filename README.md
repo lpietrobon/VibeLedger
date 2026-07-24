@@ -116,6 +116,18 @@ streamlit run Spend.py --server.baseUrlPath /vibeledger/dash
 
 The dashboard reads SQLite directly for read paths and calls the FastAPI endpoints for writes (detect, pair, confirm, unpair). It loads the bearer token inline from `.env` so no extra config is needed when run on the same host as the API.
 
+### Mobile app (React)
+
+A mobile-first React/Vite app in `frontend/` is at functional parity with the
+Streamlit dashboard for the everyday flows (Overview, Spending, Transactions,
+Accounts, Recurring, Category rules, Transfers, Add account). Unlike Streamlit,
+**all analytics are computed server-side** — the client is a thin fetch + map
+layer over the `/analytics/*` endpoints, so there's a single source of truth and
+small mobile payloads. It's served at `/vibeledger/frontend/` via a small Node
+preview server that injects the bearer token so the browser never holds it.
+Streamlit is retained for the desktop analyst views (Cashflow Sankey,
+Experimental). See `frontend/README.md` and `docs/mobile-first-plan.md`.
+
 ### Serving the dashboard via Tailscale
 
 If the API is exposed via `tailscale serve --set-path /vibeledger`, add a second rule for the dashboard. Because `--set-path` strips the matched prefix and Streamlit's `--server.baseUrlPath` expects the prefix in incoming requests, include the prefix in the **target URL** so the reverse proxy re-prepends it:
