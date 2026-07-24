@@ -1,13 +1,15 @@
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import AccountsPage from "@/routes/accounts";
-import AddAccountPage from "@/routes/add-account";
-import MorePage from "@/routes/more";
-import OverviewPage from "@/routes/index";
-import RecurringPage from "@/routes/recurring";
-import RulesPage from "@/routes/rules";
-import SpendingPage from "@/routes/spending";
-import TransactionsPage from "@/routes/transactions";
-import TransfersPage from "@/routes/transfers";
+
+const AccountsPage = lazy(() => import("@/routes/accounts"));
+const AddAccountPage = lazy(() => import("@/routes/add-account"));
+const MorePage = lazy(() => import("@/routes/more"));
+const OverviewPage = lazy(() => import("@/routes/index"));
+const RecurringPage = lazy(() => import("@/routes/recurring"));
+const RulesPage = lazy(() => import("@/routes/rules"));
+const SpendingPage = lazy(() => import("@/routes/spending"));
+const TransactionsPage = lazy(() => import("@/routes/transactions"));
+const TransfersPage = lazy(() => import("@/routes/transfers"));
 
 const queryClient = new QueryClient();
 
@@ -20,18 +22,26 @@ function currentPath() {
   return pathname.replace(/\/+$/, "") || "/";
 }
 
+const ROUTES: Record<string, React.ComponentType> = {
+  "/": OverviewPage,
+  "/spending": SpendingPage,
+  "/transactions": TransactionsPage,
+  "/accounts": AccountsPage,
+  "/more": MorePage,
+  "/rules": RulesPage,
+  "/transfers": TransfersPage,
+  "/recurring": RecurringPage,
+  "/add-account": AddAccountPage,
+};
+
 export default function App() {
-  const path = currentPath();
+  const Page = ROUTES[currentPath()] ?? OverviewPage;
 
-  let page = <OverviewPage />;
-  if (path === "/spending") page = <SpendingPage />;
-  if (path === "/transactions") page = <TransactionsPage />;
-  if (path === "/accounts") page = <AccountsPage />;
-  if (path === "/more") page = <MorePage />;
-  if (path === "/rules") page = <RulesPage />;
-  if (path === "/transfers") page = <TransfersPage />;
-  if (path === "/recurring") page = <RecurringPage />;
-  if (path === "/add-account") page = <AddAccountPage />;
-
-  return <QueryClientProvider client={queryClient}>{page}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Suspense fallback={<div className="min-h-screen bg-background" />}>
+        <Page />
+      </Suspense>
+    </QueryClientProvider>
+  );
 }

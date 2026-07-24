@@ -8,7 +8,8 @@ Status: **Phases 1–4 landed.** Phase 1–3: backend consolidation endpoints, c
 refactored onto them, and parity screens (Rules CRUD, Transfers actions, Recurring,
 Add account). Phase 4: installable PWA (manifest + Workbox service worker, offline
 app shell + last-known data cache, home-screen/desktop install, safe-area insets).
-Remaining: Phase 5 (cutover) — plus optional bundle code-splitting. Streamlit is
+Routes are code-split (React.lazy) and charts (Recharts) lazy-load, so the initial
+paint no longer ships the whole bundle. Remaining: Phase 5 (cutover). Streamlit is
 still canonical and retained. This is a living plan — revise as we go.
 
 ## Principles
