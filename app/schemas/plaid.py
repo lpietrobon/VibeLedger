@@ -47,6 +47,11 @@ class PatchAccountRequest(BaseModel):
     nickname: str | None = None
 
 
+class RecurringStatusRequest(BaseModel):
+    # 'auto' clears the override; 'kept' forces active; 'canceled' forces inactive.
+    status: Literal["auto", "kept", "canceled"]
+
+
 class TransferCreateRequest(BaseModel):
     txn_a_id: int
     txn_b_id: int

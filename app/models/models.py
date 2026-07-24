@@ -213,6 +213,20 @@ class ConnectSession(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class RecurringOverride(Base):
+    """Manual status override for a detected recurring series, keyed by the
+    deterministic merchant_key (see services/recurring_detector.merchant_key).
+    'kept' forces active, 'canceled' forces inactive; absence means auto."""
+
+    __tablename__ = "recurring_overrides"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    merchant_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(32))  # 'kept' | 'canceled'
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class AccountBalanceSnapshot(Base):
     __tablename__ = "account_balance_snapshots"
     __table_args__ = (

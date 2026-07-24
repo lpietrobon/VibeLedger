@@ -26,6 +26,7 @@ from app.models.models import (
     CategoryRule,
     ConnectSession,
     Item,
+    RecurringOverride,
     SyncRun,
     SyncState,
     Transaction,
@@ -43,6 +44,7 @@ from app.schemas.plaid import (
     CreateConnectSessionRequest,
     PatchAccountRequest,
     PatchAnnotationRequest,
+    RecurringStatusRequest,
     TransferCreateRequest,
 )
 from app.services.security import decrypt_token, encrypt_token
@@ -1397,10 +1399,29 @@ def analytics_recurring(
     ]
 
     series = detect_recurring(txns)
+    overrides = {o.merchant_key: o.status for o in db.query(RecurringOverride).all()}
+
+    def _effective_status(s) -> str:
+        manual = overrides.get(s.merchant_key)
+        if manual == "canceled":
+            return "inactive"
+        if manual == "kept":
+            return "active"
+        return s.status
+
+    # Enrich every series (effective status + manual override) before filtering,
+    # so the summary reflects the whole portfolio regardless of the status filter.
+    enriched = [(s, _effective_status(s), overrides.get(s.merchant_key)) for s in series]
+
+    active_monthly = round(sum(s.monthly_estimate for s, eff, _ in enriched if eff == "active"), 2)
+    active_annual = round(sum(s.annual_estimate for s, eff, _ in enriched if eff == "active"), 2)
+    active_count = sum(1 for _, eff, _ in enriched if eff == "active")
+
+    filtered = enriched
     if status in {"active", "inactive"}:
-        series = [s for s in series if s.status == status]
+        filtered = [e for e in filtered if e[1] == status]
     if min_monthly > 0:
-        series = [s for s in series if s.monthly_estimate >= min_monthly]
+        filtered = [e for e in filtered if e[0].monthly_estimate >= min_monthly]
 
     items = [
         {
@@ -1418,24 +1439,52 @@ def analytics_recurring(
             "median_interval_days": s.median_interval_days,
             "monthly_estimate": s.monthly_estimate,
             "annual_estimate": s.annual_estimate,
-            "status": s.status,
+            "status": eff,
+            "auto_status": s.status,
+            "manual_status": manual,
             "category": s.category,
             "account_ids": s.account_ids,
             "sample_transaction_ids": s.sample_transaction_ids,
         }
-        for s in series
+        for s, eff, manual in filtered
     ]
-    active_monthly = round(sum(s.monthly_estimate for s in series if s.status == "active"), 2)
-    active_annual = round(sum(s.annual_estimate for s in series if s.status == "active"), 2)
     return {
         "items": items,
         "summary": {
             "count": len(items),
-            "active_count": sum(1 for s in series if s.status == "active"),
+            "active_count": active_count,
             "active_monthly_estimate": active_monthly,
             "active_annual_estimate": active_annual,
         },
     }
+
+
+@router.post("/analytics/recurring/{merchant_key}/status")
+def set_recurring_status(
+    merchant_key: str,
+    payload: RecurringStatusRequest,
+    db: Session = Depends(get_db),
+):
+    """Manually override a recurring series' status (persisted, keyed by merchant).
+
+    'auto' clears the override; 'kept' forces active; 'canceled' forces inactive."""
+    row = (
+        db.query(RecurringOverride)
+        .filter(RecurringOverride.merchant_key == merchant_key)
+        .first()
+    )
+    if payload.status == "auto":
+        if row:
+            db.delete(row)
+            db.commit()
+        return {"merchant_key": merchant_key, "manual_status": None}
+
+    if row:
+        row.status = payload.status
+    else:
+        db.add(RecurringOverride(merchant_key=merchant_key, status=payload.status))
+    db.commit()
+    return {"merchant_key": merchant_key, "manual_status": payload.status}
 
 
 @router.post("/transfers/detect")

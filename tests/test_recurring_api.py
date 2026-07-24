@@ -82,6 +82,43 @@ def test_recurring_endpoint_finds_subscription():
     assert body["summary"]["active_monthly_estimate"] == spotify["monthly_estimate"]
 
 
+def test_manual_status_override_canceled_and_cleared():
+    _seed()
+    with TestClient(app) as client:
+        before = client.get("/analytics/recurring", headers=AUTH_HEADERS).json()
+        spotify = next(i for i in before["items"] if i["merchant_label"] == "Spotify")
+        assert spotify["status"] == "active"
+        assert spotify["manual_status"] is None
+        key = spotify["merchant_key"]  # deterministic: "spotify"
+
+        # Manually mark it canceled → effective status flips, summary drops it.
+        set_resp = client.post(
+            f"/analytics/recurring/{key}/status",
+            json={"status": "canceled"},
+            headers=AUTH_HEADERS,
+        )
+        assert set_resp.status_code == 200
+
+        after = client.get("/analytics/recurring", headers=AUTH_HEADERS).json()
+        s2 = next(i for i in after["items"] if i["merchant_key"] == key)
+        assert s2["status"] == "inactive"
+        assert s2["manual_status"] == "canceled"
+        assert s2["auto_status"] == "active"  # the detector still says active
+        assert after["summary"]["active_count"] == 0
+        assert after["summary"]["active_monthly_estimate"] == 0
+
+        # Only appears under the inactive filter now.
+        active_only = client.get("/analytics/recurring", params={"status": "active"}, headers=AUTH_HEADERS).json()
+        assert all(i["merchant_key"] != key for i in active_only["items"])
+
+        # Clearing the override restores auto behavior.
+        client.post(f"/analytics/recurring/{key}/status", json={"status": "auto"}, headers=AUTH_HEADERS)
+        restored = client.get("/analytics/recurring", headers=AUTH_HEADERS).json()
+        s3 = next(i for i in restored["items"] if i["merchant_key"] == key)
+        assert s3["status"] == "active"
+        assert s3["manual_status"] is None
+
+
 def test_recurring_endpoint_respects_transfer_override():
     _seed()
     with SessionLocal() as db:

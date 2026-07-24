@@ -294,6 +294,17 @@ export async function getRecurring(params?: {
   });
 }
 
+export async function setRecurringStatus(
+  merchantKey: string,
+  status: "auto" | "kept" | "canceled",
+): Promise<{ merchant_key: string; manual_status: string | null }> {
+  return jsonFetch(
+    `/analytics/recurring/${encodeURIComponent(merchantKey)}/status`,
+    undefined,
+    jsonBody("POST", { status }),
+  );
+}
+
 // --- Connect / sync ---
 
 export async function createConnectSession(): Promise<ConnectSession> {

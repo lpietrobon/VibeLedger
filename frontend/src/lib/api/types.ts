@@ -165,6 +165,8 @@ export type RecurringSeries = {
   monthly_estimate: Money;
   annual_estimate: Money;
   status: "active" | "inactive";
+  auto_status: "active" | "inactive";
+  manual_status: "kept" | "canceled" | null;
   category: string | null;
   account_ids: number[];
   sample_transaction_ids: number[];

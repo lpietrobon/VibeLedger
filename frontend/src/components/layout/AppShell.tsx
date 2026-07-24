@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   TrendingDown,
+  Repeat,
   Receipt,
   Wallet,
   MoreHorizontal,
@@ -9,11 +10,12 @@ import {
 import type { ReactNode } from "react";
 
 const NAV = [
-  { to: "/", label: "Overview", icon: LayoutDashboard },
-  { to: "/spending", label: "Spending", icon: TrendingDown },
-  { to: "/transactions", label: "Transactions", icon: Receipt },
-  { to: "/accounts", label: "Accounts", icon: Wallet },
-  { to: "/more", label: "More", icon: MoreHorizontal },
+  { to: "/", label: "Overview", short: "Overview", icon: LayoutDashboard },
+  { to: "/spending", label: "Spending", short: "Spending", icon: TrendingDown },
+  { to: "/recurring", label: "Recurring", short: "Recurring", icon: Repeat },
+  { to: "/transactions", label: "Transactions", short: "Activity", icon: Receipt },
+  { to: "/accounts", label: "Accounts", short: "Accounts", icon: Wallet },
+  { to: "/more", label: "More", short: "More", icon: MoreHorizontal },
 ] as const;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
@@ -86,20 +88,20 @@ export function AppShell({ children }: { children: ReactNode }) {
         className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/95 backdrop-blur md:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <ul className="mx-auto grid max-w-7xl grid-cols-5">
-          {NAV.map(({ to, label, icon: Icon }) => {
+        <ul className="mx-auto grid max-w-7xl grid-cols-6">
+          {NAV.map(({ to, short, icon: Icon }) => {
             const active = to === "/" ? pathname === "/" : pathname.startsWith(to);
             return (
               <li key={to}>
                 <a
                   href={appHref(to)}
                   className={
-                    "flex flex-col items-center gap-0.5 py-2 text-[11px] " +
+                    "flex flex-col items-center gap-0.5 px-0.5 py-2 text-[10px] " +
                     (active ? "text-foreground" : "text-muted-foreground")
                   }
                 >
                   <Icon className={"h-5 w-5 " + (active ? "text-foreground" : "")} />
-                  <span>{label}</span>
+                  <span className="max-w-full truncate">{short}</span>
                 </a>
               </li>
             );

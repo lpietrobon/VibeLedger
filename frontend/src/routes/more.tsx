@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Section } from "@/components/finance/Section";
-import { ChevronRight, RefreshCw, Tag, Filter, Repeat, Plus } from "lucide-react";
+import { ChevronRight, RefreshCw, Tag, Filter, Plus } from "lucide-react";
 import { syncAllAccounts } from "@/lib/api/client";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
 
 const ITEMS = [
-  { label: "Recurring & subscriptions", icon: Repeat, hint: "Review cadence", href: "/recurring" },
   { label: "Category rules", icon: Tag, hint: "Create & apply", href: "/rules" },
   { label: "Transfer detection", icon: Filter, hint: "Confirm pairs", href: "/transfers" },
   { label: "Add account", icon: Plus, hint: "Connect a bank", href: "/add-account" },

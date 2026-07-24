@@ -79,7 +79,7 @@ app/
   db/schema_patches.py       # Idempotent ALTER TABLEs + backfills + effective_transactions view on startup (no migration framework)
   models/models.py           # ORM models (Item, Account, Transaction, TransactionAnnotation, AnnotationFingerprint,
                              #   CategoryRule, CategoryDecisionEvent, TransferPair, SyncState, SyncRun,
-                             #   ConnectSession, AccountBalanceSnapshot)
+                             #   ConnectSession, AccountBalanceSnapshot, RecurringOverride)
   schemas/plaid.py           # Pydantic request/response schemas
   services/
     connect_service.py       # Plaid Link session management
@@ -139,7 +139,8 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 **Analytics:**
 - `GET /analytics/monthly-spend`, `/category-spend`, `/cashflow-trend` — support `start_date`/`end_date`; exclude transfer-paired/`is_transfer_override` transactions by default (`?include_transfers=true` for raw numbers).
 - `GET /analytics/accounts-summary` — balances by type + net worth.
-- `GET /analytics/recurring` — detected subscriptions/recurring payments grouped by merchant, with cadence (weekly/biweekly/monthly/quarterly/yearly), average amount, next expected date, monthly/annual estimates, and `active`/`inactive` status. Supports `start_date`/`end_date`, `status`, `min_monthly`. Excludes transfers and refunds; detection logic is deterministic (`app/services/recurring_detector.py`).
+- `GET /analytics/recurring` — detected subscriptions/recurring payments grouped by merchant, with cadence (weekly/biweekly/monthly/quarterly/yearly), average amount, next expected date, monthly/annual estimates, and effective `status` (`active`/`inactive`) plus `auto_status` (what the detector inferred) and `manual_status` (`kept`/`canceled`/null). Supports `start_date`/`end_date`, `status`, `min_monthly`. Excludes transfers and refunds; detection logic is deterministic (`app/services/recurring_detector.py`).
+- `POST /analytics/recurring/{merchant_key}/status` — manual status override, persisted per merchant in `recurring_overrides` (keyed by the detector's `merchant_key`): `kept` forces active, `canceled` forces inactive, `auto` clears it. The GET response's effective `status` and the active totals reflect the override, while `auto_status` preserves the detector's own call for auditing.
 - `GET /analytics/overview` — one-shot Overview summary (net worth, current/previous month spend/income/net, needs-attention counts). Backs the React Overview screen.
 - `GET /analytics/spending-summary?granularity=monthly|yearly` — period total, comparison, projection, top driver, and per-category diff.
 - `GET /analytics/cumulative-spend?granularity=monthly|yearly` — cumulative spend pace for the current period vs the prior three.
