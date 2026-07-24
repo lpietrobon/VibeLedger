@@ -1,6 +1,6 @@
 # VibeLedger
 
-Single-user personal finance ledger with Plaid ingestion and a Streamlit dashboard (Accounts / Cashflow / Categories / Transfers, Mint/Monarch-style consolidated view with double-entry transfer reconciliation).
+Single-user personal finance ledger with Plaid ingestion and a Streamlit dashboard (Overview / Transactions / Spending / Cashflow / Accounts, plus Recurring, Flow, Transfers, Rules and account linking under "More"). A Mint/Monarch-style consolidated view with double-entry transfer reconciliation, category rules, refund matching, and subscription detection.
 
 ## Prerequisites
 
@@ -92,16 +92,21 @@ No Funnel is required for recurring sync jobs; only outbound backend->Plaid acce
 
 The default database path is `~/.vibeledger/vibeledger.db`. Override with `DATABASE_URL` env var. The directory is created automatically at startup.
 
-Tables are auto-created via `Base.metadata.create_all()` on boot. There is no migration framework; for schema changes on an existing DB, drop and recreate (acceptable for single-user use).
+Tables are auto-created via `Base.metadata.create_all()` on boot. There is no migration framework, but `app/db/schema_patches.py` runs on startup after `create_all` to apply idempotent `ALTER TABLE`s, backfills, and to (re)create the `effective_transactions` SQL view — so column additions to existing tables are handled automatically without a drop. Back up `~/.vibeledger/vibeledger.db` before larger changes.
 
 ## Dashboard
 
 A Streamlit multipage app provides a consolidated view:
 
-- **Accounts** — balances grouped by type with assets/liabilities/net-worth.
+- **Overview** — net worth, current-month spend/income vs last month, and a "needs attention" queue.
+- **Transactions** — browse, filter (power-user query syntax), and annotate (category/merchant/notes/reviewed/refund).
+- **Spending** — category breakdown, period comparison, and drill-down.
 - **Cashflow** — monthly income vs expense and net trend (transfers excluded by default).
-- **Categories** — top categories, month-over-month comparison, transaction samples.
+- **Accounts** — balances grouped by type with assets/liabilities/net-worth; per-account nicknames.
+- **Recurring** — detected subscriptions/recurring payments with cadence, next expected charge, and monthly/annual cost estimates.
 - **Transfers** — auto-detected pairs (e.g. credit-card payments crossing checking + credit) awaiting confirmation, plus manual pairing and `is_transfer_override` toggles. Transfer-paired transactions are excluded from cashflow/spend analytics so they don't double-count.
+- **Rules** — manage regex/amount-based category rules with preview and apply.
+- **Add account** (under "More") — launch Plaid Link in the browser to connect a new bank, then sync.
 
 Run locally:
 
@@ -207,5 +212,5 @@ APP_BASE_URL=https://<your-machine>.tail1234.ts.net
 ## Notes
 
 - **Single-threaded SQLite.** Concurrent API requests are serialized at the DB level. Fine for single-user.
-- **No migration framework.** For schema changes on an existing DB, drop and recreate (acceptable for single-user). Back up `~/.vibeledger/vibeledger.db` before changes.
+- **No migration framework.** Column additions and backfills are applied idempotently on startup by `app/db/schema_patches.py`; only larger structural changes may warrant a manual rebuild. Back up `~/.vibeledger/vibeledger.db` before changes.
 - **Link token expiry.** Plaid link tokens expire after 4 hours. The 20-minute session TTL mitigates this in practice.

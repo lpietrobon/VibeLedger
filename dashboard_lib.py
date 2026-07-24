@@ -62,10 +62,12 @@ def render_app_navigation() -> None:
         st.page_link("pages/2_Cashflow.py", label="Cashflow", icon=":material/swap_vert:")
         st.page_link("pages/1_Accounts.py", label="Accounts", icon=":material/account_balance:")
         with st.expander("More", expanded=False):
+            st.page_link("pages/8_Recurring.py", label="Recurring")
             st.page_link("pages/3_Cashflow_Sankey.py", label="Flow")
             st.page_link("pages/0_Transfers.py", label="Transfers")
             st.page_link("pages/5_Rules.py", label="Rules")
             st.page_link("pages/4_Experimental.py", label="Experimental")
+            st.page_link("pages/9_Add_Account.py", label="Add account")
 
 
 def api_token() -> str | None:

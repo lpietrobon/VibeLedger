@@ -49,6 +49,7 @@ from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
 from app.services.refund_detector import classify_refunds
+from app.services.recurring_detector import detect_recurring
 from app.services.category_resolver import (
     PLAID_DETAILED_FRIENDLY_MAP,
     PLAID_FRIENDLY_MAP,
@@ -1114,6 +1115,89 @@ def accounts_summary(db: Session = Depends(get_db)):
         "liabilities": round(liabilities, 2),
         "net_worth": round(assets - liabilities, 2),
         "groups": by_type,
+    }
+
+
+@router.get("/analytics/recurring")
+def analytics_recurring(
+    db: Session = Depends(get_db),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    status: str | None = Query(default=None, description="Filter to 'active' or 'inactive'"),
+    min_monthly: float = Query(default=0.0, ge=0.0),
+):
+    """Detect subscriptions / recurring payments from expense history.
+
+    Transfers and refunds are excluded (only positive expense-side transactions
+    are considered). Detection is deterministic — see
+    app/services/recurring_detector.py."""
+    effective_merchant = _effective_merchant_expr()
+    effective_category = _effective_category_expr()
+    q = (
+        db.query(Transaction, effective_merchant, effective_category)
+        .join(Account, Account.id == Transaction.account_id)
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+        .filter(Transaction.pending == False)  # noqa: E712
+        .filter(Transaction.amount > 0)
+    )
+    q = _apply_transfer_exclusion(q, include_transfers=False)
+    if start_date:
+        q = q.filter(Transaction.date >= start_date)
+    if end_date:
+        q = q.filter(Transaction.date <= end_date)
+
+    txns = [
+        SimpleNamespace(
+            id=t.id,
+            date=t.date,
+            amount=float(t.amount),
+            name=t.name,
+            merchant_name=merchant,
+            account_id=t.account_id,
+            category=category,
+        )
+        for (t, merchant, category) in q.all()
+    ]
+
+    series = detect_recurring(txns)
+    if status in {"active", "inactive"}:
+        series = [s for s in series if s.status == status]
+    if min_monthly > 0:
+        series = [s for s in series if s.monthly_estimate >= min_monthly]
+
+    items = [
+        {
+            "merchant_key": s.merchant_key,
+            "merchant_label": s.merchant_label,
+            "cadence": s.cadence,
+            "occurrences": s.occurrences,
+            "average_amount": s.average_amount,
+            "min_amount": s.min_amount,
+            "max_amount": s.max_amount,
+            "amount_consistent": s.amount_consistent,
+            "first_date": str(s.first_date),
+            "last_date": str(s.last_date),
+            "next_expected_date": str(s.next_expected_date),
+            "median_interval_days": s.median_interval_days,
+            "monthly_estimate": s.monthly_estimate,
+            "annual_estimate": s.annual_estimate,
+            "status": s.status,
+            "category": s.category,
+            "account_ids": s.account_ids,
+            "sample_transaction_ids": s.sample_transaction_ids,
+        }
+        for s in series
+    ]
+    active_monthly = round(sum(s.monthly_estimate for s in series if s.status == "active"), 2)
+    active_annual = round(sum(s.annual_estimate for s in series if s.status == "active"), 2)
+    return {
+        "items": items,
+        "summary": {
+            "count": len(items),
+            "active_count": sum(1 for s in series if s.status == "active"),
+            "active_monthly_estimate": active_monthly,
+            "active_annual_estimate": active_annual,
+        },
     }
 
 
