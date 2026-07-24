@@ -4,9 +4,11 @@ Goal: make the React/Vite app (`frontend/`) the primary, phone-first VibeLedger
 UI, reaching functional parity with the Streamlit dashboard while eliminating the
 duplicated business logic that currently lives in the browser.
 
-Status: **Phases 1–3 landed** (backend consolidation endpoints, client refactored
-onto them, and parity screens: Rules CRUD, Transfers actions, Recurring, Add
-account). Remaining: Phase 4 (PWA polish) and Phase 5 (cutover). Streamlit is
+Status: **Phases 1–4 landed.** Phase 1–3: backend consolidation endpoints, client
+refactored onto them, and parity screens (Rules CRUD, Transfers actions, Recurring,
+Add account). Phase 4: installable PWA (manifest + Workbox service worker, offline
+app shell + last-known data cache, home-screen/desktop install, safe-area insets).
+Remaining: Phase 5 (cutover) — plus optional bundle code-splitting. Streamlit is
 still canonical and retained. This is a living plan — revise as we go.
 
 ## Principles
