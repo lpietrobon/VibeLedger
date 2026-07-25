@@ -39,6 +39,8 @@ working. Tokens are space-separated; anything unrecognized becomes free text.
 | `is:unreviewed` \| `is:reviewed` | annotation reviewed flag |
 | `is:uncategorized` | effective category is `uncategorized` |
 | `is:refund` | refund_status in (confirmed, likely) |
+| `is:likely-refund` | refund_status is `likely` (detected, not yet confirmed) |
+| `is:not-transfer` | drops paired transfers and `is_transfer_override` rows, matching the analytics exclusion |
 | `is:pending` | pending transactions |
 | bare words | matched against name, merchant, and category |
 

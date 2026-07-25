@@ -141,7 +141,7 @@ export default function OverviewPage() {
               <AttentionRow
                 label="Transfer pairs pending"
                 count={s.needsAttention.transferPairsPending}
-                filter="transfers"
+                href="/transfers"
               />
             </ul>
           ) : (
@@ -224,10 +224,14 @@ function AttentionRow({
   label,
   count,
   filter,
+  href,
 }: {
   label: string;
   count: number;
-  filter: "unreviewed" | "uncategorized" | "refunds" | "transfers";
+  /** Drill-down on the Transactions screen; the server-side query lives there. */
+  filter?: "unreviewed" | "uncategorized" | "refunds";
+  /** Somewhere other than Transactions — pending pairs belong on Transfers. */
+  href?: string;
 }) {
   const dim = count === 0;
   const content = (
@@ -252,7 +256,7 @@ function AttentionRow({
         <div className="flex items-center justify-between py-2.5 text-sm">{content}</div>
       ) : (
         <a
-          href={appHref(`/transactions?filter=${filter}`)}
+          href={appHref(href ?? `/transactions?filter=${filter}`)}
           className="flex items-center justify-between py-2.5 text-sm hover:text-foreground"
         >
           {content}

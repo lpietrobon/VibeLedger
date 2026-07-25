@@ -18,12 +18,19 @@ import { formatCurrency, formatDate } from "@/lib/format";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
 
-type AttentionFilter = "unreviewed" | "uncategorized" | "refunds" | "transfers";
+type AttentionFilter = "unreviewed" | "uncategorized" | "refunds";
 const FILTER_LABEL: Record<AttentionFilter, string> = {
   unreviewed: "Unreviewed",
   uncategorized: "Uncategorized",
   refunds: "Likely refunds",
-  transfers: "Transfer pairs pending",
+};
+
+/** Overview's counts are whole-ledger, so these have to filter server-side too —
+ *  narrowing a single page client-side hides matches beyond it. */
+const FILTER_QUERY: Record<AttentionFilter, string> = {
+  unreviewed: "is:unreviewed is:not-transfer",
+  uncategorized: "is:uncategorized",
+  refunds: "is:likely-refund",
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -80,19 +87,16 @@ export default function TransactionsPage() {
   const [batchOpen, setBatchOpen] = useState(false);
   const [onlyUnreviewed, setOnlyUnreviewed] = useState(false);
   const limit = filter || startDate || endDate || category !== "All" || query ? 500 : 100;
+  const serverQuery = [filter ? FILTER_QUERY[filter] : "", query].filter(Boolean).join(" ");
 
   const tx = useQuery({
-    queryKey: ["all-tx", query, category, startDate, endDate, limit],
-    queryFn: () => getTransactions({ query, category, startDate, endDate, limit }),
+    queryKey: ["all-tx", serverQuery, category, startDate, endDate, limit],
+    queryFn: () => getTransactions({ query: serverQuery, category, startDate, endDate, limit }),
   });
 
   const items = useMemo(() => {
     const filtered = (tx.data?.items ?? []).filter((t) => {
       if (onlyUnreviewed && t.annotation.reviewed) return false;
-      if (filter === "unreviewed" && t.annotation.reviewed) return false;
-      if (filter === "uncategorized" && t.effective_category.toLowerCase() !== "uncategorized") return false;
-      if (filter === "refunds" && t.refund_status !== "likely") return false;
-      if (filter === "transfers") return false;
       return true;
     });
 
@@ -105,7 +109,7 @@ export default function TransactionsPage() {
       if (dateDiff !== 0) return dateDiff * direction;
       return (a.id - b.id) * direction;
     });
-  }, [filter, onlyUnreviewed, order, sort, tx.data?.items]);
+  }, [onlyUnreviewed, order, sort, tx.data?.items]);
 
   const clearFilter = () => {
     window.history.replaceState(null, "", `${basePath}/transactions`);
@@ -176,7 +180,7 @@ export default function TransactionsPage() {
       <Section title="All activity">
         {filter ? (
           <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
-            <span>Filtered from Overview: {FILTER_LABEL[filter as AttentionFilter]}</span>
+            <span>Filtered from Overview: {FILTER_LABEL[filter]}</span>
             <button
               onClick={clearFilter}
               aria-label="Clear filter"
@@ -436,5 +440,5 @@ export default function TransactionsPage() {
 }
 
 function isAttentionFilter(value: string | null): value is AttentionFilter {
-  return value === "unreviewed" || value === "uncategorized" || value === "refunds" || value === "transfers";
+  return value === "unreviewed" || value === "uncategorized" || value === "refunds";
 }

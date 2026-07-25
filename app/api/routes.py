@@ -455,6 +455,12 @@ def _apply_search_query(query, parsed):
         query = query.filter(func.lower(_effective_category_expr()) == "uncategorized")
     if "refund" in parsed.flags:
         query = query.filter(_is_refund_expr())
+    if "likely-refund" in parsed.flags:
+        query = query.filter(TransactionAnnotation.refund_status == "likely")
+    if "not-transfer" in parsed.flags:
+        # Same exclusion the analytics counts use, so a count and the search
+        # that drills into it can describe the same set.
+        query = _apply_transfer_exclusion(query, include_transfers=False)
     if "pending" in parsed.flags:
         query = query.filter(Transaction.pending == True)  # noqa: E712
 
@@ -1372,8 +1378,12 @@ def analytics_overview(db: Session = Depends(get_db)):
 
     as_of = db.query(func.max(Transaction.date)).scalar() or date.today()
 
+    # Counted over transactions, not annotations: an annotation whose transaction
+    # is gone is invisible everywhere else, so counting it here would advertise
+    # rows the Transactions screen can never show.
     likely_refunds = (
-        db.query(func.count(TransactionAnnotation.id))
+        db.query(func.count(Transaction.id))
+        .join(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
         .filter(TransactionAnnotation.refund_status == "likely")
         .scalar()
     ) or 0
