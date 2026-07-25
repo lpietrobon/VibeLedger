@@ -191,7 +191,7 @@ export default function TransactionsPage() {
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+            className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm md:h-9 md:flex-none"
           >
             <option value="All">All categories</option>
             {category !== "All" && !CATEGORIES.includes(category) ? (
@@ -207,7 +207,7 @@ export default function TransactionsPage() {
               </optgroup>
             ))}
           </select>
-          <div className="inline-flex h-9 items-center rounded-md border border-input bg-background text-sm">
+          <div className="inline-flex h-10 min-w-0 flex-1 items-center rounded-md border border-input bg-background text-sm md:h-9 md:flex-none">
             <CalendarDays className="ml-2 h-4 w-4 text-muted-foreground" />
             <select
               value={datePreset}
@@ -229,18 +229,18 @@ export default function TransactionsPage() {
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
                 aria-label="Start date"
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm md:h-9 md:flex-none"
               />
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
                 aria-label="End date"
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm md:h-9 md:flex-none"
               />
             </>
           ) : null}
-          <div className="inline-flex h-9 items-center rounded-md border border-input bg-background text-sm">
+          <div className="inline-flex h-10 min-w-0 flex-1 items-center rounded-md border border-input bg-background text-sm md:h-9 md:flex-none">
             <ArrowDownUp className="ml-2 h-4 w-4 text-muted-foreground" />
             <select
               value={`${sort}:${order}`}
@@ -261,7 +261,7 @@ export default function TransactionsPage() {
           <button
             onClick={() => setOnlyUnreviewed((v) => !v)}
             className={
-              "h-9 rounded-md border px-3 text-xs font-medium transition-colors " +
+              "h-10 shrink-0 rounded-md border px-3 text-xs font-medium transition-colors md:h-9 " +
               (onlyUnreviewed
                 ? "border-amber-300 bg-amber-50 text-amber-800"
                 : "border-input text-muted-foreground hover:bg-secondary")

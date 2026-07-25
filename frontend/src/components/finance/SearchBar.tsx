@@ -13,10 +13,13 @@ export function SearchBar({
   value,
   onChange,
   placeholder = "Search or filter…",
+  className = "w-full md:w-auto md:flex-1 md:min-w-[240px]",
 }: {
   value: string;
   onChange: (next: string) => void;
   placeholder?: string;
+  /** Defaults to full width on mobile so the dropdown has room to breathe. */
+  className?: string;
 }) {
   const [draft, setDraft] = useState(value);
   const [open, setOpen] = useState(false);
@@ -67,7 +70,7 @@ export function SearchBar({
   const isFieldMenu = suggestions.data?.context === "field";
 
   return (
-    <div ref={containerRef} className="relative flex-1">
+    <div ref={containerRef} className={"relative " + className}>
       <div className="flex items-center gap-2">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -112,15 +115,18 @@ export function SearchBar({
           <div className="border-b border-border px-3 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             {isFieldMenu ? "Filter by" : `Values for ${suggestions.data?.field}`}
           </div>
-          <ul className="max-h-64 overflow-y-auto">
+          <ul className="max-h-[40vh] overflow-y-auto overscroll-contain">
             {items.map((s) => (
               <li key={s.value}>
                 <button
                   onClick={() => accept(s)}
-                  className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm hover:bg-secondary"
+                  className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left text-sm hover:bg-secondary"
                 >
-                  <span className="min-w-0 truncate font-medium">{s.label}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{s.hint}</span>
+                  {/* Label wins the space; the hint yields and truncates. */}
+                  <span className="min-w-0 flex-1 truncate font-medium">{s.label}</span>
+                  <span className="min-w-0 max-w-[45%] shrink truncate text-right text-xs text-muted-foreground">
+                    {s.hint}
+                  </span>
                 </button>
               </li>
             ))}
@@ -155,10 +161,12 @@ export function SearchBar({
                       accept(s);
                       if (!s.has_values) setSheetOpen(false);
                     }}
-                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm hover:bg-secondary"
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left text-sm hover:bg-secondary"
                   >
-                    <span className="min-w-0 truncate font-medium">{s.label}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{s.hint}</span>
+                    <span className="min-w-0 flex-1 truncate font-medium">{s.label}</span>
+                    <span className="min-w-0 max-w-[45%] shrink truncate text-right text-xs text-muted-foreground">
+                      {s.hint}
+                    </span>
                   </button>
                 </li>
               ))}
