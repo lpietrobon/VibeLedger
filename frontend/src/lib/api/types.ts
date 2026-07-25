@@ -196,6 +196,13 @@ export type ConnectStatus = {
   item_id: string | null;
 };
 
+export type CategoryEntry = {
+  value: string;
+  /** Transactions currently resolving to this category; 0 for rule/default entries. */
+  count: number;
+  source: "ledger" | "rule" | "default";
+};
+
 export type SearchSuggestion = {
   value: string;
   label: string;

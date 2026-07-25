@@ -52,6 +52,7 @@ from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
 from app.services.refund_detector import classify_refunds
+from app.services.category_catalog import merge_catalog
 from app.services.recurring_detector import detect_recurring
 from app.services.search_query import (
     IS_VALUES,
@@ -545,6 +546,37 @@ def transaction_search_suggestions(
 
 def _quote_value(value: str) -> str:
     return f'"{value}"' if " " in value else value
+
+
+@router.get("/categories")
+def list_categories(
+    db: Session = Depends(get_db),
+    limit: int = Query(default=500, ge=1, le=2000),
+):
+    """The category vocabulary for pickers: every category in use, plus rule
+    targets and a curated starter set.
+
+    `count` is the number of transactions currently resolving to that category
+    (0 for rule/default entries that nothing matches yet); `source` is
+    ledger|rule|default. Case variants are merged — notably the SQL fallback
+    literal 'uncategorized' and a manual "UNCATEGORIZED" annotation."""
+    expr = _effective_category_expr()
+    ledger_rows = (
+        db.query(expr.label("value"), func.count(Transaction.id).label("n"))
+        .join(Account, Account.id == Transaction.account_id)
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+        .filter(expr.is_not(None))
+        .group_by(expr)
+        .all()
+    )
+    # A rule's target is a category the user coined, even with nothing matching
+    # it yet — and disabled rules still carry intent.
+    rule_categories = [
+        row[0] for row in db.query(CategoryRule.assigned_category).distinct().all() if row[0]
+    ]
+
+    items = merge_catalog([(value, count) for value, count in ledger_rows], rule_categories)
+    return {"items": items[:limit]}
 
 
 @router.get("/transactions")

@@ -1,16 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Plus, Play, X, Trash2, Pencil } from "lucide-react";
+import { Plus, Play, Trash2, Pencil } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Section } from "@/components/finance/Section";
 import {
-  CATEGORIES,
   applyCategoryRules,
   createCategoryRule,
   deleteCategoryRule,
   getCategoryRules,
   patchCategoryRule,
 } from "@/lib/api/client";
+import { CategoryPicker } from "@/components/finance/CategoryPicker";
+import { Sheet } from "@/components/layout/Sheet";
 import type { CategoryRule, CategoryRuleDraft } from "@/lib/api/types";
 import { formatCurrency } from "@/lib/format";
 
@@ -230,20 +231,12 @@ function RuleSheet({
   );
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-[1px]" onClick={onClose} aria-hidden />
-      <aside
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto rounded-t-lg border-t border-border bg-background shadow-xl md:inset-y-0 md:right-0 md:left-auto md:max-h-none md:w-[420px] md:rounded-none md:border-l md:border-t-0"
-        role="dialog"
-        aria-label="Edit rule"
-      >
-        <div className="sticky top-0 flex items-center justify-between border-b border-border bg-background px-4 py-3">
-          <div className="text-sm font-semibold">{rule ? "Edit rule" : "New rule"}</div>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-md hover:bg-secondary" aria-label="Close">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
+    <Sheet
+      label="Edit rule"
+      title={rule ? "Edit rule" : "New rule"}
+      onClose={onClose}
+      widthClass="md:w-[420px]"
+    >
         <div className="space-y-3 px-4 py-4">
           <RuleField label="Name">
             <input
@@ -290,18 +283,11 @@ function RuleSheet({
             </RuleField>
           </div>
           <RuleField label="Assign category">
-            <input
+            <CategoryPicker
               value={form.assigned_category}
-              onChange={(e) => setForm((f) => ({ ...f, assigned_category: e.target.value.toUpperCase() }))}
-              list="rule-category-options"
-              placeholder="FOOD/COFFEE"
-              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              onChange={(next) => setForm((f) => ({ ...f, assigned_category: next }))}
+              placeholder="Choose a category"
             />
-            <datalist id="rule-category-options">
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
           </RuleField>
           <div className="grid grid-cols-2 gap-3">
             <RuleField label="Rank (lower wins)">
@@ -345,8 +331,7 @@ function RuleSheet({
             </button>
           </div>
         </div>
-      </aside>
-    </>
+    </Sheet>
   );
 }
 

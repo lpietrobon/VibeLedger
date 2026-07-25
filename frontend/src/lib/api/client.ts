@@ -14,6 +14,7 @@ import type {
   ConnectSession,
   ConnectStatus,
   SearchSuggestionsResponse,
+  CategoryEntry,
 } from "./types";
 import { CATEGORY_COLORS } from "./theme";
 
@@ -205,6 +206,12 @@ export async function getTransactions(params?: {
     limit: params?.limit ?? 100,
     offset: params?.offset ?? 0,
   });
+}
+
+/** Every category in use, plus rule targets and curated defaults. */
+export async function getCategoryCatalog(): Promise<CategoryEntry[]> {
+  const body = await jsonFetch<{ items: CategoryEntry[] }>("/categories");
+  return body.items;
 }
 
 export async function getSearchSuggestions(q: string): Promise<SearchSuggestionsResponse> {
