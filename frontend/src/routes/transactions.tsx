@@ -397,7 +397,14 @@ export default function TransactionsPage() {
                       {formatCurrency(Math.abs(t.amount))}
                     </td>
                     <td className="py-2 text-right">
-                      {t.pending ? (
+                      {t.is_transfer ? (
+                        <span
+                          className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700"
+                          title="Part of a transfer pair — excluded from spend and income totals"
+                        >
+                          Transfer
+                        </span>
+                      ) : t.pending ? (
                         <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
                           Pending
                         </span>

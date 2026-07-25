@@ -119,10 +119,11 @@ def test_manual_status_override_canceled_and_cleared():
         assert s3["manual_status"] is None
 
 
-def test_recurring_endpoint_respects_transfer_override():
+def test_one_sided_transfer_override_no_longer_hides_recurring():
+    """The legacy one-sided override is not a transfer and must not suppress
+    detection — only a real pair across two covered accounts does that."""
     _seed()
     with SessionLocal() as db:
-        # Flag every Spotify charge as a manual transfer override.
         spotify_ids = [
             t.id for t in db.query(Transaction).filter(Transaction.merchant_name == "Spotify").all()
         ]
@@ -133,4 +134,4 @@ def test_recurring_endpoint_respects_transfer_override():
     with TestClient(app) as client:
         r = client.get("/analytics/recurring", headers=AUTH_HEADERS)
     assert r.status_code == 200
-    assert r.json()["items"] == []
+    assert [i["merchant_label"] for i in r.json()["items"]] == ["Spotify"]

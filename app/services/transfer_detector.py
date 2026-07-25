@@ -1,15 +1,30 @@
-"""Heuristic transfer-pair detection.
+"""Detection of internal transfers — money moving between two covered accounts.
 
-Pairs an outflow (amount > 0, positive = money leaving per Plaid sign convention)
-with an opposite inflow on a different account within a small date window.
-Idempotent — already-paired transactions are skipped.
+A transfer is *defined* as a matched pair of transactions across two accounts
+linked in this app. If a movement has no counterparty in scope it is simply not
+a transfer here: paying a credit card from an unlinked checking account leaves a
+single unpaired transaction, and that is the correct outcome, not a one-sided
+"transfer".
+
+The point of pairing is to stop the same money being counted as both income and
+expense. Analytics exclude paired transactions for exactly that reason, so a
+wrong pair silently distorts the numbers — the matching rules below are
+deliberately conservative and refuse to guess.
+
+Matching rule (all required):
+  * equal absolute amount, opposite signs
+  * two different covered accounts
+  * the outflow lands on or before the inflow, within `window_days`
+  * exactly one best candidate — ties are left unpaired for manual review
+
+Plaid sign convention: positive = money leaving the account.
 """
 from __future__ import annotations
 
-from datetime import timedelta
-from typing import Iterable
+from collections import defaultdict
+from decimal import Decimal
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.models import Transaction, TransferPair
@@ -25,10 +40,13 @@ def _paired_ids(db: Session) -> set[int]:
 
 
 def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
-    """Greedy nearest-date pairing. Returns newly created TransferPair rows."""
+    """Pair outflows with their counterparty inflow. Returns new TransferPairs.
+
+    Idempotent: already-paired transactions are skipped.
+    """
     paired = _paired_ids(db)
 
-    # Only consider non-pending to avoid matching a transient row.
+    # Pending rows are transient and their amounts can still change.
     txns = (
         db.query(Transaction)
         .filter(Transaction.pending == False)  # noqa: E712
@@ -36,48 +54,74 @@ def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
         .all()
     )
 
-    by_id = {t.id: t for t in txns}
+    # Index inflows by absolute amount so matching is a lookup rather than a
+    # full scan per outflow (this used to be O(n^2) over the whole ledger).
+    inflows_by_amount: dict[Decimal, list[Transaction]] = defaultdict(list)
+    for t in txns:
+        if t.amount is not None and t.amount < 0:
+            inflows_by_amount[-t.amount].append(t)
+
     created: list[TransferPair] = []
 
-    for t in txns:
-        if t.id in paired or t.amount is None or t.amount <= 0:
+    for out_txn in txns:
+        if out_txn.id in paired or out_txn.amount is None or out_txn.amount <= 0:
             continue
 
-        best: Transaction | None = None
-        best_gap: int | None = None
-        for u in txns:
-            if u.id == t.id or u.id in paired:
+        candidates: list[tuple[int, Transaction]] = []
+        for in_txn in inflows_by_amount.get(out_txn.amount, ()):
+            if in_txn.id in paired or in_txn.account_id == out_txn.account_id:
                 continue
-            if u.account_id == t.account_id:
+            # Direction matters: money leaves before (or the same day as) it
+            # arrives. Allowing the inflow to precede the outflow would double
+            # the window in which unrelated amounts can collide.
+            gap = (in_txn.date - out_txn.date).days
+            if gap < 0 or gap > window_days:
                 continue
-            if u.amount is None or u.amount >= 0:
-                continue
-            if u.amount != -t.amount:
-                continue
-            gap = abs((u.date - t.date).days)
-            if gap > window_days:
-                continue
-            if best is None or gap < best_gap:
-                best = u
-                best_gap = gap
+            candidates.append((gap, in_txn))
 
-        if best is not None:
-            pair = TransferPair(
-                txn_out_id=t.id,
-                txn_in_id=best.id,
-                detected_by="auto",
-                confirmed=False,
-            )
-            db.add(pair)
-            paired.add(t.id)
-            paired.add(best.id)
-            created.append(pair)
+        if not candidates:
+            continue
+
+        best_gap = min(gap for gap, _ in candidates)
+        tied = [txn for gap, txn in candidates if gap == best_gap]
+        if len(tied) > 1:
+            # Two equally-plausible counterparties: guessing would be a coin
+            # flip that silently moves money out of the analytics, so leave both
+            # unpaired and let the review queue surface them.
+            continue
+
+        match = tied[0]
+        pair = TransferPair(
+            txn_out_id=out_txn.id,
+            txn_in_id=match.id,
+            detected_by="auto",
+            confirmed=False,
+        )
+        db.add(pair)
+        paired.add(out_txn.id)
+        paired.add(match.id)
+        created.append(pair)
 
     if created:
         db.commit()
         for p in created:
             db.refresh(p)
     return created
+
+
+def clear_auto_pairs(db: Session) -> int:
+    """Delete unconfirmed auto-detected pairs. Confirmed and manual pairs stay.
+
+    Lets a re-detect discard stale guesses (e.g. after the matching rules change
+    or a new account is linked) without touching anything the user has vetted.
+    """
+    deleted = (
+        db.query(TransferPair)
+        .filter(TransferPair.detected_by == "auto", TransferPair.confirmed == False)  # noqa: E712
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return int(deleted or 0)
 
 
 def manual_pair(db: Session, txn_a_id: int, txn_b_id: int) -> TransferPair:

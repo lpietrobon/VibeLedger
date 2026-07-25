@@ -155,7 +155,9 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 **Transfers (double-entry reconciliation):**
 - `POST /transfers/detect` — pairs unpaired opposite-sign transactions on different accounts within `window_days` (default 3). Idempotent.
 - `GET /transfers`, `POST /transfers` (manual pair), `POST /transfers/{id}/confirm`, `DELETE /transfers/{id}`.
-- `is_transfer_override` on `transaction_annotations` flags transfers the heuristic can't pair (partial amounts, fees) — set via the Transfers dashboard page.
+- A transfer is **only** a matched pair across two covered accounts — that is the sole thing that can double-count money as both income and expense. Analytics exclude paired transactions; nothing else.
+- The legacy one-sided `is_transfer_override` column is **no longer honored**. It removed single transactions from every analytic with no counterparty, could not be set or cleared through any API (contrary to earlier docs), and survived re-sync via annotation fingerprints — so anything carrying it was silently and permanently missing from spend and income. The column remains for now but is inert.
+- `POST /transfers/detect?reset_auto=true` discards unconfirmed auto pairs before re-detecting; confirmed and manual pairs are kept.
 
 **Dashboard:**
 - Reads SQLite directly (cached, fast); writes go through the FastAPI endpoints (auth/validation/transfer logic stay centralized). Server-computed analytics (e.g. the Recurring page) read via the API so the logic isn't duplicated in the dashboard.

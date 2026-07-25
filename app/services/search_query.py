@@ -47,7 +47,7 @@ IS_VALUES: tuple[tuple[str, str], ...] = (
     ("uncategorized", "No category assigned"),
     ("refund", "Confirmed or likely refund"),
     ("likely-refund", "Detected refund, not yet confirmed"),
-    ("not-transfer", "Excludes paired and flagged transfers"),
+    ("not-transfer", "Excludes paired transfers"),
     ("pending", "Still pending"),
 )
 

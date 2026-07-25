@@ -118,7 +118,13 @@ def test_cashflow_excludes_transfer_both_sides():
     assert data["2026-03"]["net"] == -50.0
 
 
-def test_transfer_override_excludes_txn():
+def test_one_sided_transfer_override_is_ignored():
+    """A transfer is a matched pair across two accounts; a one-sided flag is not.
+
+    The legacy is_transfer_override could not be set or cleared via any API yet
+    silently removed a transaction from every analytic, so it is no longer
+    honored — the spend stays counted.
+    """
     _seed_transfer_ledger()
     with SessionLocal() as db:
         tx = db.query(Transaction).filter(Transaction.name == "Groceries").first()
@@ -126,8 +132,9 @@ def test_transfer_override_excludes_txn():
         db.commit()
     with TestClient(app) as client:
         r = client.get("/analytics/monthly-spend", headers=AUTH_HEADERS)
-    # The only un-overridden spend was the $200 transfer, still counted (no pair yet)
-    assert r.json() == [{"month": "2026-03", "spend": 200.0}]
+    by_month = {row["month"]: row["spend"] for row in r.json()}
+    # $50 groceries stays counted despite the flag, plus the $200 unpaired CC PMT.
+    assert by_month["2026-03"] == 250.0
 
 
 def test_transfers_confirm_and_delete():
