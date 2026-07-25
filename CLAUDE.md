@@ -131,7 +131,9 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 - `SYNC_INTERVAL_HOURS` in `.env` enables automatic background sync (off by default).
 
 **Transactions & annotations:**
-- `GET /transactions` — supports `start_date`, `end_date`, `category`, `limit`, `offset`.
+- `GET /transactions` — supports `start_date`, `end_date`, `category`, `limit`, `offset`, and `q` (parsed search, see below).
+- **Search grammar** (`app/services/search_query.py`, canonical + server-side): `q` accepts `merchant:`, `category:`/`cat:`, `account:`, `>50`/`<100` (absolute amount), `from:`/`to:` (YYYY-MM snaps to month bounds), `is:unreviewed|reviewed|uncategorized|refund|pending`, quoted values (`merchant:"blue bottle"`), and bare words as free text over name/merchant/category. A parent category matches its children (`FOOD` matches `FOOD/DINING`). Unknown `field:value` tokens fall through to free text rather than matching nothing. See `docs/transaction-search-spec.md`.
+- `GET /transactions/search-suggestions?q=` — context-aware dropdown data: the field menu when between tokens, real DB values (ordered by frequency) inside a `field:` token. This is what makes the syntax discoverable instead of memorized.
 - `PATCH /transactions/{id}/annotation` — set `user_category`, `merchant_name_override`, `notes`, `reviewed`. Also upserts an `annotation_fingerprints` row keyed by the transaction's content hash, so the annotation survives item removal/re-link.
 - `GET /annotations/fingerprints?unapplied_only=true` — list saved annotation fingerprints, optionally only those not currently matched to a live transaction.
 - `POST /refunds/detect` — recompute automatic refund matches. Exact same-account, amount, and transaction-name matches become `likely`; Plaid refund codes become `confirmed`. Manual `confirmed`/`not_refund` choices override detection.

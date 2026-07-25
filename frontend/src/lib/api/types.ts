@@ -196,6 +196,20 @@ export type ConnectStatus = {
   item_id: string | null;
 };
 
+export type SearchSuggestion = {
+  value: string;
+  label: string;
+  hint: string;
+  has_values: boolean;
+};
+
+export type SearchSuggestionsResponse = {
+  context: "field" | "value";
+  field: string | null;
+  replace_token: string;
+  suggestions: SearchSuggestion[];
+};
+
 export type CategoryRuleDraft = {
   rank?: number;
   enabled?: boolean;

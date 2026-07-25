@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { ArrowDownUp, CalendarDays, Edit3, Search, X } from "lucide-react";
+import { ArrowDownUp, CalendarDays, Edit3, X } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Section } from "@/components/finance/Section";
+import { SearchBar, SearchChips } from "@/components/finance/SearchBar";
 import { TransactionRow } from "@/components/finance/TransactionRow";
 import { AnnotationSheet, BatchAnnotationSheet } from "@/components/finance/AnnotationSheet";
 import {
@@ -186,19 +187,11 @@ export default function TransactionsPage() {
           </div>
         ) : null}
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search transactions…"
-              className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-3 text-sm"
-            />
-          </div>
+          <SearchBar value={query} onChange={setQuery} placeholder="Search or filter transactions…" />
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+            className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm md:h-9 md:flex-none"
           >
             <option value="All">All categories</option>
             {category !== "All" && !CATEGORIES.includes(category) ? (
@@ -214,7 +207,7 @@ export default function TransactionsPage() {
               </optgroup>
             ))}
           </select>
-          <div className="inline-flex h-9 items-center rounded-md border border-input bg-background text-sm">
+          <div className="inline-flex h-10 min-w-0 flex-1 items-center rounded-md border border-input bg-background text-sm md:h-9 md:flex-none">
             <CalendarDays className="ml-2 h-4 w-4 text-muted-foreground" />
             <select
               value={datePreset}
@@ -236,18 +229,18 @@ export default function TransactionsPage() {
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
                 aria-label="Start date"
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm md:h-9 md:flex-none"
               />
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
                 aria-label="End date"
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm md:h-9 md:flex-none"
               />
             </>
           ) : null}
-          <div className="inline-flex h-9 items-center rounded-md border border-input bg-background text-sm">
+          <div className="inline-flex h-10 min-w-0 flex-1 items-center rounded-md border border-input bg-background text-sm md:h-9 md:flex-none">
             <ArrowDownUp className="ml-2 h-4 w-4 text-muted-foreground" />
             <select
               value={`${sort}:${order}`}
@@ -268,7 +261,7 @@ export default function TransactionsPage() {
           <button
             onClick={() => setOnlyUnreviewed((v) => !v)}
             className={
-              "h-9 rounded-md border px-3 text-xs font-medium transition-colors " +
+              "h-10 shrink-0 rounded-md border px-3 text-xs font-medium transition-colors md:h-9 " +
               (onlyUnreviewed
                 ? "border-amber-300 bg-amber-50 text-amber-800"
                 : "border-input text-muted-foreground hover:bg-secondary")
@@ -277,6 +270,8 @@ export default function TransactionsPage() {
             Needs review
           </button>
         </div>
+
+        <SearchChips query={query} onChange={setQuery} />
 
         {items.length ? (
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-secondary/30 px-2 py-2 text-sm">
