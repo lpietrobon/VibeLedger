@@ -47,6 +47,47 @@ def _backfill_txn_hashes(engine: Engine) -> None:
             )
 
 
+def _purge_orphan_transaction_rows(engine: Engine) -> None:
+    """Delete rows left pointing at transactions that no longer exist.
+
+    Historic syncs deleted removed transactions without cleaning up their
+    dependents (nothing cascades here), leaving annotations that no join can
+    reach but a bare COUNT still finds — e.g. Overview's "likely refunds"
+    reporting rows the Transactions screen could never show. Orphans are also a
+    correctness hazard: SQLite reuses rowids, so a stale annotation can latch
+    onto an unrelated future transaction. Manual edits survive in
+    annotation_fingerprints, so nothing the user typed is lost here.
+    """
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    if "transactions" not in tables:
+        return
+
+    with engine.begin() as conn:
+        if "transaction_annotations" in tables:
+            conn.execute(text(
+                "DELETE FROM transaction_annotations WHERE transaction_id NOT IN "
+                "(SELECT id FROM transactions)"
+            ))
+            conn.execute(text(
+                "UPDATE transaction_annotations "
+                "SET refund_status = NULL, refund_match_transaction_id = NULL, "
+                "    refund_reason = NULL "
+                "WHERE refund_match_transaction_id IS NOT NULL "
+                "  AND refund_match_transaction_id NOT IN (SELECT id FROM transactions)"
+            ))
+        if "transfer_pairs" in tables:
+            conn.execute(text(
+                "DELETE FROM transfer_pairs WHERE txn_out_id NOT IN (SELECT id FROM transactions) "
+                "   OR txn_in_id NOT IN (SELECT id FROM transactions)"
+            ))
+        if "category_decision_events" in tables:
+            conn.execute(text(
+                "DELETE FROM category_decision_events WHERE transaction_id NOT IN "
+                "(SELECT id FROM transactions)"
+            ))
+
+
 def apply_patches(engine: Engine) -> None:
     if not _has_column(engine, "transaction_annotations", "is_transfer_override"):
         with engine.begin() as conn:
@@ -262,3 +303,5 @@ def apply_patches(engine: Engine) -> None:
                 "CREATE INDEX ix_category_decision_events_transaction_changed_at "
                 "ON category_decision_events(transaction_id, changed_at)"
             ))
+
+    _purge_orphan_transaction_rows(engine)

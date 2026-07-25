@@ -46,6 +46,8 @@ IS_VALUES: tuple[tuple[str, str], ...] = (
     ("reviewed", "Already reviewed"),
     ("uncategorized", "No category assigned"),
     ("refund", "Confirmed or likely refund"),
+    ("likely-refund", "Detected refund, not yet confirmed"),
+    ("not-transfer", "Excludes paired and flagged transfers"),
     ("pending", "Still pending"),
 )
 
@@ -184,7 +186,7 @@ def describe_tokens(parsed: ParsedQuery) -> list[dict]:
     if parsed.date_to:
         chips.append({"type": "date_to", "label": f"To {parsed.date_to}", "token": f"to:{parsed.date_to}"})
     for flag in sorted(parsed.flags):
-        chips.append({"type": "is", "label": flag.capitalize(), "token": f"is:{flag}"})
+        chips.append({"type": "is", "label": flag.replace("-", " ").capitalize(), "token": f"is:{flag}"})
     for value in parsed.text:
         chips.append({"type": "text", "label": f'"{value}"', "token": value})
     return chips

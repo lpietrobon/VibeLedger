@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import date, timedelta
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.time import utcnow
@@ -9,11 +10,13 @@ from app.models.models import (
     Account,
     AccountBalanceSnapshot,
     AnnotationFingerprint,
+    CategoryDecisionEvent,
     Item,
     SyncRun,
     SyncState,
     Transaction,
     TransactionAnnotation,
+    TransferPair,
 )
 from app.services.plaid_client import PlaidClient
 from app.services.refund_detector import classify_refunds
@@ -285,9 +288,39 @@ class SyncService:
             existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
             if existing:
                 removed_count += 1
+                self._delete_dependent_rows(db, existing.id)
                 db.delete(existing)
 
         return added_count, modified_count, removed_count
+
+    def _delete_dependent_rows(self, db: Session, txn_id: int) -> None:
+        """Drop rows that point at a transaction about to be deleted.
+
+        Nothing cascades (no ORM relationships, and SQLite FKs are off), so
+        without this the annotation outlives its transaction and keeps being
+        counted by anything that queries annotations directly. The manual part
+        of the annotation is not lost — it lives on in annotation_fingerprints
+        and is reapplied if the transaction comes back.
+        """
+        db.query(TransactionAnnotation).filter(
+            TransactionAnnotation.refund_match_transaction_id == txn_id
+        ).update(
+            {
+                TransactionAnnotation.refund_status: None,
+                TransactionAnnotation.refund_match_transaction_id: None,
+                TransactionAnnotation.refund_reason: None,
+            },
+            synchronize_session=False,
+        )
+        db.query(TransferPair).filter(
+            or_(TransferPair.txn_out_id == txn_id, TransferPair.txn_in_id == txn_id)
+        ).delete(synchronize_session=False)
+        db.query(CategoryDecisionEvent).filter(
+            CategoryDecisionEvent.transaction_id == txn_id
+        ).delete(synchronize_session=False)
+        db.query(TransactionAnnotation).filter(
+            TransactionAnnotation.transaction_id == txn_id
+        ).delete(synchronize_session=False)
 
     def _reapply_fingerprint(self, db: Session, txn: Transaction, txn_hash: str, txn_occurrence: int) -> None:
         candidates = (

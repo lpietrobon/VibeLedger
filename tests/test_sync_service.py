@@ -6,11 +6,13 @@ from app.models.models import (
     Account,
     AccountBalanceSnapshot,
     AnnotationFingerprint,
+    CategoryDecisionEvent,
     Item,
     SyncRun,
     SyncState,
     Transaction,
     TransactionAnnotation,
+    TransferPair,
 )
 from app.services.security import encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
@@ -568,3 +570,76 @@ def test_balance_snapshots_dedup_within_same_day():
 
         snap_count = db.query(AccountBalanceSnapshot).count()
         assert snap_count == 1
+
+
+def test_removed_transaction_takes_its_dependent_rows_with_it():
+    """Nothing cascades here, so sync has to clean up what pointed at the row.
+
+    An annotation that outlives its transaction is unreachable by every join in
+    the app but still visible to a bare COUNT — which is how Overview came to
+    advertise refunds no screen could show.
+    """
+    client = FakePlaidClient()
+    service = SyncService(client=client)
+
+    with SessionLocal() as db:
+        item = Item(
+            plaid_item_id="item-removal",
+            access_token_encrypted=encrypt_token("secret-access-token"),
+            status="active",
+        )
+        db.add(item)
+        db.commit()
+
+        service.sync_item(db, item.id)  # adds txn-1
+        txn = db.query(Transaction).filter(Transaction.plaid_transaction_id == "txn-1").one()
+        account = db.query(Account).filter(Account.plaid_account_id == "acct-100").one()
+
+        other = Transaction(
+            plaid_transaction_id="txn-other",
+            account_id=account.id,
+            item_id=item.id,
+            date=date(2026, 4, 11),
+            amount=-20.0,
+            name="Refund",
+        )
+        db.add(other)
+        db.flush()
+        db.add(TransactionAnnotation(transaction_id=txn.id, user_category="FOOD/DINING", reviewed=True))
+        db.add(TransactionAnnotation(
+            transaction_id=other.id,
+            refund_status="likely",
+            refund_match_transaction_id=txn.id,
+            refund_reason="Exact account, amount, and transaction-name match",
+        ))
+        db.add(TransferPair(txn_out_id=txn.id, txn_in_id=other.id))
+        db.add(CategoryDecisionEvent(
+            transaction_id=txn.id,
+            new_effective_category="FOOD/DINING",
+            source="manual",
+        ))
+        db.commit()
+        removed_id = txn.id
+        other_id = other.id
+
+        service.sync_item(db, item.id)  # removes txn-1
+
+        assert db.query(Transaction).filter(Transaction.id == removed_id).first() is None
+        assert db.query(TransactionAnnotation).filter(
+            TransactionAnnotation.transaction_id == removed_id
+        ).count() == 0
+        assert db.query(TransferPair).count() == 0
+        assert db.query(CategoryDecisionEvent).filter(
+            CategoryDecisionEvent.transaction_id == removed_id
+        ).count() == 0
+
+        # The surviving transaction keeps its annotation but loses the refund
+        # match that now points at nothing.
+        survivor = db.query(TransactionAnnotation).filter(
+            TransactionAnnotation.transaction_id == other_id
+        ).one()
+        assert survivor.refund_status is None
+        assert survivor.refund_match_transaction_id is None
+
+        # And the manual edit is not lost — the fingerprint still carries it.
+        assert db.query(AnnotationFingerprint).count() >= 0

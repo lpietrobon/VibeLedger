@@ -136,3 +136,31 @@ def test_suggestions_return_real_values_inside_token():
     assert merchants["suggestions"][0]["value"] == 'merchant:"Blue Bottle"'
 
     assert [s["label"] for s in statuses["suggestions"]] == ["unreviewed", "uncategorized"]
+
+
+def test_every_is_flag_actually_filters():
+    """A flag the grammar accepts but the SQL layer ignores matches everything.
+
+    That failure mode is silent and dangerous: `is:likely-refund` parsed fine
+    while the API had no handler for it, so the Overview drill-down that used it
+    returned the entire ledger instead of nine refunds. Comparing the compiled
+    SQL catches an unwired flag without needing a fixture row per status.
+    """
+    from app.api.routes import _apply_search_query
+    from app.services.search_query import IS_VALUES, parse_query
+
+    with SessionLocal() as db:
+        base = (
+            db.query(Transaction)
+            .join(Account, Account.id == Transaction.account_id)
+            .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+        )
+        unfiltered = str(base)
+
+        for flag, _label in IS_VALUES:
+            parsed = parse_query(f"is:{flag}")
+            assert parsed.flags == {flag}, f"is:{flag} did not parse as a status flag"
+            assert str(_apply_search_query(base, parsed)) != unfiltered, (
+                f"is:{flag} is offered by the search grammar but adds no SQL filter, "
+                "so it silently matches every transaction"
+            )
