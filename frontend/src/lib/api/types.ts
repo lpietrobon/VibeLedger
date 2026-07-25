@@ -148,3 +148,61 @@ export type TransfersResponse = {
   total: number;
   items: TransferCandidate[];
 };
+
+export type RecurringSeries = {
+  merchant_key: string;
+  merchant_label: string;
+  cadence: "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
+  occurrences: number;
+  average_amount: Money;
+  min_amount: Money;
+  max_amount: Money;
+  amount_consistent: boolean;
+  first_date: string;
+  last_date: string;
+  next_expected_date: string;
+  median_interval_days: number;
+  monthly_estimate: Money;
+  annual_estimate: Money;
+  status: "active" | "inactive";
+  auto_status: "active" | "inactive";
+  manual_status: "kept" | "canceled" | null;
+  category: string | null;
+  account_ids: number[];
+  sample_transaction_ids: number[];
+};
+
+export type RecurringResponse = {
+  items: RecurringSeries[];
+  summary: {
+    count: number;
+    active_count: number;
+    active_monthly_estimate: Money;
+    active_annual_estimate: Money;
+  };
+};
+
+export type ConnectSession = {
+  session_token: string;
+  expires_at: string;
+  connect_url: string;
+};
+
+export type ConnectStatus = {
+  status: string;
+  created_at: string;
+  expires_at: string;
+  completed_at: string | null;
+  item_id: string | null;
+};
+
+export type CategoryRuleDraft = {
+  rank?: number;
+  enabled?: boolean;
+  description_regex?: string | null;
+  account_name_regex?: string | null;
+  min_amount?: Money | null;
+  max_amount?: Money | null;
+  assigned_category: string;
+  name?: string | null;
+};

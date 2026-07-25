@@ -5,9 +5,12 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "preview": "node preview-server.mjs"
+    "preview": "node preview-server.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.2.1",
     "@tanstack/react-query": "^5.101.1",
     "@vitejs/plugin-react": "^5.2.0",
     "date-fns": "^4.1.0",
@@ -16,14 +19,16 @@
     "react-dom": "^18.3.1",
     "recharts": "^2.15.4",
     "tailwindcss": "^4.2.1",
-    "@tailwindcss/vite": "^4.2.1",
     "tw-animate-css": "^1.3.4"
   },
   "devDependencies": {
     "@types/node": "^22.16.5",
     "@types/react": "^18.3.19",
     "@types/react-dom": "^18.3.5",
+    "jsdom": "^29.1.1",
     "typescript": "^5.8.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^4.1.10"
   }
 }

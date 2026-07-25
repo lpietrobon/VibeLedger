@@ -2,3 +2,6 @@ node_modules/
 dist/
 .vite/
 *.local
+
+# vite-plugin-pwa dev output
+dev-dist/

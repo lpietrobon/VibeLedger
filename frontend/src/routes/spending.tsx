@@ -1,15 +1,5 @@
+import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { Search } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Section } from "@/components/finance/Section";
@@ -28,6 +18,8 @@ import {
 } from "@/lib/api/client";
 import type { Transaction } from "@/lib/api/types";
 import { formatCurrency } from "@/lib/format";
+
+const CumulativeChart = lazy(() => import("@/components/finance/charts/CumulativeChart"));
 
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
 
@@ -153,62 +145,9 @@ export default function SpendingPage() {
         <Section title="Cumulative spend pace vs last 3 periods">
           <div className="h-64">
             {cumulative.data ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={cumulative.data} margin={{ left: -10, right: 8, top: 8, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 90%)" vertical={false} />
-                  <XAxis
-                    dataKey="day"
-                    tick={{ fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                    width={40}
-                  />
-                  <Tooltip
-                    formatter={(v: number) => (v == null ? "—" : formatCurrency(v))}
-                    contentStyle={{ fontSize: 12, borderRadius: 6 }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Line
-                    type="linear"
-                    dataKey="previous3"
-                    name="3 ago"
-                    stroke="#cbd5e1"
-                    strokeWidth={1}
-                    dot={false}
-                  />
-                  <Line
-                    type="linear"
-                    dataKey="previous2"
-                    name="2 ago"
-                    stroke="#94a3b8"
-                    strokeWidth={1}
-                    dot={false}
-                  />
-                  <Line
-                    type="linear"
-                    dataKey="previous1"
-                    name="Prior"
-                    stroke="#64748b"
-                    strokeWidth={1.5}
-                    dot={false}
-                  />
-                  <Line
-                    type="linear"
-                    dataKey="current"
-                    name="Current"
-                    stroke="#ef4444"
-                    strokeWidth={2.5}
-                    dot={false}
-                    connectNulls={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              <Suspense fallback={<div className="h-full animate-pulse rounded bg-secondary" />}>
+                <CumulativeChart data={cumulative.data} />
+              </Suspense>
             ) : (
               <div className="h-full animate-pulse rounded bg-secondary" />
             )}

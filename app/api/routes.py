@@ -1,4 +1,5 @@
 from datetime import date
+import calendar
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,7 @@ from app.models.models import (
     CategoryRule,
     ConnectSession,
     Item,
+    RecurringOverride,
     SyncRun,
     SyncState,
     Transaction,
@@ -42,6 +44,7 @@ from app.schemas.plaid import (
     CreateConnectSessionRequest,
     PatchAccountRequest,
     PatchAnnotationRequest,
+    RecurringStatusRequest,
     TransferCreateRequest,
 )
 from app.services.security import decrypt_token, encrypt_token
@@ -49,6 +52,7 @@ from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
 from app.services.refund_detector import classify_refunds
+from app.services.recurring_detector import detect_recurring
 from app.services.category_resolver import (
     PLAID_DETAILED_FRIENDLY_MAP,
     PLAID_FRIENDLY_MAP,
@@ -400,6 +404,7 @@ def list_transactions(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     category: str | None = Query(default=None),
+    q: str | None = Query(default=None, description="Search name, merchant, or category"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -433,6 +438,15 @@ def list_transactions(
         base = base.filter(Transaction.date <= end_date)
     if category:
         base = base.filter(_effective_category_expr() == category)
+    if q:
+        needle = f"%{q.strip().lower()}%"
+        base = base.filter(
+            or_(
+                func.lower(Transaction.name).like(needle),
+                func.lower(_effective_merchant_expr()).like(needle),
+                func.lower(_effective_category_expr()).like(needle),
+            )
+        )
 
     total = base.with_entities(func.count(Transaction.id)).scalar()
     rows = (
@@ -1115,6 +1129,362 @@ def accounts_summary(db: Session = Depends(get_db)):
         "net_worth": round(assets - liabilities, 2),
         "groups": by_type,
     }
+
+
+def _month_key(d: date) -> str:
+    return f"{d.year:04d}-{d.month:02d}"
+
+
+def _prev_month_key(month: str) -> str:
+    y, m = (int(x) for x in month.split("-"))
+    m -= 1
+    if m == 0:
+        m, y = 12, y - 1
+    return f"{y:04d}-{m:02d}"
+
+
+def _month_bounds(month: str) -> tuple[date, date]:
+    y, m = (int(x) for x in month.split("-"))
+    return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
+
+
+def _month_label(month: str) -> str:
+    y, m = (int(x) for x in month.split("-"))
+    return f"{calendar.month_name[m]} {y}"
+
+
+def _expense_value_case():
+    """Signed per-transaction expense: positive charges add, refunds subtract."""
+    return case(
+        (_is_refund_expr(), Transaction.amount),
+        (Transaction.amount > 0, Transaction.amount),
+        else_=0,
+    )
+
+
+def _project_month(month: str, total: float) -> float:
+    """Straight-line projection for the in-progress current month; else unchanged."""
+    today = date.today()
+    y, m = (int(x) for x in month.split("-"))
+    days_in_month = calendar.monthrange(y, m)[1]
+    if y == today.year and m == today.month and today.day:
+        return round(total / today.day * days_in_month, 2)
+    return round(total, 2)
+
+
+def _merge_comparison(current: dict[str, float], previous: dict[str, float]) -> list[dict]:
+    rows = [
+        {
+            "category": cat,
+            "current": round(current.get(cat, 0.0), 2),
+            "previous": round(previous.get(cat, 0.0), 2),
+        }
+        for cat in (set(current) | set(previous))
+    ]
+    rows.sort(key=lambda r: r["current"], reverse=True)
+    return rows
+
+
+@router.get("/analytics/overview")
+def analytics_overview(db: Session = Depends(get_db)):
+    """One-shot summary for the mobile Overview screen (KPIs + needs-attention)."""
+    accounts = accounts_summary(db)
+    cash = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False)
+    by_month = {row["month"]: row for row in cash}
+    latest = cash[-1]["month"] if cash else _month_key(date.today())
+    previous = _prev_month_key(latest)
+    cur = by_month.get(latest, {})
+    pre = by_month.get(previous, {})
+
+    as_of = db.query(func.max(Transaction.date)).scalar() or date.today()
+
+    likely_refunds = (
+        db.query(func.count(TransactionAnnotation.id))
+        .filter(TransactionAnnotation.refund_status == "likely")
+        .scalar()
+    ) or 0
+    transfer_pending = (
+        db.query(func.count(TransferPair.id))
+        .filter(TransferPair.confirmed == False)  # noqa: E712
+        .scalar()
+    ) or 0
+
+    unreviewed_q = db.query(func.count(Transaction.id)).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+    )
+    unreviewed_q = _apply_transfer_exclusion(unreviewed_q, include_transfers=False)
+    unreviewed = unreviewed_q.filter(
+        or_(
+            TransactionAnnotation.reviewed.is_(None),
+            TransactionAnnotation.reviewed == False,  # noqa: E712
+        )
+    ).scalar() or 0
+
+    uncategorized = (
+        db.query(func.count(Transaction.id))
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+        .filter(func.lower(_effective_category_expr()) == "uncategorized")
+        .scalar()
+    ) or 0
+
+    return {
+        "as_of_date": str(as_of),
+        "net_worth": accounts["net_worth"],
+        "assets": accounts["assets"],
+        "liabilities": accounts["liabilities"],
+        "month_spend": cur.get("expenses", 0.0),
+        "previous_month_spend": pre.get("expenses", 0.0),
+        "month_income": cur.get("income", 0.0),
+        "previous_month_income": pre.get("income", 0.0),
+        "net_cashflow": cur.get("net", 0.0),
+        "previous_net_cashflow": pre.get("net", 0.0),
+        "needs_attention": {
+            "unreviewed_transactions": int(unreviewed),
+            "uncategorized_transactions": int(uncategorized),
+            "likely_refunds": int(likely_refunds),
+            "transfer_pairs_pending": int(transfer_pending),
+        },
+    }
+
+
+@router.get("/analytics/spending-summary")
+def analytics_spending_summary(
+    db: Session = Depends(get_db),
+    granularity: str = Query(default="monthly"),
+):
+    """Period spend total, comparison, projection, top driver, and per-category diff."""
+    monthly = monthly_spend(db, start_date=None, end_date=None, include_transfers=False)
+    spend_by_month = {r["month"]: r["spend"] for r in monthly}
+    latest = monthly[-1]["month"] if monthly else _month_key(date.today())
+
+    if granularity == "yearly":
+        year = int(latest.split("-")[0])
+        prev_year = year - 1
+        total = round(sum(v for m, v in spend_by_month.items() if m.startswith(f"{year}-")), 2)
+        previous_total = round(
+            sum(v for m, v in spend_by_month.items() if m.startswith(f"{prev_year}-")), 2
+        )
+        months_with_data = sum(1 for m in spend_by_month if m.startswith(f"{year}-"))
+        projection = round(total / months_with_data * 12, 2) if months_with_data else 0.0
+        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, date(year, 1, 1), date(year, 12, 31), include_transfers=False)}
+        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, date(prev_year, 1, 1), date(prev_year, 12, 31), include_transfers=False)}
+        period_label = f"{year} YTD"
+    else:
+        previous = _prev_month_key(latest)
+        total = round(spend_by_month.get(latest, 0.0), 2)
+        previous_total = round(spend_by_month.get(previous, 0.0), 2)
+        projection = _project_month(latest, total)
+        cur_start, cur_end = _month_bounds(latest)
+        prev_start, prev_end = _month_bounds(previous)
+        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
+        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
+        period_label = _month_label(latest)
+
+    comparison = _merge_comparison(cur_cats, prev_cats)
+    top_driver = None
+    if comparison:
+        top = comparison[0]
+        top_driver = {"category": top["category"], "amount": round(top["current"] - top["previous"], 2)}
+    change_pct = round((total - previous_total) / previous_total * 100, 2) if previous_total else None
+
+    return {
+        "period_label": period_label,
+        "total": total,
+        "previous_total": previous_total,
+        "change": round(total - previous_total, 2),
+        "change_pct": change_pct,
+        "projection": projection,
+        "top_driver": top_driver,
+        "category_comparison": comparison,
+    }
+
+
+def _daily_expense(db: Session, start: date, end: date, bucket: str) -> dict[int, float]:
+    """Sum expense per day-of-month ('%d') or per month-of-year ('%m') in [start, end]."""
+    bucket_col = func.strftime(bucket, Transaction.date)
+    q = db.query(bucket_col, func.sum(_expense_value_case())).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+    )
+    q = _apply_transfer_exclusion(q, include_transfers=False)
+    q = q.filter(Transaction.date >= start, Transaction.date <= end)
+    rows = q.group_by(bucket_col).all()
+    return {int(b): float(total or 0) for b, total in rows if b is not None}
+
+
+def _cumulative(daily: dict[int, float], length: int) -> list[float | None]:
+    """Running total over 1..length; None once past the last bucket that had data."""
+    if not daily:
+        return [None] * length
+    last = max(daily)
+    out: list[float | None] = []
+    running = 0.0
+    for i in range(1, length + 1):
+        running += daily.get(i, 0.0)
+        out.append(round(running, 2) if i <= last else None)
+    return out
+
+
+@router.get("/analytics/cumulative-spend")
+def analytics_cumulative_spend(
+    db: Session = Depends(get_db),
+    granularity: str = Query(default="monthly"),
+):
+    """Cumulative spend pace for the current period vs the prior three."""
+    anchor = db.query(func.max(Transaction.date)).scalar() or date.today()
+    keys = ("current", "previous1", "previous2", "previous3")
+
+    if granularity == "yearly":
+        years = [anchor.year - i for i in range(4)]
+        series = [
+            _cumulative(_daily_expense(db, date(y, 1, 1), date(y, 12, 31), "%m"), 12)
+            for y in years
+        ]
+        length = 12
+    else:
+        months = [_month_key(anchor)]
+        for _ in range(3):
+            months.append(_prev_month_key(months[-1]))
+        anchor_month = _month_key(anchor)
+        length = calendar.monthrange(int(anchor_month[:4]), int(anchor_month[5:7]))[1]
+        series = []
+        for mkey in months:
+            start, end = _month_bounds(mkey)
+            series.append(_cumulative(_daily_expense(db, start, end, "%d"), length))
+
+    return [
+        {"x": i + 1, **{key: series[j][i] for j, key in enumerate(keys)}}
+        for i in range(length)
+    ]
+
+
+@router.get("/analytics/recurring")
+def analytics_recurring(
+    db: Session = Depends(get_db),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    status: str | None = Query(default=None, description="Filter to 'active' or 'inactive'"),
+    min_monthly: float = Query(default=0.0, ge=0.0),
+):
+    """Detect subscriptions / recurring payments from expense history.
+
+    Transfers and refunds are excluded (only positive expense-side transactions
+    are considered). Detection is deterministic — see
+    app/services/recurring_detector.py."""
+    effective_merchant = _effective_merchant_expr()
+    effective_category = _effective_category_expr()
+    q = (
+        db.query(Transaction, effective_merchant, effective_category)
+        .join(Account, Account.id == Transaction.account_id)
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+        .filter(Transaction.pending == False)  # noqa: E712
+        .filter(Transaction.amount > 0)
+    )
+    q = _apply_transfer_exclusion(q, include_transfers=False)
+    if start_date:
+        q = q.filter(Transaction.date >= start_date)
+    if end_date:
+        q = q.filter(Transaction.date <= end_date)
+
+    txns = [
+        SimpleNamespace(
+            id=t.id,
+            date=t.date,
+            amount=float(t.amount),
+            name=t.name,
+            merchant_name=merchant,
+            account_id=t.account_id,
+            category=category,
+        )
+        for (t, merchant, category) in q.all()
+    ]
+
+    series = detect_recurring(txns)
+    overrides = {o.merchant_key: o.status for o in db.query(RecurringOverride).all()}
+
+    def _effective_status(s) -> str:
+        manual = overrides.get(s.merchant_key)
+        if manual == "canceled":
+            return "inactive"
+        if manual == "kept":
+            return "active"
+        return s.status
+
+    # Enrich every series (effective status + manual override) before filtering,
+    # so the summary reflects the whole portfolio regardless of the status filter.
+    enriched = [(s, _effective_status(s), overrides.get(s.merchant_key)) for s in series]
+
+    active_monthly = round(sum(s.monthly_estimate for s, eff, _ in enriched if eff == "active"), 2)
+    active_annual = round(sum(s.annual_estimate for s, eff, _ in enriched if eff == "active"), 2)
+    active_count = sum(1 for _, eff, _ in enriched if eff == "active")
+
+    filtered = enriched
+    if status in {"active", "inactive"}:
+        filtered = [e for e in filtered if e[1] == status]
+    if min_monthly > 0:
+        filtered = [e for e in filtered if e[0].monthly_estimate >= min_monthly]
+
+    items = [
+        {
+            "merchant_key": s.merchant_key,
+            "merchant_label": s.merchant_label,
+            "cadence": s.cadence,
+            "occurrences": s.occurrences,
+            "average_amount": s.average_amount,
+            "min_amount": s.min_amount,
+            "max_amount": s.max_amount,
+            "amount_consistent": s.amount_consistent,
+            "first_date": str(s.first_date),
+            "last_date": str(s.last_date),
+            "next_expected_date": str(s.next_expected_date),
+            "median_interval_days": s.median_interval_days,
+            "monthly_estimate": s.monthly_estimate,
+            "annual_estimate": s.annual_estimate,
+            "status": eff,
+            "auto_status": s.status,
+            "manual_status": manual,
+            "category": s.category,
+            "account_ids": s.account_ids,
+            "sample_transaction_ids": s.sample_transaction_ids,
+        }
+        for s, eff, manual in filtered
+    ]
+    return {
+        "items": items,
+        "summary": {
+            "count": len(items),
+            "active_count": active_count,
+            "active_monthly_estimate": active_monthly,
+            "active_annual_estimate": active_annual,
+        },
+    }
+
+
+@router.post("/analytics/recurring/{merchant_key}/status")
+def set_recurring_status(
+    merchant_key: str,
+    payload: RecurringStatusRequest,
+    db: Session = Depends(get_db),
+):
+    """Manually override a recurring series' status (persisted, keyed by merchant).
+
+    'auto' clears the override; 'kept' forces active; 'canceled' forces inactive."""
+    row = (
+        db.query(RecurringOverride)
+        .filter(RecurringOverride.merchant_key == merchant_key)
+        .first()
+    )
+    if payload.status == "auto":
+        if row:
+            db.delete(row)
+            db.commit()
+        return {"merchant_key": merchant_key, "manual_status": None}
+
+    if row:
+        row.status = payload.status
+    else:
+        db.add(RecurringOverride(merchant_key=merchant_key, status=payload.status))
+    db.commit()
+    return {"merchant_key": merchant_key, "manual_status": payload.status}
 
 
 @router.post("/transfers/detect")
