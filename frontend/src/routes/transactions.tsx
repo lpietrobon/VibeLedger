@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { ArrowDownUp, CalendarDays, Edit3, Search, X } from "lucide-react";
+import { ArrowDownUp, CalendarDays, Edit3, X } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Section } from "@/components/finance/Section";
+import { SearchBar, SearchChips } from "@/components/finance/SearchBar";
 import { TransactionRow } from "@/components/finance/TransactionRow";
 import { AnnotationSheet, BatchAnnotationSheet } from "@/components/finance/AnnotationSheet";
 import {
@@ -186,15 +187,7 @@ export default function TransactionsPage() {
           </div>
         ) : null}
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search transactions…"
-              className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-3 text-sm"
-            />
-          </div>
+          <SearchBar value={query} onChange={setQuery} placeholder="Search or filter transactions…" />
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
@@ -277,6 +270,8 @@ export default function TransactionsPage() {
             Needs review
           </button>
         </div>
+
+        <SearchChips query={query} onChange={setQuery} />
 
         {items.length ? (
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-secondary/30 px-2 py-2 text-sm">

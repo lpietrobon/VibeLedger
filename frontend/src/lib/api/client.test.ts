@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  applySuggestion,
   getOverviewSummary,
   getCumulativeSpending,
   getSpendingSummary,
@@ -85,6 +86,25 @@ describe("getCumulativeSpending", () => {
     const rows = await getCumulativeSpending({ granularity: "monthly" });
     expect(rows[0]).toEqual({ day: 1, current: 100, previous1: 50, previous2: null, previous3: null });
     expect(rows[1].current).toBeNull();
+  });
+});
+
+describe("applySuggestion", () => {
+  it("completes a field token and leaves it open for a value", () => {
+    // Accepting "Category" from the empty field menu should not add a trailing
+    // space — the user still needs to pick a value.
+    expect(applySuggestion("", "", "category:")).toBe("category:");
+    expect(applySuggestion("cat", "cat", "category:")).toBe("category:");
+  });
+
+  it("replaces the in-progress token, preserving earlier terms", () => {
+    expect(applySuggestion("coffee merchant:blu", "merchant:blu", 'merchant:"Blue Bottle"')).toBe(
+      'coffee merchant:"Blue Bottle" ',
+    );
+  });
+
+  it("appends a completed value with a trailing space", () => {
+    expect(applySuggestion("is:", "is:", "is:unreviewed")).toBe("is:unreviewed ");
   });
 });
 

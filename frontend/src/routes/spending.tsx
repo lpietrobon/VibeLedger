@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { SearchBar } from "@/components/finance/SearchBar";
 import { AppShell } from "@/components/layout/AppShell";
 import { Section } from "@/components/finance/Section";
 import { KpiCard } from "@/components/finance/KpiCard";
@@ -176,15 +176,7 @@ export default function SpendingPage() {
 
       <Section title="Transactions" className="mt-4">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search merchant, category…"
-              className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-3 text-sm"
-            />
-          </div>
+          <SearchBar value={query} onChange={setQuery} placeholder="Search merchant, category…" />
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}

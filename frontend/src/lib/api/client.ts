@@ -13,6 +13,7 @@ import type {
   RecurringResponse,
   ConnectSession,
   ConnectStatus,
+  SearchSuggestionsResponse,
 } from "./types";
 import { CATEGORY_COLORS } from "./theme";
 
@@ -204,6 +205,19 @@ export async function getTransactions(params?: {
     limit: params?.limit ?? 100,
     offset: params?.offset ?? 0,
   });
+}
+
+export async function getSearchSuggestions(q: string): Promise<SearchSuggestionsResponse> {
+  return jsonFetch<SearchSuggestionsResponse>("/transactions/search-suggestions", { q: q || undefined });
+}
+
+/** Replace the trailing in-progress token with an accepted suggestion. */
+export function applySuggestion(query: string, replaceToken: string, value: string): string {
+  const base = replaceToken ? query.slice(0, query.length - replaceToken.length) : query;
+  const needsSpace = base && !base.endsWith(" ");
+  const joined = `${base}${needsSpace ? " " : ""}${value}`;
+  // Field tokens end with ":" and still need a value typed; others complete a term.
+  return joined.endsWith(":") ? joined : `${joined} `;
 }
 
 type AnnotationPayload = {

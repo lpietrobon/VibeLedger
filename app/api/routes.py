@@ -53,6 +53,12 @@ from app.services.connect_service import ConnectService
 from app.services import transfer_detector
 from app.services.refund_detector import classify_refunds
 from app.services.recurring_detector import detect_recurring
+from app.services.search_query import (
+    IS_VALUES,
+    SEARCH_FIELDS,
+    parse_query,
+    suggestion_context,
+)
 from app.services.category_resolver import (
     PLAID_DETAILED_FRIENDLY_MAP,
     PLAID_FRIENDLY_MAP,
@@ -398,6 +404,149 @@ def sync_all(db: Session = Depends(get_db)):
     return {"results": results, "summary": f"{succeeded}/{len(results)} items synced"}
 
 
+def _contains(expr, value: str):
+    return func.lower(expr).like(f"%{value.strip().lower()}%")
+
+
+def _apply_search_query(query, parsed):
+    """Turn a ParsedQuery (app/services/search_query.py) into SQL filters.
+
+    Multiple values for the same field OR together; different fields AND."""
+    if parsed.merchant:
+        query = query.filter(
+            or_(*[_contains(_effective_merchant_expr(), v) for v in parsed.merchant])
+        )
+    if parsed.account:
+        query = query.filter(
+            or_(*[_contains(_effective_account_name_expr(), v) for v in parsed.account])
+        )
+    if parsed.category:
+        # A parent matches its children: FOOD also matches FOOD/DINING.
+        clauses = []
+        for value in parsed.category:
+            needle = value.strip().lower()
+            clauses.append(
+                or_(
+                    func.lower(_effective_category_expr()) == needle,
+                    func.lower(_effective_category_expr()).like(f"{needle}/%"),
+                )
+            )
+        query = query.filter(or_(*clauses))
+    if parsed.amount_min is not None:
+        query = query.filter(func.abs(Transaction.amount) > parsed.amount_min)
+    if parsed.amount_max is not None:
+        query = query.filter(func.abs(Transaction.amount) < parsed.amount_max)
+    if parsed.date_from:
+        query = query.filter(Transaction.date >= parsed.date_from)
+    if parsed.date_to:
+        query = query.filter(Transaction.date <= parsed.date_to)
+
+    if "unreviewed" in parsed.flags:
+        query = query.filter(
+            or_(
+                TransactionAnnotation.reviewed.is_(None),
+                TransactionAnnotation.reviewed == False,  # noqa: E712
+            )
+        )
+    if "reviewed" in parsed.flags:
+        query = query.filter(TransactionAnnotation.reviewed == True)  # noqa: E712
+    if "uncategorized" in parsed.flags:
+        query = query.filter(func.lower(_effective_category_expr()) == "uncategorized")
+    if "refund" in parsed.flags:
+        query = query.filter(_is_refund_expr())
+    if "pending" in parsed.flags:
+        query = query.filter(Transaction.pending == True)  # noqa: E712
+
+    for word in parsed.text:
+        query = query.filter(
+            or_(
+                _contains(Transaction.name, word),
+                _contains(_effective_merchant_expr(), word),
+                _contains(_effective_category_expr(), word),
+            )
+        )
+    return query
+
+
+@router.get("/transactions/search-suggestions")
+def transaction_search_suggestions(
+    db: Session = Depends(get_db),
+    q: str | None = Query(default=None, description="Partial query being typed"),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    """Context-aware suggestions powering the search bar dropdown.
+
+    With no input (or between tokens) this returns the field menu — that list is
+    what removes the need to remember the syntax. Inside a `field:` token it
+    returns real values from the ledger."""
+    context, field_key, active = suggestion_context(q)
+
+    if context == "field":
+        prefix = active.strip().lower()
+        fields = [
+            {"value": f.token, "label": f.label, "hint": f.hint, "has_values": f.has_values}
+            for f in SEARCH_FIELDS
+            if not prefix or prefix in f.label.lower() or f.token.startswith(prefix)
+        ]
+        return {
+            "context": "field",
+            "field": None,
+            "replace_token": active,
+            "suggestions": fields[:limit],
+        }
+
+    value_prefix = active.partition(":")[2].strip().lower()
+    token_prefix = active.partition(":")[0] + ":"
+
+    if field_key == "is":
+        return {
+            "context": "value",
+            "field": "is",
+            "replace_token": active,
+            "suggestions": [
+                {"value": f"is:{value}", "label": value, "hint": hint, "has_values": False}
+                for value, hint in IS_VALUES
+                if not value_prefix or value.startswith(value_prefix)
+            ][:limit],
+        }
+
+    expr = {
+        "merchant": _effective_merchant_expr(),
+        "category": _effective_category_expr(),
+        "account": _effective_account_name_expr(),
+    }[field_key]
+
+    rows = (
+        db.query(expr.label("value"), func.count(Transaction.id).label("n"))
+        .join(Account, Account.id == Transaction.account_id)
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+        .filter(expr.is_not(None))
+        .group_by(expr)
+        .order_by(func.count(Transaction.id).desc())
+        .all()
+    )
+    suggestions = [
+        {
+            "value": f"{token_prefix}{_quote_value(str(value))}",
+            "label": str(value),
+            "hint": f"{count} transaction{'s' if count != 1 else ''}",
+            "has_values": False,
+        }
+        for value, count in rows
+        if value and (not value_prefix or value_prefix in str(value).lower())
+    ]
+    return {
+        "context": "value",
+        "field": field_key,
+        "replace_token": active,
+        "suggestions": suggestions[:limit],
+    }
+
+
+def _quote_value(value: str) -> str:
+    return f'"{value}"' if " " in value else value
+
+
 @router.get("/transactions")
 def list_transactions(
     db: Session = Depends(get_db),
@@ -439,14 +588,7 @@ def list_transactions(
     if category:
         base = base.filter(_effective_category_expr() == category)
     if q:
-        needle = f"%{q.strip().lower()}%"
-        base = base.filter(
-            or_(
-                func.lower(Transaction.name).like(needle),
-                func.lower(_effective_merchant_expr()).like(needle),
-                func.lower(_effective_category_expr()).like(needle),
-            )
-        )
+        base = _apply_search_query(base, parse_query(q))
 
     total = base.with_entities(func.count(Transaction.id)).scalar()
     rows = (
