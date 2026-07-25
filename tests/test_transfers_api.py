@@ -150,9 +150,10 @@ def test_transfers_confirm_and_delete():
         r = client.delete(f"/transfers/{pair_id}", headers=AUTH_HEADERS)
         assert r.status_code == 200
 
-        # Re-detect now works again — proves idempotent removal
+        # Unpairing is remembered: re-detection must NOT resurrect the pair,
+        # otherwise every correction is undone by the next sync.
         r = client.post("/transfers/detect", headers=AUTH_HEADERS)
-        assert r.json()["created"] == 1
+        assert r.json()["created"] == 0
 
 
 def test_manual_pair_validates_amounts_and_accounts():

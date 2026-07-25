@@ -24,10 +24,10 @@ from __future__ import annotations
 from collections import defaultdict
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.models import Transaction, TransferPair
+from app.models.models import RejectedTransferPair, Transaction, TransferPair
 
 
 def _paired_ids(db: Session) -> set[int]:
@@ -39,12 +39,55 @@ def _paired_ids(db: Session) -> set[int]:
     return out
 
 
+def _rejected_pairs(db: Session) -> set[tuple[int, int]]:
+    """Combinations the user has explicitly unpaired."""
+    rows = db.execute(
+        select(RejectedTransferPair.txn_out_id, RejectedTransferPair.txn_in_id)
+    ).all()
+    return {(a, b) for a, b in rows}
+
+
+def reject_pair(db: Session, txn_out_id: int, txn_in_id: int) -> None:
+    """Remember that these two transactions are not a transfer.
+
+    Detection is re-run after every sync, so without this an unpaired
+    false positive simply comes back.
+    """
+    exists = (
+        db.query(RejectedTransferPair)
+        .filter(
+            RejectedTransferPair.txn_out_id == txn_out_id,
+            RejectedTransferPair.txn_in_id == txn_in_id,
+        )
+        .first()
+    )
+    if not exists:
+        db.add(RejectedTransferPair(txn_out_id=txn_out_id, txn_in_id=txn_in_id))
+
+
+def unreject_pair(db: Session, txn_a_id: int, txn_b_id: int) -> None:
+    """Forget a rejection, in either direction (used when manually pairing)."""
+    db.query(RejectedTransferPair).filter(
+        or_(
+            and_(
+                RejectedTransferPair.txn_out_id == txn_a_id,
+                RejectedTransferPair.txn_in_id == txn_b_id,
+            ),
+            and_(
+                RejectedTransferPair.txn_out_id == txn_b_id,
+                RejectedTransferPair.txn_in_id == txn_a_id,
+            ),
+        )
+    ).delete(synchronize_session=False)
+
+
 def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
     """Pair outflows with their counterparty inflow. Returns new TransferPairs.
 
     Idempotent: already-paired transactions are skipped.
     """
     paired = _paired_ids(db)
+    rejected = _rejected_pairs(db)
 
     # Pending rows are transient and their amounts can still change.
     txns = (
@@ -71,6 +114,8 @@ def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
         for in_txn in inflows_by_amount.get(out_txn.amount, ()):
             if in_txn.id in paired or in_txn.account_id == out_txn.account_id:
                 continue
+            if (out_txn.id, in_txn.id) in rejected:
+                continue  # the user already said these two are not a transfer
             # Direction matters: money leaves before (or the same day as) it
             # arrives. Allowing the inflow to precede the outflow would double
             # the window in which unrelated amounts can collide.
@@ -137,6 +182,8 @@ def manual_pair(db: Session, txn_a_id: int, txn_b_id: int) -> TransferPair:
     paired = _paired_ids(db)
     if a.id in paired or b.id in paired:
         raise ValueError("one or both transactions already paired")
+
+    unreject_pair(db, a.id, b.id)
 
     if a.amount > 0:
         out_id, in_id = a.id, b.id

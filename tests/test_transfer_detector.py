@@ -1,8 +1,6 @@
 from datetime import date
 from decimal import Decimal
 
-import pytest
-
 from app.db.session import SessionLocal
 from app.models.models import Account, Item, Transaction, TransferPair
 from app.services import transfer_detector
@@ -168,23 +166,21 @@ def test_does_not_pair_same_account():
         db.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "OPEN DECISION: with neither reciprocal-name matching nor a category veto, "
-        "amount+date+different-account cannot separate a real transfer from a "
-        "coincidence, so RENT PORTION still pairs with ONLINE PAYMENT. Flips to "
-        "passing as soon as a discriminator is added; strict=True so it fails loudly "
-        "if it starts passing unnoticed."
-    ),
-)
-def test_cards_paid_from_an_unlinked_account_produce_no_pairs():
-    """The real-world setup this was failing on: credit cards plus one
-    depository, where the cards are paid from an account that is NOT linked.
-    Every card payment is one-sided, so the correct answer is zero pairs.
+def test_unrelated_equal_amounts_still_pair_accepted_limitation():
+    """ACCEPTED LIMITATION, pinned deliberately.
 
-    Previously the detector married unrelated equal amounts (a rent payment to a
-    card payment) and silently removed both from spend and income.
+    Cards paid from an account that is NOT linked leave one-sided payments, so
+    ideally nothing here would pair. But with only amount + date +
+    different-account to go on, a rent payment and a card payment of the same
+    size within the window are indistinguishable from a real transfer, and one
+    pair is produced.
+
+    The chosen mitigation is visibility rather than precision: the transaction
+    list shows both rows with a Transfer badge, and unpairing is remembered (see
+    test_unpairing_is_remembered_across_redetection) so a correction sticks.
+    Adding a discriminator — a consumption-category veto, or matching the
+    counterparty account name in the description — would eliminate this at the
+    cost of complexity, and was deliberately deferred.
     """
     db = SessionLocal()
     try:
@@ -203,10 +199,42 @@ def test_cards_paid_from_an_unlinked_account_produce_no_pairs():
         db.commit()
 
         created = transfer_detector.detect_candidates(db)
-        assert created == [], [
+        paired_names = sorted(
             (db.get(Transaction, p.txn_out_id).name, db.get(Transaction, p.txn_in_id).name)
             for p in created
-        ]
+        )
+        # The genuine one-sided payments stay unpaired; only the amount
+        # coincidence pairs.
+        assert paired_names == [("RENT PORTION", "ONLINE PAYMENT")]
+    finally:
+        db.close()
+
+
+def test_unpairing_is_remembered_across_redetection():
+    """Detection re-runs after every sync. Without a memory of rejections, an
+    unpaired false positive reappears immediately and the review page is a
+    treadmill."""
+    db = SessionLocal()
+    try:
+        item, checking, credit = _seed_item_and_accounts(db)
+        out = _mk_txn(db, item, checking, 300, date(2024, 3, 11), "RENT PORTION")
+        inn = _mk_txn(db, item, credit, -300, date(2024, 3, 12), "ONLINE PAYMENT")
+        db.commit()
+
+        created = transfer_detector.detect_candidates(db)
+        assert len(created) == 1
+
+        # The user unpairs it.
+        transfer_detector.reject_pair(db, out.id, inn.id)
+        db.query(TransferPair).delete()
+        db.commit()
+
+        assert transfer_detector.detect_candidates(db) == []
+        assert db.query(TransferPair).count() == 0
+
+        # Manually pairing them later overrides the rejection.
+        transfer_detector.manual_pair(db, out.id, inn.id)
+        assert db.query(TransferPair).count() == 1
     finally:
         db.close()
 

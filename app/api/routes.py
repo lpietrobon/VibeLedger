@@ -1790,9 +1790,15 @@ def transfers_confirm(pair_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/transfers/{pair_id}")
 def transfers_delete(pair_id: int, db: Session = Depends(get_db)):
+    """Unpair, and remember the rejection.
+
+    Detection re-runs after every sync, so deleting alone would let the same
+    false pair reappear immediately — the review queue would be a treadmill.
+    """
     pair = db.get(TransferPair, pair_id)
     if not pair:
         raise HTTPException(status_code=404, detail="pair not found")
+    transfer_detector.reject_pair(db, pair.txn_out_id, pair.txn_in_id)
     db.delete(pair)
     db.commit()
-    return {"status": "unpaired"}
+    return {"status": "unpaired", "remembered": True}
