@@ -1,8 +1,31 @@
 import type { Transaction } from "@/lib/api/types";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { CATEGORIES } from "@/lib/api/client";
-import { X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CategoryPicker, normalizeCategory } from "@/components/finance/CategoryPicker";
+import { Sheet } from "@/components/layout/Sheet";
+import { useEffect, useState } from "react";
+
+/**
+ * Decide what to persist for `user_category`.
+ *
+ * Returning null means "keep inheriting" — the rule/Plaid mapping stays live.
+ * Only an actual change (or a transaction already manually overridden) pins a
+ * value.
+ *
+ * The comparison is case-insensitive on purpose: `effective_category` can be
+ * the SQL fallback literal 'uncategorized' (lowercase) while the picker emits
+ * canonical uppercase. Comparing exactly would pin a manual "UNCATEGORIZED"
+ * override on every save of an uncategorized transaction, silently detaching it
+ * from future rule/Plaid categorization.
+ */
+export function resolveUserCategory(
+  tx: Pick<Transaction, "category_source" | "effective_category">,
+  selected: string,
+): string | null {
+  const isInherited =
+    tx.category_source !== "manual" &&
+    selected.toUpperCase() === (tx.effective_category ?? "").toUpperCase();
+  return isInherited ? null : selected;
+}
 
 type AnnotationPayload = {
   user_category?: string | null;
@@ -42,12 +65,6 @@ export function AnnotationSheet({
     );
   }, [tx]);
 
-  const categoryOptions = useMemo(() => {
-    const normalized = normalizeCategory(category);
-    if (!normalized || CATEGORIES.includes(normalized)) return CATEGORIES;
-    return [normalized, ...CATEGORIES];
-  }, [category]);
-
   if (!tx) return null;
 
   const bankCategory = tx.plaid_category_friendly ?? tx.plaid_category_primary ?? "Uncategorized";
@@ -57,14 +74,11 @@ export function AnnotationSheet({
       : null;
   const sourceLabel = categorySourceLabel(tx.category_source);
   const selectedCategory = normalizeCategory(category) || tx.effective_category;
-  const categoryListId = `category-options-${tx.id}`;
+  const willInherit = resolveUserCategory(tx, selectedCategory) === null;
 
   const handleSave = () => {
-    const isInheritedSelection =
-      tx.category_source !== "manual" && selectedCategory === tx.effective_category;
-
     onSave(tx.id, {
-      user_category: isInheritedSelection ? null : selectedCategory,
+      user_category: resolveUserCategory(tx, selectedCategory),
       merchant_name_override: merchant || null,
       notes: notes || null,
       reviewed,
@@ -74,35 +88,12 @@ export function AnnotationSheet({
   };
 
   return (
-    <>
-      <div
-        className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-[1px]"
-        onClick={onClose}
-        aria-hidden
-      />
-      <aside
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto rounded-t-lg border-t border-border bg-background shadow-xl md:inset-y-0 md:right-0 md:left-auto md:max-h-none md:w-[400px] md:rounded-none md:border-l md:border-t-0"
-        role="dialog"
-        aria-label="Edit transaction"
-      >
-        <div className="sticky top-0 flex items-center justify-between border-b border-border bg-background px-4 py-3">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">
-              {tx.effective_merchant ?? tx.name}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {formatDate(tx.date)} · {tx.effective_account_name}
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
+    <Sheet
+      label="Edit transaction"
+      title={tx.effective_merchant ?? tx.name}
+      subtitle={`${formatDate(tx.date)} · ${tx.effective_account_name}`}
+      onClose={onClose}
+    >
         <div className="px-4 py-4">
           <div className="mb-4 flex items-baseline justify-between">
             <span className="text-xs uppercase tracking-wide text-muted-foreground">Amount</span>
@@ -166,22 +157,12 @@ export function AnnotationSheet({
           </div>
 
           <Field label="Category">
-            <input
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              onBlur={(e) => setCategory(normalizeCategory(e.target.value))}
-              list={categoryListId}
-              placeholder="FOOD/DINING"
-              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            />
-            <datalist id={categoryListId}>
-              {categoryOptions.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
+            <CategoryPicker value={category} onChange={setCategory} placeholder="Choose a category" />
             <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>After save</span>
-              <span className="min-w-0 truncate font-medium text-foreground">{selectedCategory}</span>
+              <span className="min-w-0 truncate font-medium text-foreground">
+                {willInherit ? "keeps the automatic mapping" : selectedCategory}
+              </span>
             </div>
           </Field>
 
@@ -247,8 +228,7 @@ export function AnnotationSheet({
             </button>
           </div>
         </div>
-      </aside>
-    </>
+    </Sheet>
   );
 }
 
@@ -268,12 +248,6 @@ export function BatchAnnotationSheet({
   const [refund, setRefund] = useState<"auto" | "confirmed" | "not_refund">("auto");
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
 
-  const categoryOptions = useMemo(() => {
-    const normalized = normalizeCategory(category);
-    if (!normalized || CATEGORIES.includes(normalized)) return CATEGORIES;
-    return [normalized, ...CATEGORIES];
-  }, [category]);
-
   if (!count) return null;
 
   const markDirty = (field: string) => setDirty((current) => ({ ...current, [field]: true }));
@@ -292,53 +266,28 @@ export function BatchAnnotationSheet({
   };
 
   return (
-    <>
-      <div
-        className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-[1px]"
-        onClick={onClose}
-        aria-hidden
-      />
-      <aside
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto rounded-t-lg border-t border-border bg-background shadow-xl md:inset-y-0 md:right-0 md:left-auto md:max-h-none md:w-[400px] md:rounded-none md:border-l md:border-t-0"
-        role="dialog"
-        aria-label="Batch edit transactions"
-      >
-        <div className="sticky top-0 flex items-center justify-between border-b border-border bg-background px-4 py-3">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">Batch edit</div>
-            <div className="text-xs text-muted-foreground">{count} selected transactions</div>
-          </div>
-          <button
-            onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
+    <Sheet
+      label="Batch edit transactions"
+      title="Batch edit"
+      subtitle={`${count} selected transactions`}
+      onClose={onClose}
+    >
         <div className="px-4 py-4">
           <div className="mb-3 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground">
             Only fields you change here will be applied.
           </div>
 
           <Field label="Category">
-            <input
+            <CategoryPicker
               value={category}
-              onChange={(e) => {
-                setCategory(e.target.value);
+              onChange={(next) => {
+                setCategory(next);
                 markDirty("category");
               }}
-              onBlur={(e) => setCategory(normalizeCategory(e.target.value))}
-              list="batch-category-options"
               placeholder="Leave unchanged"
-              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              allowClear
+              clearLabel="Clear category override"
             />
-            <datalist id="batch-category-options">
-              {categoryOptions.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
           </Field>
 
           <Field label="Merchant override">
@@ -417,8 +366,7 @@ export function BatchAnnotationSheet({
             </button>
           </div>
         </div>
-      </aside>
-    </>
+    </Sheet>
   );
 }
 
@@ -444,8 +392,4 @@ function categorySourceLabel(source: Transaction["category_source"]) {
     case "default":
       return "Default";
   }
-}
-
-function normalizeCategory(value: string) {
-  return value.trim().replace(/\s+/g, "_").replace(/\/+/g, "/").toUpperCase();
 }

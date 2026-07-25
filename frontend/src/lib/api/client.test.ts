@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applySuggestion,
+  getCategoryCatalog,
   getOverviewSummary,
   getCumulativeSpending,
   getSpendingSummary,
@@ -86,6 +87,22 @@ describe("getCumulativeSpending", () => {
     const rows = await getCumulativeSpending({ granularity: "monthly" });
     expect(rows[0]).toEqual({ day: 1, current: 100, previous1: 50, previous2: null, previous3: null });
     expect(rows[1].current).toBeNull();
+  });
+});
+
+describe("getCategoryCatalog", () => {
+  it("unwraps items from the /categories envelope", async () => {
+    const fetchMock = mockFetch({
+      items: [
+        { value: "FOOD/DINING", count: 12, source: "ledger" },
+        { value: "PETS/VET", count: 0, source: "rule" },
+      ],
+    });
+    const items = await getCategoryCatalog();
+    expect(items).toHaveLength(2);
+    expect(items[0]).toEqual({ value: "FOOD/DINING", count: 12, source: "ledger" });
+    const calledUrl = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]));
+    expect(calledUrl.pathname).toContain("/categories");
   });
 });
 

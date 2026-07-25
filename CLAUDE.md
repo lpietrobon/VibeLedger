@@ -92,6 +92,8 @@ app/
     refund_detector.py       # High-confidence refund matching + manual override support
     recurring_detector.py    # Deterministic subscription / recurring-payment detection (pure functions)
     category_resolver.py     # Rule compilation + Plaid->friendly category map (shared by API and SQL view)
+    category_catalog.py      # DEFAULT_CATEGORIES + merge of ledger/rule/default vocab for pickers (pure)
+    search_query.py          # Canonical transaction search grammar (pure parser)
 Spend.py                     # Streamlit "Overview" entry page (net worth, month spend/income, needs-attention)
 dashboard_lib.py             # Cached SQLite loaders + HTTP helpers for mutations + shared nav/filters
 pages/
@@ -134,6 +136,7 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 - `GET /transactions` — supports `start_date`, `end_date`, `category`, `limit`, `offset`, and `q` (parsed search, see below).
 - **Search grammar** (`app/services/search_query.py`, canonical + server-side): `q` accepts `merchant:`, `category:`/`cat:`, `account:`, `>50`/`<100` (absolute amount), `from:`/`to:` (YYYY-MM snaps to month bounds), `is:unreviewed|reviewed|uncategorized|refund|pending`, quoted values (`merchant:"blue bottle"`), and bare words as free text over name/merchant/category. A parent category matches its children (`FOOD` matches `FOOD/DINING`). Unknown `field:value` tokens fall through to free text rather than matching nothing. See `docs/transaction-search-spec.md`.
 - `GET /transactions/search-suggestions?q=` — context-aware dropdown data: the field menu when between tokens, real DB values (ordered by frequency) inside a `field:` token. This is what makes the syntax discoverable instead of memorized.
+- `GET /categories` — the vocabulary offered by category pickers: every category in use (with transaction counts), plus category-rule targets and a curated starter set (`DEFAULT_CATEGORIES` in `app/services/category_catalog.py`). Each item is `{value, count, source}` where source is `ledger|rule|default`. Case variants are merged — notably the SQL fallback literal `uncategorized` and a manual `UNCATEGORIZED` annotation collapse into one row. `PARENT/CHILD` is a convention, not an invariant: 1-level values (unmapped Plaid primaries) and 3+-level values are returned as-is.
 - `PATCH /transactions/{id}/annotation` — set `user_category`, `merchant_name_override`, `notes`, `reviewed`. Also upserts an `annotation_fingerprints` row keyed by the transaction's content hash, so the annotation survives item removal/re-link.
 - `GET /annotations/fingerprints?unapplied_only=true` — list saved annotation fingerprints, optionally only those not currently matched to a live transaction.
 - `POST /refunds/detect` — recompute automatic refund matches. Exact same-account, amount, and transaction-name matches become `likely`; Plaid refund codes become `confirmed`. Manual `confirmed`/`not_refund` choices override detection.
