@@ -20,8 +20,12 @@ const CADENCE_LABEL: Record<string, string> = {
 
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
 
-function txHref(label: string) {
-  return `${basePath}/transactions?query=${encodeURIComponent(label)}`;
+// The series' own search_query, never merchant_label: the label is one raw
+// sample name and can carry a per-transaction suffix (a Zelle confirmation
+// code, a store number). Search ANDs free-text tokens, so a label-derived query
+// would return only the single transaction that suffix came from.
+function txHref(series: RecurringSeries) {
+  return `${basePath}/transactions?query=${encodeURIComponent(series.search_query)}`;
 }
 
 export default function RecurringPage() {
@@ -101,7 +105,7 @@ export default function RecurringPage() {
               {items.map((series) => (
                 <tr key={series.merchant_key} className="border-b border-border hover:bg-secondary/40">
                   <td className="py-2">
-                    <a href={txHref(series.merchant_label)} className="group inline-flex items-center gap-1 font-medium text-sky-700 hover:underline">
+                    <a href={txHref(series)} className="group inline-flex items-center gap-1 font-medium text-sky-700 hover:underline">
                       {series.merchant_label}
                       <ChevronRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
                     </a>
@@ -127,7 +131,7 @@ export default function RecurringPage() {
         <div className="-mx-4 -mb-4 divide-y divide-border md:hidden">
           {items.map((series) => (
             <div key={series.merchant_key} className="px-4 py-3">
-              <a href={txHref(series.merchant_label)} className="flex items-center justify-between gap-3">
+              <a href={txHref(series)} className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1 truncate font-medium text-sky-700">
                     {series.merchant_label}

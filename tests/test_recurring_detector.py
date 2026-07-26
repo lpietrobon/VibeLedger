@@ -1,7 +1,11 @@
 from datetime import date, timedelta
 from types import SimpleNamespace
 
-from app.services.recurring_detector import detect_recurring, merchant_key
+from app.services.recurring_detector import (
+    detect_recurring,
+    merchant_key,
+    merchant_search_query,
+)
 
 
 def _txn(i, d, amount, merchant, name=None, account_id=1, category=None):
@@ -80,3 +84,46 @@ def test_variable_amount_still_recurring_but_marked_inconsistent():
 def test_merchant_key_normalizes_store_numbers():
     assert merchant_key(_txn(1, date(2026, 1, 1), 5, "SPOTIFY P0F3A1")) == "spotify"
     assert merchant_key(_txn(1, date(2026, 1, 1), 5, "Spotify")) == "spotify"
+
+
+def test_search_query_drops_per_transaction_suffixes():
+    """The drilldown query must be built from the same tokens as the group key,
+    so it cannot contain junk unique to one charge."""
+    noisy = _txn(1, date(2026, 1, 1), 5, None, name="Zelle payment to Clara -SF26 JPM99ck4gexd")
+    plain = _txn(2, date(2026, 2, 1), 5, None, name="Zelle payment to Clara -SF26 JPM88zz1abcd")
+    assert merchant_search_query(noisy) == "zelle payment to clara"
+    # Every member of a group yields the identical query (it is the key, spaced).
+    assert merchant_search_query(noisy) == merchant_search_query(plain)
+    assert merchant_search_query(noisy).replace(" ", "") == merchant_key(noisy)
+
+
+def test_series_search_query_matches_every_member_name():
+    txns = [
+        _txn(i, date(2026, 1 + i, 5), 800.0, None, name=f"Zelle payment to Clara -SF26 JPM{i}ck4gexd")
+        for i in range(5)
+    ]
+    series = detect_recurring(txns, reference_date=date(2026, 6, 1))
+    assert len(series) == 1
+    query = series[0].search_query
+    assert query == "zelle payment to clara"
+    # Free-text search ANDs its tokens against each transaction's own name, so
+    # every token has to appear in every member for the drilldown to be complete.
+    for t in txns:
+        assert all(word in t.name.lower() for word in query.split())
+
+
+def test_label_strips_trailing_noise_but_keeps_leading_digits():
+    clara = detect_recurring(
+        [
+            _txn(i, date(2026, 1 + i, 5), 800.0, None, name=f"Zelle payment to Clara -SF26 JPM{i}ck4gexd")
+            for i in range(5)
+        ],
+        reference_date=date(2026, 6, 1),
+    )
+    assert clara[0].merchant_label == "Zelle payment to Clara"
+
+    store = detect_recurring(
+        [_txn(i, date(2026, 1 + i, 5), 20.0, None, name=f"7-ELEVEN 3512{i}") for i in range(5)],
+        reference_date=date(2026, 6, 1),
+    )
+    assert store[0].merchant_label == "7-ELEVEN"

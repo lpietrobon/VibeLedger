@@ -67,6 +67,8 @@ _AMOUNT_TOLERANCE = 0.2
 class RecurringSeries:
     merchant_key: str
     merchant_label: str
+    #: transaction-search query that reproduces this group (see merchant_search_query)
+    search_query: str
     cadence: str
     occurrences: int
     average_amount: float
@@ -85,21 +87,69 @@ class RecurringSeries:
     sample_transaction_ids: list[int]
 
 
+def _stable_tokens(txn: RecurringTxnLike) -> list[str]:
+    """Lowercased words of the merchant descriptor, minus anything with a digit.
+
+    Digit-bearing tokens are per-transaction noise (store numbers, order ids,
+    Zelle confirmation codes), so dropping them is what lets charges from the
+    same merchant collapse into one series.
+    """
+    raw = (txn.merchant_name or txn.name or "").lower()
+    tokens = re.split(r"[^a-z0-9]+", raw)
+    return [tok for tok in tokens if tok and not any(c.isdigit() for c in tok)]
+
+
 def merchant_key(txn: RecurringTxnLike) -> str:
     """Normalize a transaction to a grouping key.
 
     Prefers Plaid's cleaned ``merchant_name``; falls back to the raw descriptor.
-    Non-alphanumeric characters and trailing digit runs (store numbers, order
+    Non-alphanumeric characters and digit-bearing tokens (store numbers, order
     ids) are stripped so "SPOTIFY P0F3A1" and "Spotify" collapse together.
     """
-    raw = (txn.merchant_name or txn.name or "").lower()
-    tokens = re.split(r"[^a-z0-9]+", raw)
-    alpha_tokens = [tok for tok in tokens if tok and not any(c.isdigit() for c in tok)]
-    return "".join(alpha_tokens)
+    return "".join(_stable_tokens(txn))
+
+
+def merchant_search_query(txn: RecurringTxnLike) -> str:
+    """The transaction-search query that reproduces this transaction's group.
+
+    Same tokens as :func:`merchant_key`, space-separated instead of joined —
+    which makes it a valid free-text query. Every member of a group has the same
+    token sequence by construction (that is exactly what the key is), and each
+    token is a substring of that member's own name/merchant, so the query is
+    guaranteed to match the whole series.
+
+    Drilldowns must use this, never ``merchant_label``: the label is one raw
+    sample name and may carry a per-transaction suffix ("Zelle payment to Clara
+    -SF26 JPM99ck4gexd"). Search ANDs free-text tokens, so a query built from
+    that label matches only the single transaction it came from.
+    """
+    return " ".join(_stable_tokens(txn))
+
+
+#: Trailing junk on a raw descriptor: a separator followed by a digit-bearing
+#: word at the end of the string (" -SF26", " JPM99ck4gexd", " P0F3A1").
+_TRAILING_NOISE_RE = re.compile(r"[\s\-*#/.,]+[A-Za-z]*\d[A-Za-z0-9]*$")
+
+
+def _clean_name(name: str) -> str:
+    """Trim trailing per-transaction junk for display purposes.
+
+    Only strips from the end, and only while a letter-bearing prefix survives,
+    so "7-ELEVEN 35123" becomes "7-ELEVEN" rather than being eaten whole.
+    """
+    cleaned = name.strip()
+    while (match := _TRAILING_NOISE_RE.search(cleaned)) is not None:
+        candidate = cleaned[: match.start()].rstrip(" -*#/.,")
+        if not any(c.isalpha() for c in candidate):
+            break
+        cleaned = candidate
+    return cleaned or name
 
 
 def _label_for(txns: list[RecurringTxnLike]) -> str:
-    names = [t.merchant_name or t.name for t in txns if (t.merchant_name or t.name)]
+    names = [
+        _clean_name(t.merchant_name or t.name) for t in txns if (t.merchant_name or t.name)
+    ]
     if not names:
         return "(unknown)"
     return Counter(names).most_common(1)[0][0]
@@ -155,6 +205,7 @@ def _analyze_group(
     return RecurringSeries(
         merchant_key=merchant_key(txns[0]),
         merchant_label=_label_for(txns),
+        search_query=merchant_search_query(txns[0]),
         cadence=spec.name,
         occurrences=len(txns),
         average_amount=round(average_amount, 2),

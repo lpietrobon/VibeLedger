@@ -82,6 +82,62 @@ def test_recurring_endpoint_finds_subscription():
     assert body["summary"]["active_monthly_estimate"] == spotify["monthly_estimate"]
 
 
+def _seed_noisy_descriptors():
+    """9 monthly Zelle payments whose raw name carries a per-charge confirmation
+    code — the shape that made the drilldown link return a single row."""
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="i-zelle", access_token_encrypted=encrypt_token("t"), status="active")
+        db.add(item)
+        db.flush()
+        checking = Account(plaid_account_id="a-zelle-chk", item_id=item.id, name="Checking")
+        db.add(checking)
+        db.flush()
+
+        for k in range(9):
+            month = 9 + k  # 2025-10 .. 2026-06
+            db.add(
+                Transaction(
+                    plaid_transaction_id=f"zelle-{k}",
+                    account_id=checking.id,
+                    item_id=item.id,
+                    date=date(2025 + month // 12, month % 12 + 1, 20),
+                    # The $1.00 charge is the one whose label used to win.
+                    amount=1.0 if k == 0 else 814.25,
+                    name=f"Zelle payment to Clara -SF26 JPM{k}9ck4gexd",
+                    pending=False,
+                )
+            )
+        db.commit()
+
+
+def test_recurring_drilldown_query_returns_the_whole_series():
+    _seed_noisy_descriptors()
+    with TestClient(app) as client:
+        body = client.get(
+            "/analytics/recurring", headers=AUTH_HEADERS, params={"end_date": "2026-06-30"}
+        ).json()
+        series = next(i for i in body["items"] if i["merchant_key"] == "zellepaymenttoclara")
+        assert series["occurrences"] == 9
+
+        # The drilldown link's query has to reproduce the detector's group.
+        assert series["search_query"] == "zelle payment to clara"
+        drilldown = client.get(
+            "/transactions", headers=AUTH_HEADERS, params={"q": series["search_query"], "limit": 500}
+        ).json()
+        assert len(drilldown["items"]) == series["occurrences"]
+
+        # The raw sample label carries a suffix unique to one charge; searching
+        # it ANDs that suffix in and collapses the series to a single row.
+        one_sample = next(t["name"] for t in drilldown["items"] if t["amount"] == 1.0)
+        narrowed = client.get(
+            "/transactions", headers=AUTH_HEADERS, params={"q": one_sample, "limit": 500}
+        ).json()
+        assert len(narrowed["items"]) == 1
+
+        # …which is exactly why the label is cleaned up before it is shown.
+        assert series["merchant_label"] == "Zelle payment to Clara"
+
+
 def test_manual_status_override_canceled_and_cleared():
     _seed()
     with TestClient(app) as client:
