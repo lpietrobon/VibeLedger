@@ -1199,6 +1199,12 @@ def _is_refund_expr():
     return TransactionAnnotation.refund_status.in_(["confirmed", "likely"])
 
 
+def _apply_account_filter(q, account_ids: list[int] | None):
+    if account_ids:
+        q = q.filter(Transaction.account_id.in_(account_ids))
+    return q
+
+
 @router.post("/refunds/detect")
 def refunds_detect(db: Session = Depends(get_db)):
     return classify_refunds(db)
@@ -1210,6 +1216,7 @@ def monthly_spend(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
+    account_ids: list[int] | None = Query(default=None),
 ):
     month_col = func.strftime("%Y-%m", Transaction.date).label("month")
     q = (
@@ -1224,6 +1231,7 @@ def monthly_spend(
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
     q = _apply_transfer_exclusion(q, include_transfers)
+    q = _apply_account_filter(q, account_ids)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1238,6 +1246,7 @@ def category_spend(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
+    account_ids: list[int] | None = Query(default=None),
 ):
     effective_category = _effective_category_expr().label("category")
     q = (
@@ -1252,6 +1261,7 @@ def category_spend(
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
     q = _apply_transfer_exclusion(q, include_transfers)
+    q = _apply_account_filter(q, account_ids)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1266,6 +1276,7 @@ def cashflow_trend(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
+    account_ids: list[int] | None = Query(default=None),
 ):
     month_col = func.strftime("%Y-%m", Transaction.date).label("month")
     q = (
@@ -1291,6 +1302,7 @@ def cashflow_trend(
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
     q = _apply_transfer_exclusion(q, include_transfers)
+    q = _apply_account_filter(q, account_ids)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1391,10 +1403,13 @@ def _merge_comparison(current: dict[str, float], previous: dict[str, float]) -> 
 
 
 @router.get("/analytics/overview")
-def analytics_overview(db: Session = Depends(get_db)):
+def analytics_overview(
+    db: Session = Depends(get_db),
+    account_ids: list[int] | None = Query(default=None),
+):
     """One-shot summary for the mobile Overview screen (KPIs + needs-attention)."""
     accounts = accounts_summary(db)
-    cash = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False)
+    cash = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False, account_ids=account_ids)
     by_month = {row["month"]: row for row in cash}
     latest = cash[-1]["month"] if cash else _month_key(date.today())
     previous = _prev_month_key(latest)
@@ -1406,12 +1421,12 @@ def analytics_overview(db: Session = Depends(get_db)):
     # Counted over transactions, not annotations: an annotation whose transaction
     # is gone is invisible everywhere else, so counting it here would advertise
     # rows the Transactions screen can never show.
-    likely_refunds = (
+    likely_refunds_q = (
         db.query(func.count(Transaction.id))
         .join(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
         .filter(TransactionAnnotation.refund_status == "likely")
-        .scalar()
-    ) or 0
+    )
+    likely_refunds = _apply_account_filter(likely_refunds_q, account_ids).scalar() or 0
     transfer_pending = (
         db.query(func.count(TransferPair.id))
         .filter(TransferPair.confirmed == False)  # noqa: E712
@@ -1422,6 +1437,7 @@ def analytics_overview(db: Session = Depends(get_db)):
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
     unreviewed_q = _apply_transfer_exclusion(unreviewed_q, include_transfers=False)
+    unreviewed_q = _apply_account_filter(unreviewed_q, account_ids)
     unreviewed = unreviewed_q.filter(
         or_(
             TransactionAnnotation.reviewed.is_(None),
@@ -1429,12 +1445,12 @@ def analytics_overview(db: Session = Depends(get_db)):
         )
     ).scalar() or 0
 
-    uncategorized = (
+    uncategorized_q = (
         db.query(func.count(Transaction.id))
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
         .filter(func.lower(_effective_category_expr()) == "uncategorized")
-        .scalar()
-    ) or 0
+    )
+    uncategorized = _apply_account_filter(uncategorized_q, account_ids).scalar() or 0
 
     return {
         "as_of_date": str(as_of),
@@ -1460,9 +1476,10 @@ def analytics_overview(db: Session = Depends(get_db)):
 def analytics_spending_summary(
     db: Session = Depends(get_db),
     granularity: str = Query(default="monthly"),
+    account_ids: list[int] | None = Query(default=None),
 ):
     """Period spend total, comparison, projection, top driver, and per-category diff."""
-    monthly = monthly_spend(db, start_date=None, end_date=None, include_transfers=False)
+    monthly = monthly_spend(db, start_date=None, end_date=None, include_transfers=False, account_ids=account_ids)
     spend_by_month = {r["month"]: r["spend"] for r in monthly}
     latest = monthly[-1]["month"] if monthly else _month_key(date.today())
 
@@ -1475,8 +1492,8 @@ def analytics_spending_summary(
         )
         months_with_data = sum(1 for m in spend_by_month if m.startswith(f"{year}-"))
         projection = round(total / months_with_data * 12, 2) if months_with_data else 0.0
-        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, date(year, 1, 1), date(year, 12, 31), include_transfers=False)}
-        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, date(prev_year, 1, 1), date(prev_year, 12, 31), include_transfers=False)}
+        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, date(year, 1, 1), date(year, 12, 31), include_transfers=False, account_ids=account_ids)}
+        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, date(prev_year, 1, 1), date(prev_year, 12, 31), include_transfers=False, account_ids=account_ids)}
         period_label = f"{year} YTD"
     else:
         previous = _prev_month_key(latest)
@@ -1485,8 +1502,8 @@ def analytics_spending_summary(
         projection = _project_month(latest, total)
         cur_start, cur_end = _month_bounds(latest)
         prev_start, prev_end = _month_bounds(previous)
-        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
-        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
+        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False, account_ids=account_ids)}
+        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False, account_ids=account_ids)}
         period_label = _month_label(latest)
 
     comparison = _merge_comparison(cur_cats, prev_cats)
@@ -1508,13 +1525,16 @@ def analytics_spending_summary(
     }
 
 
-def _daily_expense(db: Session, start: date, end: date, bucket: str) -> dict[int, float]:
+def _daily_expense(
+    db: Session, start: date, end: date, bucket: str, account_ids: list[int] | None = None
+) -> dict[int, float]:
     """Sum expense per day-of-month ('%d') or per month-of-year ('%m') in [start, end]."""
     bucket_col = func.strftime(bucket, Transaction.date)
     q = db.query(bucket_col, func.sum(_expense_value_case())).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
     q = _apply_transfer_exclusion(q, include_transfers=False)
+    q = _apply_account_filter(q, account_ids)
     q = q.filter(Transaction.date >= start, Transaction.date <= end)
     rows = q.group_by(bucket_col).all()
     return {int(b): float(total or 0) for b, total in rows if b is not None}
@@ -1537,6 +1557,7 @@ def _cumulative(daily: dict[int, float], length: int) -> list[float | None]:
 def analytics_cumulative_spend(
     db: Session = Depends(get_db),
     granularity: str = Query(default="monthly"),
+    account_ids: list[int] | None = Query(default=None),
 ):
     """Cumulative spend pace for the current period vs the prior three."""
     anchor = db.query(func.max(Transaction.date)).scalar() or date.today()
@@ -1545,7 +1566,7 @@ def analytics_cumulative_spend(
     if granularity == "yearly":
         years = [anchor.year - i for i in range(4)]
         series = [
-            _cumulative(_daily_expense(db, date(y, 1, 1), date(y, 12, 31), "%m"), 12)
+            _cumulative(_daily_expense(db, date(y, 1, 1), date(y, 12, 31), "%m", account_ids), 12)
             for y in years
         ]
         length = 12
@@ -1558,7 +1579,7 @@ def analytics_cumulative_spend(
         series = []
         for mkey in months:
             start, end = _month_bounds(mkey)
-            series.append(_cumulative(_daily_expense(db, start, end, "%d"), length))
+            series.append(_cumulative(_daily_expense(db, start, end, "%d", account_ids), length))
 
     return [
         {"x": i + 1, **{key: series[j][i] for j, key in enumerate(keys)}}

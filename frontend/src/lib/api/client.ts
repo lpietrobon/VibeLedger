@@ -23,12 +23,17 @@ const MAX_PAGE_SIZE = 500;
 
 const jsonFetch = async <T>(
   path: string,
-  params?: Record<string, string | number | boolean | undefined>,
+  params?: Record<string, string | number | boolean | number[] | undefined>,
   init?: RequestInit,
 ) => {
   const url = new URL(path.replace(/^\/+/, ""), apiOrigin());
   for (const [key, value] of Object.entries(params ?? {})) {
-    if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
+    if (value === undefined || value === "") continue;
+    if (Array.isArray(value)) {
+      for (const v of value) url.searchParams.append(key, String(v));
+    } else {
+      url.searchParams.set(key, String(value));
+    }
   }
 
   const response = await fetch(url, init);
@@ -77,8 +82,12 @@ type OverviewResponse = {
   };
 };
 
-export async function getOverviewSummary(): Promise<OverviewSummary> {
-  const r = await jsonFetch<OverviewResponse>("/analytics/overview");
+export async function getOverviewSummary(params?: {
+  accountIds?: number[] | null;
+}): Promise<OverviewSummary> {
+  const r = await jsonFetch<OverviewResponse>("/analytics/overview", {
+    account_ids: params?.accountIds ?? undefined,
+  });
   return {
     asOfDate: r.as_of_date,
     netWorth: r.net_worth,
@@ -99,9 +108,12 @@ export async function getOverviewSummary(): Promise<OverviewSummary> {
   };
 }
 
-export async function getCashflowTrend(): Promise<CashflowPoint[]> {
+export async function getCashflowTrend(params?: {
+  accountIds?: number[] | null;
+}): Promise<CashflowPoint[]> {
   const rows = await jsonFetch<Array<{ month: string; income: number; expenses: number; net: number }>>(
     "/analytics/cashflow-trend",
+    { account_ids: params?.accountIds ?? undefined },
   );
   return rows.slice(-12).map((row) => ({
     month: row.month,
@@ -114,10 +126,12 @@ export async function getCashflowTrend(): Promise<CashflowPoint[]> {
 export async function getCategorySpend(params?: {
   startDate?: string;
   endDate?: string;
+  accountIds?: number[] | null;
 }): Promise<CategorySpendPoint[]> {
   const rows = await jsonFetch<CategorySpendPoint[]>("/analytics/category-spend", {
     start_date: params?.startDate,
     end_date: params?.endDate,
+    account_ids: params?.accountIds ?? undefined,
   });
   return rows
     .filter((row) => row.spend > 0)
@@ -136,14 +150,18 @@ type SpendingSummaryResponse = {
   category_comparison: CategoryComparisonPoint[];
 };
 
-async function fetchSpendingSummary(granularity: "monthly" | "yearly") {
-  return jsonFetch<SpendingSummaryResponse>("/analytics/spending-summary", { granularity });
+async function fetchSpendingSummary(granularity: "monthly" | "yearly", accountIds?: number[] | null) {
+  return jsonFetch<SpendingSummaryResponse>("/analytics/spending-summary", {
+    granularity,
+    account_ids: accountIds ?? undefined,
+  });
 }
 
 export async function getSpendingSummary(params?: {
   granularity: "monthly" | "yearly";
+  accountIds?: number[] | null;
 }): Promise<SpendingSummary> {
-  const r = await fetchSpendingSummary(params?.granularity ?? "monthly");
+  const r = await fetchSpendingSummary(params?.granularity ?? "monthly", params?.accountIds);
   return {
     periodLabel: r.period_label,
     total: r.total,
@@ -155,17 +173,23 @@ export async function getSpendingSummary(params?: {
   };
 }
 
-export async function getCategoryComparison(): Promise<CategoryComparisonPoint[]> {
-  const r = await fetchSpendingSummary("monthly");
+export async function getCategoryComparison(params?: {
+  accountIds?: number[] | null;
+}): Promise<CategoryComparisonPoint[]> {
+  const r = await fetchSpendingSummary("monthly", params?.accountIds);
   return r.category_comparison.slice().sort((a, b) => b.current - a.current);
 }
 
 export async function getCumulativeSpending(params?: {
   granularity: "monthly" | "yearly";
+  accountIds?: number[] | null;
 }): Promise<CumulativeSpendingPoint[]> {
   const rows = await jsonFetch<
     Array<{ x: number; current: number | null; previous1: number | null; previous2: number | null; previous3: number | null }>
-  >("/analytics/cumulative-spend", { granularity: params?.granularity ?? "monthly" });
+  >("/analytics/cumulative-spend", {
+    granularity: params?.granularity ?? "monthly",
+    account_ids: params?.accountIds ?? undefined,
+  });
   return rows.map((row) => ({
     day: row.x,
     current: row.current,
