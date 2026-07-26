@@ -116,6 +116,7 @@ def test_remove_item_leaves_no_rows_pointing_at_deleted_transactions():
         Account,
         AnnotationFingerprint,
         CategoryDecisionEvent,
+        RejectedTransferPair,
         Transaction,
         TransactionAnnotation,
         TransferPair,
@@ -150,6 +151,7 @@ def test_remove_item_leaves_no_rows_pointing_at_deleted_transactions():
             refund_reason="Exact account, amount, and transaction-name match",
         ))
         db.add(TransferPair(txn_out_id=charge.id, txn_in_id=survivor.id))
+        db.add(RejectedTransferPair(txn_out_id=charge.id, txn_in_id=survivor.id))
         db.add(CategoryDecisionEvent(
             transaction_id=charge.id, new_effective_category="SHOPPING/GENERAL", source="manual",
         ))
@@ -174,6 +176,9 @@ def test_remove_item_leaves_no_rows_pointing_at_deleted_transactions():
             ).count() == 0
             assert db.query(TransferPair).count() == 0
             assert db.query(CategoryDecisionEvent).count() == 0
+            # A surviving rejection would suppress a future pairing between
+            # whichever transactions inherit these rowids.
+            assert db.query(RejectedTransferPair).count() == 0
 
             refund = db.query(TransactionAnnotation).filter(
                 TransactionAnnotation.transaction_id == survivor_id
