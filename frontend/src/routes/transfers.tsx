@@ -68,8 +68,8 @@ export default function TransfersPage() {
             <thead>
               <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="py-2 font-medium">Date</th>
-                <th className="py-2 font-medium">Out</th>
-                <th className="py-2 font-medium">In</th>
+                <th className="py-2 font-medium">From → To</th>
+                <th className="py-2 font-medium">Descriptions</th>
                 <th className="py-2 text-right font-medium">Amount</th>
                 <th className="py-2 text-right font-medium">Status</th>
                 <th className="py-2 text-right font-medium">Actions</th>
@@ -80,12 +80,22 @@ export default function TransfersPage() {
                 <tr key={item.id} className="border-b border-border">
                   <td className="py-2 text-muted-foreground">{item.out.date ? formatDate(item.out.date) : "-"}</td>
                   <td className="py-2">
-                    <a className="font-medium text-sky-700 hover:underline" href={txHref(item.out.date, item.out.name)}>
+                    <div className="font-medium">
+                      {item.out.account_name ?? `Account ${item.out.account_id}`}
+                      <span className="mx-1 text-muted-foreground">→</span>
+                      {item.in.account_name ?? `Account ${item.in.account_id}`}
+                    </div>
+                    {item.gap_days ? (
+                      <div className="text-xs text-muted-foreground">
+                        settles after {item.gap_days} day{item.gap_days === 1 ? "" : "s"}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="max-w-[280px] py-2 text-muted-foreground">
+                    <a className="block truncate hover:underline" href={txHref(item.out.date, item.out.name)}>
                       {item.out.name ?? `Transaction ${item.out.transaction_id}`}
                     </a>
-                  </td>
-                  <td className="py-2">
-                    <a className="font-medium text-sky-700 hover:underline" href={txHref(item.in.date, item.in.name)}>
+                    <a className="block truncate hover:underline" href={txHref(item.in.date, item.in.name)}>
                       {item.in.name ?? `Transaction ${item.in.transaction_id}`}
                     </a>
                   </td>
@@ -144,10 +154,15 @@ export default function TransfersPage() {
                   {item.confirmed ? "Confirmed" : "Pending"}
                 </span>
               </div>
-              <a className="block truncate font-medium text-sky-700" href={txHref(item.out.date, item.out.name)}>
+              <div className="truncate font-medium">
+                {item.out.account_name ?? `Account ${item.out.account_id}`}
+                <span className="mx-1 text-muted-foreground">→</span>
+                {item.in.account_name ?? `Account ${item.in.account_id}`}
+              </div>
+              <a className="mt-1 block truncate text-xs text-sky-700" href={txHref(item.out.date, item.out.name)}>
                 {item.out.name ?? `Transaction ${item.out.transaction_id}`}
               </a>
-              <a className="mt-1 block truncate font-medium text-sky-700" href={txHref(item.in.date, item.in.name)}>
+              <a className="block truncate text-xs text-sky-700" href={txHref(item.in.date, item.in.name)}>
                 {item.in.name ?? `Transaction ${item.in.transaction_id}`}
               </a>
               <div className="mt-1 text-xs text-muted-foreground">

@@ -635,6 +635,25 @@ def list_transactions(
         .offset(offset)
         .all()
     )
+
+    # This list deliberately shows everything, transfers included — but a row
+    # excluded from spend/income analytics should say so, otherwise money
+    # silently goes missing from the totals with no visible cause.
+    page_ids = [row[0].id for row in rows]
+    pair_by_txn: dict[int, int] = {}
+    if page_ids:
+        pair_rows = db.query(
+            TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id
+        ).filter(
+            or_(
+                TransferPair.txn_out_id.in_(page_ids),
+                TransferPair.txn_in_id.in_(page_ids),
+            )
+        ).all()
+        for pair_id, out_id, in_id in pair_rows:
+            pair_by_txn[out_id] = pair_id
+            pair_by_txn[in_id] = pair_id
+
     return {
         "total": total,
         "items": [
@@ -654,6 +673,8 @@ def list_transactions(
                 "effective_category": resolved_category,
                 "category_source": resolved_source,
                 "rule_id": a.rule_id if (a and resolved_source == "rule") else None,
+                "transfer_pair_id": pair_by_txn.get(t.id),
+                "is_transfer": t.id in pair_by_txn,
                 "refund_status": a.refund_status if a else None,
                 "refund_match_transaction_id": a.refund_match_transaction_id if a else None,
                 "refund_reason": a.refund_reason if a else None,
@@ -1156,17 +1177,21 @@ def recompute_all_category_rules(payload: CategoryRuleRecomputeRequest, db: Sess
 
 
 def _apply_transfer_exclusion(q, include_transfers: bool):
-    """Filter out any transaction participating in a TransferPair or flagged via
-    TransactionAnnotation.is_transfer_override."""
+    """Filter out transactions participating in a TransferPair.
+
+    A transfer is a *matched pair* across two covered accounts — that is the only
+    thing that can double-count money as both income and expense. The legacy
+    one-sided `is_transfer_override` flag is deliberately no longer honored: it
+    removed single transactions from every analytic with no counterparty, could
+    not be set or cleared through any API, and survived re-sync via annotation
+    fingerprints, so anything carrying it was silently and permanently missing
+    from spend and income.
+    """
     if include_transfers:
         return q
     return q.filter(
         ~Transaction.id.in_(select(TransferPair.txn_out_id)),
         ~Transaction.id.in_(select(TransferPair.txn_in_id)),
-        or_(
-            TransactionAnnotation.is_transfer_override == False,  # noqa: E712
-            TransactionAnnotation.is_transfer_override.is_(None),
-        ),
     )
 
 
@@ -1675,9 +1700,41 @@ def set_recurring_status(
 def transfers_detect(
     db: Session = Depends(get_db),
     window_days: int = Query(default=3, ge=0, le=14),
+    reset_auto: bool = Query(
+        default=False,
+        description="Discard unconfirmed auto pairs first (keeps confirmed/manual)",
+    ),
 ):
+    cleared = transfer_detector.clear_auto_pairs(db) if reset_auto else 0
     created = transfer_detector.detect_candidates(db, window_days=window_days)
-    return {"created": len(created), "pair_ids": [p.id for p in created]}
+    return {"cleared": cleared, "created": len(created), "pair_ids": [p.id for p in created]}
+
+
+def _transfer_side(db: Session, txn_id: int) -> dict:
+    """One leg of a pair, with enough account context to be interpretable.
+
+    The account is the whole point of a transfer — showing only the transaction
+    description ("PAYMENT THANK YOU") tells you nothing about what moved where.
+    """
+    txn = db.get(Transaction, txn_id)
+    if not txn:
+        return {"transaction_id": txn_id, "account_id": None, "account_name": None,
+                "account_type": None, "date": None, "name": None, "amount": None}
+    account = db.get(Account, txn.account_id)
+    account_name = None
+    if account:
+        account_name = account.nickname or (
+            f"{account.name} ··{account.mask}" if account.mask else account.name
+        )
+    return {
+        "transaction_id": txn.id,
+        "account_id": txn.account_id,
+        "account_name": account_name,
+        "account_type": account.type if account else None,
+        "date": str(txn.date),
+        "name": txn.name,
+        "amount": round(float(txn.amount), 2) if txn.amount is not None else None,
+    }
 
 
 @router.get("/transfers")
@@ -1692,25 +1749,19 @@ def transfers_list(
     )
     items = []
     for p in rows:
-        out = db.get(Transaction, p.txn_out_id)
-        inn = db.get(Transaction, p.txn_in_id)
+        out = _transfer_side(db, p.txn_out_id)
+        inn = _transfer_side(db, p.txn_in_id)
+        gap = None
+        if out["date"] and inn["date"]:
+            gap = (date.fromisoformat(inn["date"]) - date.fromisoformat(out["date"])).days
         items.append({
             "id": p.id,
             "detected_by": p.detected_by,
             "confirmed": p.confirmed,
-            "amount": round(float(out.amount), 2) if out else None,
-            "out": {
-                "transaction_id": p.txn_out_id,
-                "account_id": out.account_id if out else None,
-                "date": str(out.date) if out else None,
-                "name": out.name if out else None,
-            },
-            "in": {
-                "transaction_id": p.txn_in_id,
-                "account_id": inn.account_id if inn else None,
-                "date": str(inn.date) if inn else None,
-                "name": inn.name if inn else None,
-            },
+            "amount": out["amount"],
+            "gap_days": gap,
+            "out": out,
+            "in": inn,
         })
     return {"total": total, "items": items}
 
@@ -1739,9 +1790,15 @@ def transfers_confirm(pair_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/transfers/{pair_id}")
 def transfers_delete(pair_id: int, db: Session = Depends(get_db)):
+    """Unpair, and remember the rejection.
+
+    Detection re-runs after every sync, so deleting alone would let the same
+    false pair reappear immediately — the review queue would be a treadmill.
+    """
     pair = db.get(TransferPair, pair_id)
     if not pair:
         raise HTTPException(status_code=404, detail="pair not found")
+    transfer_detector.reject_pair(db, pair.txn_out_id, pair.txn_in_id)
     db.delete(pair)
     db.commit()
-    return {"status": "unpaired"}
+    return {"status": "unpaired", "remembered": True}

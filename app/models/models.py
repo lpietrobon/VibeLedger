@@ -172,6 +172,26 @@ class TransferPair(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class RejectedTransferPair(Base):
+    """Memory of a pairing the user rejected.
+
+    Detection is heuristic and will mis-pair unrelated transactions that share an
+    amount. Without this, unpairing is futile: the next sync re-runs detection
+    and recreates the identical pair. Rejection is per *combination* — either
+    transaction may still pair with a different counterparty.
+    """
+
+    __tablename__ = "rejected_transfer_pairs"
+    __table_args__ = (
+        UniqueConstraint("txn_out_id", "txn_in_id", name="uq_rejected_transfer_pair"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    txn_out_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), index=True)
+    txn_in_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class SyncState(Base):
     __tablename__ = "sync_state"
 

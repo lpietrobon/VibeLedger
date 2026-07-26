@@ -74,6 +74,10 @@ export type Transaction = {
   effective_category: string;
   category_source: "manual" | "rule" | "plaid" | "default";
   rule_id?: number | null;
+  /** True when this transaction is one leg of a transfer pair (so it is
+   *  excluded from spend/income analytics). */
+  is_transfer?: boolean;
+  transfer_pair_id?: number | null;
   refund_status?: "confirmed" | "likely" | "not_refund" | null;
   refund_match_transaction_id?: number | null;
   refund_reason?: string | null;
@@ -125,23 +129,25 @@ export type CategoryRule = {
   updated_at: string;
 };
 
+export type TransferLeg = {
+  transaction_id: number;
+  account_id?: number | null;
+  /** Display name of the account this leg sits on — the point of a transfer. */
+  account_name?: string | null;
+  account_type?: string | null;
+  date?: string | null;
+  name?: string | null;
+  amount?: Money | null;
+};
+
 export type TransferCandidate = {
   id: number;
   detected_by: string;
   confirmed: boolean;
   amount: Money | null;
-  out: {
-    transaction_id: number;
-    account_id?: number | null;
-    date?: string | null;
-    name?: string | null;
-  };
-  in: {
-    transaction_id: number;
-    account_id?: number | null;
-    date?: string | null;
-    name?: string | null;
-  };
+  gap_days?: number | null;
+  out: TransferLeg;
+  in: TransferLeg;
 };
 
 export type TransfersResponse = {

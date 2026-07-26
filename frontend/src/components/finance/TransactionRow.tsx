@@ -32,7 +32,12 @@ export function TransactionRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-sm font-medium">{merchant}</span>
-          {tx.pending ? (
+          {tx.is_transfer ? (
+        <span className="rounded bg-sky-50 px-1 py-0.5 text-[10px] font-medium text-sky-700">
+          Transfer
+        </span>
+      ) : null}
+      {tx.pending ? (
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700">
               <Clock className="h-2.5 w-2.5" />
               Pending

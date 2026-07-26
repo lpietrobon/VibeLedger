@@ -152,9 +152,9 @@ def load_transactions(db_path: str) -> pd.DataFrame:
         conn.close()
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"]).dt.date
-        df["is_transfer"] = (
-            df["pair_as_out"].notna() | df["pair_as_in"].notna() | (df["is_transfer_override"] == 1)
-        )
+        # A transfer is a matched pair across two covered accounts. The legacy
+        # one-sided is_transfer_override flag is no longer honored.
+        df["is_transfer"] = df["pair_as_out"].notna() | df["pair_as_in"].notna()
     return df
 
 
@@ -216,7 +216,7 @@ def sidebar_filters(df: pd.DataFrame):
     if df.empty:
         return db_path, None, None, [], True
 
-    exclude_transfers = st.sidebar.checkbox("Exclude transfers", value=True, key="excl_xfer")
+    exclude_transfers = st.sidebar.checkbox("Exclude transfers", value=False, key="excl_xfer")
 
     min_d, max_d = df["date"].min(), df["date"].max()
     period = st.sidebar.selectbox(
