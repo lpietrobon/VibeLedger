@@ -133,7 +133,7 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 - `SYNC_INTERVAL_HOURS` in `.env` enables automatic background sync (off by default).
 
 **Transactions & annotations:**
-- `GET /transactions` — supports `start_date`, `end_date`, `category`, `limit`, `offset`, and `q` (parsed search, see below).
+- `GET /transactions` — supports `start_date`, `end_date`, `category` (exact value, case-insensitive — the `/categories` catalog merges case variants, so an exact match would answer the value it advertises with an empty list), `limit`, `offset`, and `q` (parsed search, see below).
 - **Search grammar** (`app/services/search_query.py`, canonical + server-side): `q` accepts `merchant:`, `category:`/`cat:`, `account:`, `>50`/`<100` (absolute amount), `from:`/`to:` (YYYY-MM snaps to month bounds), `is:unreviewed|reviewed|uncategorized|refund|likely-refund|not-transfer|pending`, quoted values (`merchant:"blue bottle"`), and bare words as free text over name/merchant/category. A parent category matches its children (`FOOD` matches `FOOD/DINING`). Unknown `field:value` tokens fall through to free text rather than matching nothing. See `docs/transaction-search-spec.md`.
 - `GET /transactions/search-suggestions?q=` — context-aware dropdown data: the field menu when between tokens, real DB values (ordered by frequency) inside a `field:` token. This is what makes the syntax discoverable instead of memorized.
 - `GET /categories` — the vocabulary offered by category pickers: every category in use (with transaction counts), plus category-rule targets and a curated starter set (`DEFAULT_CATEGORIES` in `app/services/category_catalog.py`). Each item is `{value, count, source}` where source is `ledger|rule|default`. Case variants are merged — notably the SQL fallback literal `uncategorized` and a manual `UNCATEGORIZED` annotation collapse into one row. `PARENT/CHILD` is a convention, not an invariant: 1-level values (unmapped Plaid primaries) and 3+-level values are returned as-is.
@@ -154,7 +154,7 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 
 **Transfers (double-entry reconciliation):**
 - `POST /transfers/detect` — pairs unpaired opposite-sign transactions on different accounts within `window_days` (default 3). Idempotent.
-- `GET /transfers`, `POST /transfers` (manual pair), `POST /transfers/{id}/confirm`, `DELETE /transfers/{id}`.
+- `GET /transfers` (optional `confirmed=` filter; returns `total` and a whole-table `pending` count alongside the page — don't recount `items`), `POST /transfers` (manual pair), `POST /transfers/{id}/confirm`, `DELETE /transfers/{id}`.
 - A transfer is **only** a matched pair across two covered accounts — that is the sole thing that can double-count money as both income and expense. Analytics exclude paired transactions; nothing else.
 - The legacy one-sided `is_transfer_override` column is **no longer honored**. It removed single transactions from every analytic with no counterparty, could not be set or cleared through any API (contrary to earlier docs), and survived re-sync via annotation fingerprints — so anything carrying it was silently and permanently missing from spend and income. The column remains for now but is inert.
 - `POST /transfers/detect?reset_auto=true` discards unconfirmed auto pairs before re-detecting; confirmed and manual pairs are kept.
@@ -164,7 +164,7 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 **Dashboard:**
 - Reads SQLite directly (cached, fast); writes go through the FastAPI endpoints (auth/validation/transfer logic stay centralized). Server-computed analytics (e.g. the Recurring page) read via the API so the logic isn't duplicated in the dashboard.
 - **Add account** (under "More") drives the connect flow from the browser: it calls `POST /connect/sessions` and opens the returned `connect_url` (Plaid Link), then offers `POST /sync/all`. Same flow as the curl steps in "Linking a bank account" below.
-- Date range pickers default to the last 90 days even though more history may be loaded — widen the range to see older data.
+- The Streamlit sidebar period defaults to "All time"; the React screens default to no date bound. Narrow deliberately — a default window would make whole-ledger counts disagree with the lists they link to.
 - Restart after changes: `systemctl --user restart vibeledger-dash`.
 
 ## Key design decisions

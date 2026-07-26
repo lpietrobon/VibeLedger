@@ -312,6 +312,12 @@ class SyncService:
             },
             synchronize_session=False,
         )
+        db.query(AnnotationFingerprint).filter(
+            AnnotationFingerprint.applied_transaction_id == txn_id
+        ).update(
+            {AnnotationFingerprint.applied_transaction_id: None},
+            synchronize_session=False,
+        )
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id == txn_id, TransferPair.txn_in_id == txn_id)
         ).delete(synchronize_session=False)

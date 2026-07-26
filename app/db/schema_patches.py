@@ -86,6 +86,15 @@ def _purge_orphan_transaction_rows(engine: Engine) -> None:
                 "DELETE FROM category_decision_events WHERE transaction_id NOT IN "
                 "(SELECT id FROM transactions)"
             ))
+        if "annotation_fingerprints" in tables:
+            # The fingerprint itself is the durable record and must survive; only
+            # its claim to a now-deleted transaction is cleared, so it reads as
+            # unapplied again.
+            conn.execute(text(
+                "UPDATE annotation_fingerprints SET applied_transaction_id = NULL "
+                "WHERE applied_transaction_id IS NOT NULL "
+                "  AND applied_transaction_id NOT IN (SELECT id FROM transactions)"
+            ))
 
 
 def apply_patches(engine: Engine) -> None:

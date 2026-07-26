@@ -183,3 +183,52 @@ def test_transfers_unauth():
         assert client.get("/transfers").status_code == 401
         assert client.post("/transfers/detect").status_code == 401
         assert client.get("/analytics/accounts-summary").status_code == 401
+
+
+def test_pending_count_is_whole_table_not_page():
+    """Overview's "transfer pairs pending" counts every unconfirmed pair, so the
+    page it links to must not derive its own count from one page of results."""
+    _seed_transfer_ledger()
+    with TestClient(app) as client:
+        client.post("/transfers/detect", headers=AUTH_HEADERS)
+
+        # Enough pairs that a paged client would under-count.
+        with SessionLocal() as db:
+            item = db.query(Item).one()
+            account = db.query(Account).filter(Account.name == "Checking").one()
+            other = db.query(Account).filter(Account.name == "CC").one()
+            for i in range(6):
+                out = Transaction(
+                    plaid_transaction_id=f"bulk-out-{i}", account_id=account.id, item_id=item.id,
+                    date=date(2026, 2, 1), amount=Decimal("10.00"), name="Move out",
+                )
+                inn = Transaction(
+                    plaid_transaction_id=f"bulk-in-{i}", account_id=other.id, item_id=item.id,
+                    date=date(2026, 2, 1), amount=Decimal("-10.00"), name="Move in",
+                )
+                db.add_all([out, inn])
+                db.flush()
+                db.add(TransferPair(txn_out_id=out.id, txn_in_id=inn.id, confirmed=False))
+            db.commit()
+
+        overview = client.get("/analytics/overview", headers=AUTH_HEADERS).json()
+        expected = overview["needs_attention"]["transfer_pairs_pending"]
+        assert expected == 7  # detected pair + six seeded
+
+        page = client.get("/transfers", params={"limit": 2}, headers=AUTH_HEADERS).json()
+        assert len(page["items"]) == 2
+        assert page["total"] == 7
+        assert page["pending"] == expected, (
+            "the pending count must survive pagination, not describe the page"
+        )
+
+        pending_only = client.get(
+            "/transfers", params={"confirmed": False, "limit": 1000}, headers=AUTH_HEADERS
+        ).json()
+        assert pending_only["total"] == 7
+        assert all(not item["confirmed"] for item in pending_only["items"])
+
+        client.post(f"/transfers/{pending_only['items'][0]['id']}/confirm", headers=AUTH_HEADERS)
+        after = client.get("/transfers", headers=AUTH_HEADERS).json()
+        assert after["pending"] == 6
+        assert after["total"] == 7
