@@ -8,6 +8,7 @@ from app.models.models import (
     AnnotationFingerprint,
     CategoryDecisionEvent,
     Item,
+    RejectedTransferPair,
     SyncRun,
     SyncState,
     Transaction,
@@ -613,6 +614,7 @@ def test_removed_transaction_takes_its_dependent_rows_with_it():
             refund_reason="Exact account, amount, and transaction-name match",
         ))
         db.add(TransferPair(txn_out_id=txn.id, txn_in_id=other.id))
+        db.add(RejectedTransferPair(txn_out_id=other.id, txn_in_id=txn.id))
         db.add(CategoryDecisionEvent(
             transaction_id=txn.id,
             new_effective_category="FOOD/DINING",
@@ -629,6 +631,7 @@ def test_removed_transaction_takes_its_dependent_rows_with_it():
             TransactionAnnotation.transaction_id == removed_id
         ).count() == 0
         assert db.query(TransferPair).count() == 0
+        assert db.query(RejectedTransferPair).count() == 0
         assert db.query(CategoryDecisionEvent).filter(
             CategoryDecisionEvent.transaction_id == removed_id
         ).count() == 0

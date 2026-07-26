@@ -27,6 +27,7 @@ from app.models.models import (
     ConnectSession,
     Item,
     RecurringOverride,
+    RejectedTransferPair,
     SyncRun,
     SyncState,
     Transaction,
@@ -318,13 +319,28 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
             TransactionAnnotation.refund_match_transaction_id.in_(txn_ids)
         ).update(
             {
+                TransactionAnnotation.refund_status: None,
                 TransactionAnnotation.refund_match_transaction_id: None,
                 TransactionAnnotation.refund_reason: None,
             },
             synchronize_session=False,
         )
+        # A fingerprint still claiming one of these transactions would look
+        # applied forever; see list_annotation_fingerprints.
+        db.query(AnnotationFingerprint).filter(
+            AnnotationFingerprint.applied_transaction_id.in_(txn_ids)
+        ).update(
+            {AnnotationFingerprint.applied_transaction_id: None},
+            synchronize_session=False,
+        )
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id.in_(txn_ids), TransferPair.txn_in_id.in_(txn_ids))
+        ).delete(synchronize_session=False)
+        db.query(RejectedTransferPair).filter(
+            or_(
+                RejectedTransferPair.txn_out_id.in_(txn_ids),
+                RejectedTransferPair.txn_in_id.in_(txn_ids),
+            )
         ).delete(synchronize_session=False)
         db.query(CategoryDecisionEvent).filter(CategoryDecisionEvent.transaction_id.in_(txn_ids)).delete(
             synchronize_session=False
@@ -624,7 +640,12 @@ def list_transactions(
     if end_date:
         base = base.filter(Transaction.date <= end_date)
     if category:
-        base = base.filter(_effective_category_expr() == category)
+        # Case-insensitive: the value a picker offers comes from /categories,
+        # which merges case variants ('uncategorized' and a manual
+        # 'UNCATEGORIZED' collapse into one row), and the SQL fallback literal
+        # is lowercase. An exact match would answer that merged value with an
+        # empty list.
+        base = base.filter(func.lower(_effective_category_expr()) == category.lower())
     if q:
         base = _apply_search_query(base, parse_query(q))
 
@@ -803,7 +824,16 @@ def list_annotation_fingerprints(
 ):
     q = db.query(AnnotationFingerprint)
     if unapplied_only:
-        q = q.filter(AnnotationFingerprint.applied_transaction_id.is_(None))
+        # "Unapplied" means no *live* transaction carries it. A fingerprint whose
+        # transaction was deleted still holds that id, so a bare IS NULL check
+        # would keep hiding annotations that no longer apply to anything —
+        # exactly the ones this endpoint exists to surface after a re-link.
+        q = q.filter(
+            or_(
+                AnnotationFingerprint.applied_transaction_id.is_(None),
+                ~AnnotationFingerprint.applied_transaction_id.in_(select(Transaction.id)),
+            )
+        )
     rows = q.order_by(AnnotationFingerprint.updated_at.desc()).all()
     return [
         {
@@ -1742,11 +1772,21 @@ def transfers_list(
     db: Session = Depends(get_db),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    confirmed: bool | None = Query(default=None),
 ):
-    total = db.query(func.count(TransferPair.id)).scalar()
-    rows = (
-        db.query(TransferPair).order_by(TransferPair.id.desc()).limit(limit).offset(offset).all()
-    )
+    """Pairs, newest first. `pending` is a whole-table count, not a page count:
+    the client must not derive it by filtering `items`, which is truncated."""
+    base = db.query(TransferPair)
+    if confirmed is not None:
+        base = base.filter(TransferPair.confirmed == confirmed)
+
+    total = base.with_entities(func.count(TransferPair.id)).scalar() or 0
+    pending = (
+        db.query(func.count(TransferPair.id))
+        .filter(TransferPair.confirmed == False)  # noqa: E712
+        .scalar()
+    ) or 0
+    rows = base.order_by(TransferPair.id.desc()).limit(limit).offset(offset).all()
     items = []
     for p in rows:
         out = _transfer_side(db, p.txn_out_id)
@@ -1763,7 +1803,7 @@ def transfers_list(
             "out": out,
             "in": inn,
         })
-    return {"total": total, "items": items}
+    return {"total": total, "pending": pending, "items": items}
 
 
 @router.post("/transfers")

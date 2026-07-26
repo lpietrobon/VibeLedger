@@ -12,6 +12,7 @@ from app.models.models import (
     AnnotationFingerprint,
     CategoryDecisionEvent,
     Item,
+    RejectedTransferPair,
     SyncRun,
     SyncState,
     Transaction,
@@ -312,8 +313,22 @@ class SyncService:
             },
             synchronize_session=False,
         )
+        db.query(AnnotationFingerprint).filter(
+            AnnotationFingerprint.applied_transaction_id == txn_id
+        ).update(
+            {AnnotationFingerprint.applied_transaction_id: None},
+            synchronize_session=False,
+        )
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id == txn_id, TransferPair.txn_in_id == txn_id)
+        ).delete(synchronize_session=False)
+        # A rejection outliving its transaction is worse than useless: rowid
+        # reuse can make it suppress a pairing between two unrelated rows.
+        db.query(RejectedTransferPair).filter(
+            or_(
+                RejectedTransferPair.txn_out_id == txn_id,
+                RejectedTransferPair.txn_in_id == txn_id,
+            )
         ).delete(synchronize_session=False)
         db.query(CategoryDecisionEvent).filter(
             CategoryDecisionEvent.transaction_id == txn_id

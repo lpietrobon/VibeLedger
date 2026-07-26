@@ -23,7 +23,7 @@ export default function TransfersPage() {
   const transfers = useQuery({ queryKey: ["transfers"], queryFn: getTransfers });
   const [detectMsg, setDetectMsg] = useState<string | null>(null);
   const items = transfers.data?.items ?? [];
-  const pending = items.filter((item) => !item.confirmed).length;
+  const pending = transfers.data?.pending ?? 0;
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["transfers"] });
 
   const detect = useMutation({
@@ -43,7 +43,10 @@ export default function TransfersPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Transfer Detection</h1>
           <p className="text-sm text-muted-foreground">
-            {transfers.data ? `${pending} pending · ${items.length} candidates` : "Loading..."}
+            {transfers.data
+              ? `${pending} pending · ${transfers.data.total} candidates` +
+                (items.length < transfers.data.total ? ` · showing ${items.length}` : "")
+              : "Loading..."}
           </p>
         </div>
         <button

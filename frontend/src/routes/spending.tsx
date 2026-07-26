@@ -174,7 +174,19 @@ export default function SpendingPage() {
         </Section>
       </div>
 
-      <Section title="Transactions" className="mt-4">
+      <Section
+        title="Transactions"
+        className="mt-4"
+        action={
+          tx.data && tx.data.total > tx.data.items.length ? (
+            // This list is a sample, not the set behind the numbers above. Say
+            // so rather than letting it read as the whole period.
+            <span className="text-xs text-muted-foreground">
+              showing {tx.data.items.length} of {tx.data.total}
+            </span>
+          ) : null
+        }
+      >
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <SearchBar value={query} onChange={setQuery} placeholder="Search merchant, category…" />
           <select

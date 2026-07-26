@@ -76,15 +76,25 @@ def _purge_orphan_transaction_rows(engine: Engine) -> None:
                 "WHERE refund_match_transaction_id IS NOT NULL "
                 "  AND refund_match_transaction_id NOT IN (SELECT id FROM transactions)"
             ))
-        if "transfer_pairs" in tables:
-            conn.execute(text(
-                "DELETE FROM transfer_pairs WHERE txn_out_id NOT IN (SELECT id FROM transactions) "
-                "   OR txn_in_id NOT IN (SELECT id FROM transactions)"
-            ))
+        for table in ("transfer_pairs", "rejected_transfer_pairs"):
+            if table in tables:
+                conn.execute(text(
+                    f"DELETE FROM {table} WHERE txn_out_id NOT IN (SELECT id FROM transactions) "
+                    "   OR txn_in_id NOT IN (SELECT id FROM transactions)"
+                ))
         if "category_decision_events" in tables:
             conn.execute(text(
                 "DELETE FROM category_decision_events WHERE transaction_id NOT IN "
                 "(SELECT id FROM transactions)"
+            ))
+        if "annotation_fingerprints" in tables:
+            # The fingerprint itself is the durable record and must survive; only
+            # its claim to a now-deleted transaction is cleared, so it reads as
+            # unapplied again.
+            conn.execute(text(
+                "UPDATE annotation_fingerprints SET applied_transaction_id = NULL "
+                "WHERE applied_transaction_id IS NOT NULL "
+                "  AND applied_transaction_id NOT IN (SELECT id FROM transactions)"
             ))
 
 
