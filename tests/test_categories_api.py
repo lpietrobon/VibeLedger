@@ -163,3 +163,32 @@ def test_merge_catalog_is_pure_and_sums_case_variants():
     assert by_value["PETS/VET"]["source"] == "rule"
     assert by_value["FOOD/COFFEE"]["source"] == "default"
     assert [row["value"] for row in merged][0] == "UNCATEGORIZED"  # highest count first
+
+
+def test_every_advertised_category_is_filterable():
+    """A picker offers these values; filtering by one must find its transactions.
+
+    The catalog merges case variants into a single row (the lowercase SQL
+    fallback and a manual "UNCATEGORIZED" collapse), so an exact, case-sensitive
+    `?category=` answered the value it advertises with a short count — or an
+    empty list.
+    """
+    _seed()
+    with SessionLocal() as db:
+        tx = db.query(Transaction).filter(Transaction.name == "Wire").one()
+        db.add(TransactionAnnotation(transaction_id=tx.id, user_category="UNCATEGORIZED"))
+        db.commit()
+
+    with TestClient(app) as client:
+        catalog = client.get("/categories", headers=AUTH_HEADERS).json()["items"]
+        ledger_rows = [row for row in catalog if row["source"] == "ledger"]
+        assert ledger_rows, "fixture produced no ledger categories"
+
+        for row in ledger_rows:
+            body = client.get(
+                "/transactions", params={"category": row["value"]}, headers=AUTH_HEADERS
+            ).json()
+            assert body["total"] == row["count"], (
+                f"/categories advertises {row['count']} transactions for "
+                f"{row['value']!r}, but filtering by it returns {body['total']}"
+            )

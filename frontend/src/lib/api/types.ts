@@ -198,6 +198,9 @@ export type TransferCandidate = {
 
 export type TransfersResponse = {
   total: number;
+  /** Whole-table count of unconfirmed pairs — `items` is one page, so counting
+   *  it would under-report exactly what Overview links here for. */
+  pending: number;
   items: TransferCandidate[];
 };
 
