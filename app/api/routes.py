@@ -1636,6 +1636,10 @@ def analytics_recurring(
         {
             "merchant_key": s.merchant_key,
             "merchant_label": s.merchant_label,
+            # Drilldown query for GET /transactions?q= — clients must use this
+            # rather than merchant_label, which can carry a per-transaction
+            # suffix that would narrow the search to one row.
+            "search_query": s.search_query,
             "cadence": s.cadence,
             "occurrences": s.occurrences,
             "average_amount": s.average_amount,

@@ -158,6 +158,8 @@ export type TransfersResponse = {
 export type RecurringSeries = {
   merchant_key: string;
   merchant_label: string;
+  /** Search query that matches the whole series — use for drilldowns, not merchant_label. */
+  search_query: string;
   cadence: "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
   occurrences: number;
   average_amount: Money;
