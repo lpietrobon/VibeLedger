@@ -27,6 +27,7 @@ from app.models.models import (
     ConnectSession,
     Item,
     RecurringOverride,
+    RejectedTransferPair,
     SyncRun,
     SyncState,
     Transaction,
@@ -334,6 +335,12 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
         )
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id.in_(txn_ids), TransferPair.txn_in_id.in_(txn_ids))
+        ).delete(synchronize_session=False)
+        db.query(RejectedTransferPair).filter(
+            or_(
+                RejectedTransferPair.txn_out_id.in_(txn_ids),
+                RejectedTransferPair.txn_in_id.in_(txn_ids),
+            )
         ).delete(synchronize_session=False)
         db.query(CategoryDecisionEvent).filter(CategoryDecisionEvent.transaction_id.in_(txn_ids)).delete(
             synchronize_session=False
