@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/client";
 import { CATEGORY_COLORS } from "@/lib/api/theme";
 import { formatCurrency } from "@/lib/format";
+import { useAccountScope, useAccountScopeQuery } from "@/lib/accountScope";
 
 const CashflowChart = lazy(() => import("@/components/finance/charts/CashflowChart"));
 const CategoryBarChart = lazy(() => import("@/components/finance/charts/CategoryBarChart"));
@@ -26,12 +27,23 @@ function appHref(path: string) {
 }
 
 export default function OverviewPage() {
-  const summary = useQuery({ queryKey: ["overview"], queryFn: getOverviewSummary });
-  const cashflow = useQuery({ queryKey: ["cashflow"], queryFn: getCashflowTrend });
-  const comparison = useQuery({ queryKey: ["comparison"], queryFn: getCategoryComparison });
+  const [accountIds] = useAccountScope();
+  const summary = useQuery({
+    queryKey: ["overview", accountIds],
+    queryFn: () => getOverviewSummary({ accountIds }),
+  });
+  const cashflow = useQuery({
+    queryKey: ["cashflow", accountIds],
+    queryFn: () => getCashflowTrend({ accountIds }),
+  });
+  const comparison = useQuery({
+    queryKey: ["comparison", accountIds],
+    queryFn: () => getCategoryComparison({ accountIds }),
+  });
+  const accountScopeQuery = useAccountScopeQuery();
   const recent = useQuery({
-    queryKey: ["recent-tx"],
-    queryFn: () => getTransactions({ limit: 8 }),
+    queryKey: ["recent-tx", accountScopeQuery],
+    queryFn: () => getTransactions({ query: accountScopeQuery, limit: 8 }),
   });
 
   const s = summary.data;

@@ -6,8 +6,13 @@ import {
   Wallet,
   MoreHorizontal,
   RefreshCw,
+  Landmark,
+  ChevronDown,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getAccountsSummary } from "@/lib/api/client";
+import { useAccountScope } from "@/lib/accountScope";
 
 const NAV = [
   { to: "/", label: "Overview", short: "Overview", icon: LayoutDashboard },
@@ -67,6 +72,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            <AccountScopeSelector />
             <span className="hidden text-xs text-muted-foreground sm:inline">
               Synced 2m ago
             </span>
@@ -108,6 +114,83 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </ul>
       </nav>
+    </div>
+  );
+}
+
+/** App-wide account filter, persisted via useAccountScope and applied to
+ *  every analytics query through queryKey + params — see routes/index.tsx,
+ *  routes/spending.tsx, and the `account:` tokens in routes/transactions.tsx. */
+function AccountScopeSelector() {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useAccountScope();
+  const accounts = useQuery({ queryKey: ["accounts-summary"], queryFn: getAccountsSummary });
+  const flat = Object.values(accounts.data?.groups ?? {}).flat();
+
+  if (!flat.length) return null;
+
+  const allSelected = !selected;
+  const label = allSelected
+    ? "All accounts"
+    : selected.length === 1
+      ? (flat.find((a) => a.id === selected[0])?.display_name ?? "1 account")
+      : `${selected.length} accounts`;
+
+  const toggle = (id: number) => {
+    const current = selected ?? flat.map((a) => a.id);
+    const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+    setSelected(next.length === flat.length ? null : next);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
+      >
+        <Landmark className="h-3.5 w-3.5" />
+        <span className="max-w-[8rem] truncate">{label}</span>
+        <ChevronDown className="h-3.5 w-3.5" />
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-50 mt-1 w-56 rounded-md border border-border bg-background p-1 shadow-lg">
+            <button
+              type="button"
+              onClick={() => {
+                setSelected(null);
+                setOpen(false);
+              }}
+              className={
+                "flex w-full items-center rounded px-2 py-1.5 text-left text-sm hover:bg-secondary " +
+                (allSelected ? "font-medium text-foreground" : "text-muted-foreground")
+              }
+            >
+              All accounts
+            </button>
+            <div className="my-1 border-t border-border" />
+            {flat.map((a) => {
+              const checked = allSelected || (selected?.includes(a.id) ?? false);
+              return (
+                <label
+                  key={a.id}
+                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-secondary"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(a.id)}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className="truncate">{a.display_name ?? a.name}</span>
+                </label>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

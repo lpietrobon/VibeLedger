@@ -18,6 +18,7 @@ import {
 } from "@/lib/api/client";
 import type { Transaction } from "@/lib/api/types";
 import { formatCurrency } from "@/lib/format";
+import { useAccountScope, useAccountScopeQuery } from "@/lib/accountScope";
 
 const CumulativeChart = lazy(() => import("@/components/finance/charts/CumulativeChart"));
 
@@ -44,23 +45,29 @@ function activePeriodBounds(granularity: "monthly" | "yearly") {
 }
 
 export default function SpendingPage() {
+  const [accountIds] = useAccountScope();
   const [granularity, setGranularity] = useState<"monthly" | "yearly">("monthly");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
   const [selected, setSelected] = useState<Transaction | null>(null);
 
   const summary = useQuery({
-    queryKey: ["spending-summary", granularity],
-    queryFn: () => getSpendingSummary({ granularity }),
+    queryKey: ["spending-summary", granularity, accountIds],
+    queryFn: () => getSpendingSummary({ granularity, accountIds }),
   });
   const cumulative = useQuery({
-    queryKey: ["cumulative", granularity],
-    queryFn: () => getCumulativeSpending({ granularity }),
+    queryKey: ["cumulative", granularity, accountIds],
+    queryFn: () => getCumulativeSpending({ granularity, accountIds }),
   });
-  const comparison = useQuery({ queryKey: ["comparison"], queryFn: getCategoryComparison });
+  const comparison = useQuery({
+    queryKey: ["comparison", accountIds],
+    queryFn: () => getCategoryComparison({ accountIds }),
+  });
+  const accountScopeQuery = useAccountScopeQuery();
+  const serverQuery = [accountScopeQuery, query].filter(Boolean).join(" ");
   const tx = useQuery({
-    queryKey: ["tx", query, category],
-    queryFn: () => getTransactions({ query, category, limit: 30 }),
+    queryKey: ["tx", serverQuery, category],
+    queryFn: () => getTransactions({ query: serverQuery, category, limit: 30 }),
   });
 
   const s = summary.data;
