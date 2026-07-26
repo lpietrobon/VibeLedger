@@ -15,6 +15,9 @@ import type {
   ConnectStatus,
   SearchSuggestionsResponse,
   CategoryEntry,
+  CashflowSankey,
+  CategoryMovers,
+  DailySpend,
 } from "./types";
 import { CATEGORY_COLORS } from "./theme";
 
@@ -173,6 +176,54 @@ export async function getCumulativeSpending(params?: {
     previous2: row.previous2,
     previous3: row.previous3,
   }));
+}
+
+type SankeyResponse = {
+  income: number;
+  total_spend: number;
+  savings: number;
+  deficit: number;
+  income_sources: { category: string; amount: number }[];
+  buckets: { bucket: string; amount: number; categories: { category: string; amount: number }[] }[];
+};
+
+export async function getCashflowSankey(params?: {
+  startDate?: string;
+  endDate?: string;
+}): Promise<CashflowSankey> {
+  const r = await jsonFetch<SankeyResponse>("/analytics/cashflow-sankey", {
+    start_date: params?.startDate,
+    end_date: params?.endDate,
+  });
+  return {
+    income: r.income,
+    totalSpend: r.total_spend,
+    savings: r.savings,
+    deficit: r.deficit,
+    incomeSources: r.income_sources,
+    buckets: r.buckets,
+  };
+}
+
+export async function getCategoryMovers(params?: {
+  month?: string;
+  limit?: number;
+}): Promise<CategoryMovers> {
+  const r = await jsonFetch<{
+    month: string;
+    previous_month: string;
+    items: { category: string; current: number; previous: number; change: number }[];
+  }>("/analytics/category-movers", { month: params?.month, limit: params?.limit });
+  return { month: r.month, previousMonth: r.previous_month, items: r.items };
+}
+
+export async function getDailySpend(params?: { year?: number }): Promise<DailySpend> {
+  const r = await jsonFetch<{
+    year: number;
+    available_years: number[];
+    days: { date: string; amount: number }[];
+  }>("/analytics/daily-spend", { year: params?.year });
+  return { year: r.year, availableYears: r.available_years, days: r.days };
 }
 
 // --- Accounts ---

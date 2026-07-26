@@ -225,6 +225,50 @@ export type SearchSuggestionsResponse = {
   suggestions: SearchSuggestion[];
 };
 
+export type SankeyFlow = {
+  category: string;
+  amount: Money;
+};
+
+export type SankeyBucket = {
+  bucket: string;
+  amount: Money;
+  categories: SankeyFlow[];
+};
+
+export type CashflowSankey = {
+  income: Money;
+  totalSpend: Money;
+  savings: Money;
+  deficit: Money;
+  incomeSources: SankeyFlow[];
+  buckets: SankeyBucket[];
+};
+
+export type CategoryMover = {
+  category: string;
+  current: Money;
+  previous: Money;
+  change: Money;
+};
+
+export type CategoryMovers = {
+  month: string;
+  previousMonth: string;
+  items: CategoryMover[];
+};
+
+export type DailySpendPoint = {
+  date: string;
+  amount: Money;
+};
+
+export type DailySpend = {
+  year: number;
+  availableYears: number[];
+  days: DailySpendPoint[];
+};
+
 export type CategoryRuleDraft = {
   rank?: number;
   enabled?: boolean;

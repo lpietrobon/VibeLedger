@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 import calendar
 import re
 from pathlib import Path
@@ -1698,6 +1698,155 @@ def set_recurring_status(
         db.add(RecurringOverride(merchant_key=merchant_key, status=payload.status))
     db.commit()
     return {"merchant_key": merchant_key, "manual_status": payload.status}
+
+
+@router.get("/analytics/cashflow-sankey")
+def analytics_cashflow_sankey(
+    db: Session = Depends(get_db),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+):
+    """Income -> top-level category buckets -> categories, plus savings/deficit.
+
+    Buckets are the part of the effective category before the first '/'. Transfers
+    are always excluded; refunds net against their expense category rather than
+    counting as income (same rule as every other analytics endpoint)."""
+    effective_category = _effective_category_expr().label("category")
+    income_expr = case(
+        (
+            (Transaction.amount < 0)
+            & or_(
+                TransactionAnnotation.refund_status.is_(None),
+                ~TransactionAnnotation.refund_status.in_(["confirmed", "likely"]),
+            ),
+            -Transaction.amount,
+        ),
+        else_=0,
+    )
+    expense_expr = _expense_value_case()
+
+    q = (
+        db.query(effective_category, func.sum(income_expr), func.sum(expense_expr))
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+    )
+    q = _apply_transfer_exclusion(q, include_transfers=False)
+    if start_date:
+        q = q.filter(Transaction.date >= start_date)
+    if end_date:
+        q = q.filter(Transaction.date <= end_date)
+    rows = q.group_by(effective_category).all()
+
+    income = 0.0
+    income_by_category: dict[str, float] = {}
+    bucket_totals: dict[str, float] = {}
+    bucket_categories: dict[str, dict[str, float]] = {}
+    for category, income_total, expense_total in rows:
+        income_total = float(income_total or 0)
+        expense_total = float(expense_total or 0)
+        if income_total > 0:
+            income_by_category[category] = income_by_category.get(category, 0.0) + income_total
+            income += income_total
+        if expense_total != 0:
+            # Bucket net includes refund-only categories (negative), matching
+            # spend everywhere else; only positive categories become their own
+            # link — a negative-width flow isn't drawable.
+            bucket = category.split("/", 1)[0] or "UNCATEGORIZED"
+            bucket_totals[bucket] = bucket_totals.get(bucket, 0.0) + expense_total
+            if expense_total > 0:
+                bucket_categories.setdefault(bucket, {})[category] = expense_total
+
+    bucket_totals = {b: a for b, a in bucket_totals.items() if a > 0}
+    total_spend = sum(bucket_totals.values())
+    savings = max(income - total_spend, 0.0)
+    deficit = max(total_spend - income, 0.0)
+
+    income_sources = sorted(
+        ({"category": c, "amount": round(a, 2)} for c, a in income_by_category.items()),
+        key=lambda r: r["amount"],
+        reverse=True,
+    )
+    buckets = [
+        {
+            "bucket": bucket,
+            "amount": round(bucket_totals[bucket], 2),
+            "categories": sorted(
+                (
+                    {"category": c, "amount": round(a, 2)}
+                    for c, a in bucket_categories.get(bucket, {}).items()
+                ),
+                key=lambda r: r["amount"],
+                reverse=True,
+            ),
+        }
+        for bucket in sorted(bucket_totals, key=lambda b: bucket_totals[b], reverse=True)
+    ]
+
+    return {
+        "income": round(income, 2),
+        "total_spend": round(total_spend, 2),
+        "savings": round(savings, 2),
+        "deficit": round(deficit, 2),
+        "income_sources": income_sources,
+        "buckets": buckets,
+    }
+
+
+@router.get("/analytics/category-movers")
+def analytics_category_movers(
+    db: Session = Depends(get_db),
+    month: str | None = Query(default=None, description="YYYY-MM anchor month; defaults to the latest transaction month"),
+    limit: int = Query(default=12, ge=1, le=50),
+):
+    """Top categories by absolute change in spend vs the previous month."""
+    anchor = month or _month_key(db.query(func.max(Transaction.date)).scalar() or date.today())
+    previous = _prev_month_key(anchor)
+    cur_start, cur_end = _month_bounds(anchor)
+    prev_start, prev_end = _month_bounds(previous)
+    current = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
+    previous_totals = {
+        r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)
+    }
+
+    rows = [
+        {
+            "category": cat,
+            "current": round(current.get(cat, 0.0), 2),
+            "previous": round(previous_totals.get(cat, 0.0), 2),
+            "change": round(current.get(cat, 0.0) - previous_totals.get(cat, 0.0), 2),
+        }
+        for cat in (set(current) | set(previous_totals))
+    ]
+    rows.sort(key=lambda r: abs(r["change"]), reverse=True)
+    return {
+        "month": anchor,
+        "previous_month": previous,
+        "items": rows[:limit],
+    }
+
+
+@router.get("/analytics/daily-spend")
+def analytics_daily_spend(
+    db: Session = Depends(get_db),
+    year: int | None = Query(default=None),
+):
+    """Daily expense totals for one calendar year (refund-netted, transfers excluded)."""
+    anchor_year = year or (db.query(func.max(Transaction.date)).scalar() or date.today()).year
+    start, end = date(anchor_year, 1, 1), date(anchor_year, 12, 31)
+    by_day_of_year = _daily_expense(db, start, end, "%j")
+
+    days = []
+    current, day_of_year = start, 1
+    while current <= end:
+        days.append({"date": str(current), "amount": round(by_day_of_year.get(day_of_year, 0.0), 2)})
+        current += timedelta(days=1)
+        day_of_year += 1
+
+    available_years = sorted(
+        {int(y) for (y,) in db.query(func.strftime("%Y", Transaction.date)).distinct().all() if y},
+        reverse=True,
+    )
+
+    return {"year": anchor_year, "available_years": available_years, "days": days}
 
 
 @router.post("/transfers/detect")
