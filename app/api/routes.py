@@ -222,8 +222,11 @@ def connect_start(session: str, db: Session = Depends(get_db)):
     <script src='https://cdn.plaid.com/link/v2/stable/link-initialize.js'></script>
     <script>
       const sessionToken = {json.dumps(session)};
+      const linkToken = {json.dumps(link_token)};
+      window.localStorage.setItem('vibeledger_connect_session', sessionToken);
+      window.localStorage.setItem('vibeledger_link_token', linkToken);
       const handler = Plaid.create({{
-        token: {json.dumps(link_token)},
+        token: linkToken,
         onSuccess: async (public_token, metadata) => {{
           const completePath = window.location.pathname.replace(/\\/start$/, '/complete');
           const resp = await fetch(completePath, {{
@@ -239,6 +242,49 @@ def connect_start(session: str, db: Session = Depends(get_db)):
         }}
       }});
       document.getElementById('link-button').onclick = () => handler.open();
+    </script>
+  </body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
+@router.get("/connect/oauth", response_class=HTMLResponse)
+def connect_oauth():
+    html = """
+<!doctype html>
+<html>
+  <head><title>VibeLedger Connect</title></head>
+  <body>
+    <h3>Returning to Plaid...</h3>
+    <script src='https://cdn.plaid.com/link/v2/stable/link-initialize.js'></script>
+    <script>
+      const sessionToken = window.localStorage.getItem('vibeledger_connect_session');
+      const linkToken = window.localStorage.getItem('vibeledger_link_token');
+      if (!sessionToken || !linkToken) {
+        document.body.innerHTML = '<h3>Connection session not found. Please generate a new secure link.</h3>';
+      } else {
+        const completePath = window.location.pathname.replace(/\\/oauth$/, '/complete');
+        const handler = Plaid.create({
+          token: linkToken,
+          receivedRedirectUri: window.location.href,
+          onSuccess: async (public_token, metadata) => {
+            const resp = await fetch(completePath, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session_token: sessionToken, public_token })
+            });
+            if (resp.ok) {
+              window.localStorage.removeItem('vibeledger_connect_session');
+              window.localStorage.removeItem('vibeledger_link_token');
+              document.body.innerHTML = '<h3>Account connected. You can return to VibeLedger.</h3>';
+            } else {
+              document.body.innerHTML = '<h3>Failed to connect. Please retry.</h3>';
+            }
+          }
+        });
+        handler.open();
+      }
     </script>
   </body>
 </html>

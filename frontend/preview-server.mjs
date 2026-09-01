@@ -3,7 +3,9 @@ import { extname, join, normalize, resolve } from "node:path";
 import { request } from "node:http";
 import { createServer } from "node:http";
 
-const host = process.env.FRONTEND_HOST ?? "100.107.151.121";
+// This process is an authenticated application edge, not a network boundary.
+// Keep it on loopback and expose it only through Tailscale Serve.
+const host = process.env.FRONTEND_HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? process.env.FRONTEND_PORT ?? 5173);
 const rootDir = resolve(new URL(".", import.meta.url).pathname);
 const distDir = join(rootDir, "dist");
@@ -31,8 +33,22 @@ createServer((req, res) => {
     return;
   }
 
+  if (
+    url.pathname === "/vibeledger/health" ||
+    url.pathname.startsWith("/vibeledger/connect/")
+  ) {
+    proxyBackend(req, res, url);
+    return;
+  }
+
   if (url.pathname === "/vibeledger/frontend" || url.pathname.startsWith("/vibeledger/frontend/")) {
     serveFrontend(url.pathname, res);
+    return;
+  }
+
+  if (url.pathname === "/vibeledger" || url.pathname === "/vibeledger/") {
+    res.writeHead(302, { Location: "/vibeledger/frontend/" });
+    res.end();
     return;
   }
 
@@ -44,9 +60,18 @@ createServer((req, res) => {
 
 function proxyApi(req, res, url) {
   const upstreamPath = url.pathname.replace(/^\/vibeledger\/api/, "") + url.search;
+  proxyRequest(req, res, upstreamPath, true);
+}
+
+function proxyBackend(req, res, url) {
+  const upstreamPath = url.pathname.replace(/^\/vibeledger/, "") + url.search;
+  proxyRequest(req, res, upstreamPath, false);
+}
+
+function proxyRequest(req, res, upstreamPath, injectApiToken) {
   const target = new URL(upstreamPath, apiTarget);
   const headers = { ...req.headers, host: target.host };
-  if (apiToken) headers.authorization = `Bearer ${apiToken}`;
+  if (injectApiToken && apiToken) headers.authorization = `Bearer ${apiToken}`;
   delete headers.connection;
 
   const upstream = request(

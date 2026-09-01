@@ -9,6 +9,7 @@ _EXEMPT_PREFIXES = (
     "/health",
     "/connect/start",
     "/connect/complete",
+    "/connect/oauth",
     "/docs",
     "/openapi.json",
     "/frontend",
