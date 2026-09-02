@@ -2,7 +2,7 @@
 id: 010-trustworthy-cashflow
 title: Trustworthy cashflow across linked accounts
 status: in-progress
-owner: coordinator
+owner: null
 created: 2026-09-02
 revision: 1
 ---
@@ -18,7 +18,7 @@ of intent; implementation choices may change while serving that intent.
 ## Scope Notes
 
 Progress checkpoint: [recovered agent drafts, test evidence, and remaining gaps](artifacts/CF-01-recovered-progress.md).
-CF-01 and CF-02 are accepted. Application implementation remains unaccepted; CF-04 has resumed after the execution environment recovered; CF-03 still awaits its walkthrough. Task logs preserve prior interruptions and current evidence.
+CF-01 and CF-02 are accepted. Application implementation remains unaccepted; CF-04 is accepted with passing GitHub CI. CF-05 has a published, CI-verified atomic-sync slice and remains in progress. CF-03 is blocked by a preview navigation timeout. No agent is currently assigned; task logs identify the next slices.
 
 - Prioritize correctness and clarity of existing functionality over new features.
   Focus on checking accounts, credit cards, and supported payment systems such as
