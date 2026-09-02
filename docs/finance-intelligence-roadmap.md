@@ -2,6 +2,12 @@
 
 This roadmap tracks the long-running Candor-inspired work. The repository is the durable source of truth; chat is for decisions and coordination.
 
+**2026-09-02 — feature expansion paused.** Current execution is the
+[trustworthy cashflow epic](roadmap/epics/010-trustworthy-cashflow/_epic.md), indexed
+in [docs/roadmap](roadmap/_registry.md). The ideas and queue below are preserved
+as deferred backlog; their earlier priorities do not authorize starting them.
+Use the new roadmap's scan and task logs for active work.
+
 ## Status vocabulary
 
 - `idea`: captured, not yet committed
@@ -38,7 +44,7 @@ Raw transaction data must remain local by default. Any future LLM integration re
 | FI-09 | Local evidence/document ingestion | Medium/high | M/L | idea | Threat model and local OCR spike |
 | FI-10 | Benefits, tax, rewards, portfolio-fee analysis | Medium | L | idea | Separate capability designs and external-source policy |
 
-## Current execution queue
+## Deferred execution queue
 
 - [ ] FI-01.1 Specify recurring-event types, confidence, evidence, and suppression rules.
 - [ ] FI-01.2 Add synthetic fixtures for price increase, missed recurrence, trial conversion, and duplicate service.
@@ -65,6 +71,6 @@ A feature is not `done` until it has deterministic calculations, synthetic-data 
 
 ## Checkpoint protocol
 
-At the start of each work session: read this file, inspect git status, and select one queue item.
+At the start of each work session: follow [the active roadmap](roadmap/README.md), inspect git status, and select an eligible task there. Revisit this deferred queue only after an explicit scope decision.
 
 At the end of each session: update status and next action, record tests and unresolved risks, and add a dated note to the project memory. If scope changes, update this roadmap before continuing.
