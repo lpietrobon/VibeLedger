@@ -1,0 +1,28 @@
+{
+  "meta": {
+    "format": 3,
+    "version": "7.16.0",
+    "timestamp": "2026-09-02T19:00:45.882705",
+    "branch_coverage": true,
+    "show_contexts": false
+  },
+  "totals": {
+    "covered_lines": 1986,
+    "num_statements": 2290,
+    "percent_covered": 84.13793103448276,
+    "percent_covered_display": "84.14",
+    "missing_lines": 304,
+    "excluded_lines": 0,
+    "percent_statements_covered": 86.72489082969432,
+    "percent_statements_covered_display": "86.72",
+    "num_branches": 610,
+    "num_partial_branches": 100,
+    "covered_branches": 454,
+    "missing_branches": 156,
+    "percent_branches_covered": 74.42622950819673,
+    "percent_branches_covered_display": "74.43"
+  },
+  "source": "app/",
+  "gate": 81.34,
+  "frontend_included": false
+}

@@ -1,8 +1,8 @@
 ---
 id: 010-trustworthy-cashflow
 title: Trustworthy cashflow across linked accounts
-status: blocked
-owner: null
+status: in-progress
+owner: coordinator
 created: 2026-09-02
 revision: 1
 ---
@@ -18,7 +18,7 @@ of intent; implementation choices may change while serving that intent.
 ## Scope Notes
 
 Progress checkpoint: [recovered agent drafts, test evidence, and remaining gaps](artifacts/CF-01-recovered-progress.md).
-CF-01 and CF-02 are accepted. Application implementation remains unaccepted; CF-03/CF-04 were started and interrupted when the execution environment became unavailable. Task logs preserve the resume point.
+CF-01 and CF-02 are accepted. Application implementation remains unaccepted; CF-04 has resumed after the execution environment recovered; CF-03 still awaits its walkthrough. Task logs preserve prior interruptions and current evidence.
 
 - Prioritize correctness and clarity of existing functionality over new features.
   Focus on checking accounts, credit cards, and supported payment systems such as
