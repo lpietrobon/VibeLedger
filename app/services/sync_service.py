@@ -83,10 +83,13 @@ class SyncService:
         db.flush()
 
         try:
-            access_token = decrypt_token(item.access_token_encrypted)
-            self._refresh_accounts_and_snapshots(db, item_id, access_token)
-            data = self.client.sync_transactions(access_token, state.cursor)
-            added_count, modified_count, removed_count = self._apply_changes(db, item_id, data)
+            # The failure record must survive, but a failed batch must not commit
+            # fresh balances or partially imported rows with an unchanged cursor.
+            with db.begin_nested():
+                access_token = decrypt_token(item.access_token_encrypted)
+                self._refresh_accounts_and_snapshots(db, item_id, access_token)
+                data = self.client.sync_transactions(access_token, state.cursor)
+                added_count, modified_count, removed_count = self._apply_changes(db, item_id, data)
         except Exception as exc:
             now = utcnow()
             run.status = "error"
@@ -140,10 +143,11 @@ class SyncService:
         db.flush()
 
         try:
-            access_token = decrypt_token(item.access_token_encrypted)
-            self._refresh_accounts_and_snapshots(db, item_id, access_token)
-            data = self.client.get_historical_transactions(access_token, start_date, end_date)
-            added_count, modified_count, removed_count = self._apply_changes(db, item_id, {"added": data})
+            with db.begin_nested():
+                access_token = decrypt_token(item.access_token_encrypted)
+                self._refresh_accounts_and_snapshots(db, item_id, access_token)
+                data = self.client.get_historical_transactions(access_token, start_date, end_date)
+                added_count, modified_count, removed_count = self._apply_changes(db, item_id, {"added": data})
         except Exception as exc:
             now = utcnow()
             run.status = "error"
