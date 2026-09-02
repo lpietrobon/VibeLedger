@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-02T15:01:30+00:00_
+_Last scan: 2026-09-02T15:07:47+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -16,7 +16,7 @@ dependencies are done; a blank assignment means unassigned.
 | id | epic | status | deps | assigned | title |
 |---|---|---|---|---|---|
 | [CF-01](epics/010-trustworthy-cashflow/tasks/CF-01.md) | 010-trustworthy-cashflow | done |  | coordinator | Audit existing behavior and establish the baseline |
-| [CF-02](epics/010-trustworthy-cashflow/tasks/CF-02.md) | 010-trustworthy-cashflow | todo | CF-01 |  | Define accounting expectations with worked examples |
+| [CF-02](epics/010-trustworthy-cashflow/tasks/CF-02.md) | 010-trustworthy-cashflow | done | CF-01 | coordinator | Define accounting expectations with worked examples |
 | [CF-03](epics/010-trustworthy-cashflow/tasks/CF-03.md) | 010-trustworthy-cashflow | todo | CF-01 |  | Review the spending and reconciliation experience |
 | [CF-04](epics/010-trustworthy-cashflow/tasks/CF-04.md) | 010-trustworthy-cashflow | blocked | CF-01, CF-02 |  | Establish focused regression fixtures and coverage checks |
 | [CF-05](epics/010-trustworthy-cashflow/tasks/CF-05.md) | 010-trustworthy-cashflow | blocked | CF-02, CF-04 |  | Harden transaction identity and synchronization |
