@@ -1,8 +1,8 @@
 ---
 id: 010-trustworthy-cashflow
 title: Trustworthy cashflow across linked accounts
-status: planned
-owner: null
+status: in-progress
+owner: coordinator
 created: 2026-09-02
 revision: 1
 ---
