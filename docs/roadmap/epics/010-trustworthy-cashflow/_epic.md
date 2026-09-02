@@ -17,6 +17,9 @@ of intent; implementation choices may change while serving that intent.
 
 ## Scope Notes
 
+Progress checkpoint: [recovered agent drafts, test evidence, and remaining gaps](artifacts/CF-01-recovered-progress.md).
+Partial work is recorded in task logs; no application task has final acceptance.
+
 - Prioritize correctness and clarity of existing functionality over new features.
   Focus on checking accounts, credit cards, and supported payment systems such as
   Venmo. All linked accounts define the reporting boundary, irrespective of owner

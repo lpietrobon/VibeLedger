@@ -1,0 +1,263 @@
+{
+  "base_commit": "3b9c8c922b7db22597a7ac74c3b3bb63554a820c",
+  "captured_on": "2026-09-02",
+  "state": "uncommitted draft; not applied to pr-22",
+  "patch_sha256": "0e1380e6ac88ee7bb169ed2dd2299dab0d724f3e4d6c8781d35ba6248f37cfb6",
+  "files": [
+    {
+      "path": ".github/workflows/tests.yml",
+      "state": "untracked",
+      "sha256": "72b15a4367497e92cf5265499a866e9b6aadf714a50f966d38d94b9c756e18db"
+    },
+    {
+      "path": ".gitignore",
+      "state": "modified",
+      "sha256": "e62b80c11bb7cf67fd4cefa02ef8b112adf01b9f4d6da8b7c39b04fbed5dd1be"
+    },
+    {
+      "path": "CLAUDE.md",
+      "state": "modified",
+      "sha256": "becd4dc8b98a911c0ad09b444e8f9c42a7f4405858c0da7c9ecc75a6e76bf1c9"
+    },
+    {
+      "path": "README.md",
+      "state": "modified",
+      "sha256": "51b1771cc7a8d0c6a0f3e1dd5d6f71db50e6c561f568515c77f4456ad1fa03f6"
+    },
+    {
+      "path": "Spend.py",
+      "state": "modified",
+      "sha256": "45cc756774f6e718252de76fcc2b8d7293d4f7f3a423ac9ad0d977b4f5194dd7"
+    },
+    {
+      "path": "app/api/routes.py",
+      "state": "modified",
+      "sha256": "b055e67212e5402bbc56ef1b86385565cc881df603bd8e5451dc4b5624c286bb"
+    },
+    {
+      "path": "app/db/schema_patches.py",
+      "state": "modified",
+      "sha256": "f761b7b9970b5a90a79852184037633f69a8f2b497341eaaa435097c27df4b8e"
+    },
+    {
+      "path": "app/services/accounting.py",
+      "state": "untracked",
+      "sha256": "00422740892d629140ab5901f9f4e83fe76bacc38350f828d048e4378a0f80be"
+    },
+    {
+      "path": "app/services/category_resolver.py",
+      "state": "modified",
+      "sha256": "20519e7d97238a5c7a0cf4202fc9b30579627c1de8f7725374dc1fcb01a971f9"
+    },
+    {
+      "path": "app/services/refund_detector.py",
+      "state": "modified",
+      "sha256": "f1eef88ca0031b0ca813006f4c643a31315f7f6b6c1395ae8e3a06905693ff92"
+    },
+    {
+      "path": "app/services/search_query.py",
+      "state": "modified",
+      "sha256": "7283ee335660e8514b93a55e7f4023ac4b8a12587d3b272c15525b68f9673b09"
+    },
+    {
+      "path": "app/services/sync_service.py",
+      "state": "modified",
+      "sha256": "151006cc834532831bfc144d39b49385d6eb421fc543627f4cbbb1113e79169d"
+    },
+    {
+      "path": "app/services/transfer_detector.py",
+      "state": "modified",
+      "sha256": "fac64741198876cfce5521c72faab548654aaaae444bc99360237d0987ee3d94"
+    },
+    {
+      "path": "dashboard_lib.py",
+      "state": "modified",
+      "sha256": "46fd5b8dc0a5d7ff715cf859cc49450894937d2e0c4baf9df5e3bfe084e59772"
+    },
+    {
+      "path": "docs/finance-intelligence-roadmap.md",
+      "state": "modified",
+      "sha256": "b75ccfe2f46ee93dd5a5dd49ee9654e4d819da69491040a8f8aa107e5c06455b"
+    },
+    {
+      "path": "frontend/src/components/finance/AnnotationSheet.tsx",
+      "state": "modified",
+      "sha256": "c7e1c9c470bfb4715d01ea1d799d791ac7ae76cb5034a4e69331dcfa7511575e"
+    },
+    {
+      "path": "frontend/src/components/finance/CategoryComparison.tsx",
+      "state": "modified",
+      "sha256": "ed2e627387cecdf34dee01e6179ddc9332b433c5a4b1117baa03534d8ee54947"
+    },
+    {
+      "path": "frontend/src/components/finance/TransactionRow.tsx",
+      "state": "modified",
+      "sha256": "4f75bc7dd8780361a8796c7532141ca503078a75229603f31dd143ede6f7e86b"
+    },
+    {
+      "path": "frontend/src/components/finance/charts/CalendarHeatmap.tsx",
+      "state": "modified",
+      "sha256": "e5840e13e39aad34613275ed2779523bd9afad3530b9c387b1faeba6c3bc5543"
+    },
+    {
+      "path": "frontend/src/components/finance/charts/CategoryBarChart.tsx",
+      "state": "modified",
+      "sha256": "654d3dfd9c4fef3bf0a54d7ffb45284523f873a9fe82b597b46328b7456cf647"
+    },
+    {
+      "path": "frontend/src/components/finance/charts/SankeyChart.tsx",
+      "state": "modified",
+      "sha256": "6cf4433922a447bc26bbb0b333bdb5952f8d5933167e877587624370acef5938"
+    },
+    {
+      "path": "frontend/src/components/finance/ledger-review.test.tsx",
+      "state": "untracked",
+      "sha256": "9d6144099da476ec3ae06279f63863e7763cee00bc4c5099dfdcb6f4b3738404"
+    },
+    {
+      "path": "frontend/src/lib/api/cache.ts",
+      "state": "untracked",
+      "sha256": "bbecc0bc3cc1d7d0a920e8cc9c2346fc11c754ce34b834c36eceaf41cbd03520"
+    },
+    {
+      "path": "frontend/src/lib/api/client.test.ts",
+      "state": "modified",
+      "sha256": "c48170886e510d9c4dbe7de9dc699f6ea0637d1ef19bd8a627b6add10253885b"
+    },
+    {
+      "path": "frontend/src/lib/api/client.ts",
+      "state": "modified",
+      "sha256": "be583c0f1b5321f28b6e39d42d75e8ef356bd70e33a03da704dd65e0fb2237b3"
+    },
+    {
+      "path": "frontend/src/lib/api/types.ts",
+      "state": "modified",
+      "sha256": "6b350d1f28fceee2432cfb783047a51fc2c94471a96a78f78a35b5ce7851d2b2"
+    },
+    {
+      "path": "frontend/src/routes/accounts.tsx",
+      "state": "modified",
+      "sha256": "43d89b55e474ab1887fdb4c9691eeb60b3df83cfa1a75471a704f57e5aea4d45"
+    },
+    {
+      "path": "frontend/src/routes/add-account.tsx",
+      "state": "modified",
+      "sha256": "4890ed1149a89f0bc49f396096556ccf1ca6717c32eb4fff82ab2fd173031879"
+    },
+    {
+      "path": "frontend/src/routes/index.tsx",
+      "state": "modified",
+      "sha256": "04ec040594398cd9844f8ada81560fd5dc0b9493b32140d3faa62c97d3b661b4"
+    },
+    {
+      "path": "frontend/src/routes/rules.tsx",
+      "state": "modified",
+      "sha256": "564f82d30567cb59e0bd466e59c515df6ad4c3cb5c7e3337ff57b287dc6bd232"
+    },
+    {
+      "path": "frontend/src/routes/spending.tsx",
+      "state": "modified",
+      "sha256": "b51023a72e1da6f0ae4cb02743883ada35d7d1f0168476e68024466e654afea5"
+    },
+    {
+      "path": "frontend/src/routes/transactions.tsx",
+      "state": "modified",
+      "sha256": "31e9fc8c23bd3c794ea5c3cb97ccfcc55169f8cd0d6ac620b882a874ab3e051a"
+    },
+    {
+      "path": "frontend/src/routes/transfers.tsx",
+      "state": "modified",
+      "sha256": "d2fd46754e0f1102c3105ce927bb8715e504b1be477ba34de00383812fbbdf34"
+    },
+    {
+      "path": "pages/0_Transfers.py",
+      "state": "modified",
+      "sha256": "24545703b804ae8a48688f181aabd65f3560212e5e2ce7c6e2c97308f80b2081"
+    },
+    {
+      "path": "pages/2_Spending.py",
+      "state": "modified",
+      "sha256": "efd2e496e235cffebf8909008ecefc4527b3f693806bf68fc2c814c2a2fee415"
+    },
+    {
+      "path": "pages/3_Cashflow_Sankey.py",
+      "state": "modified",
+      "sha256": "7d1dcfebc6e937f8819a0068db6e7cf2de40b58c37bfcfa806dd6aac049d12f1"
+    },
+    {
+      "path": "pages/6_Transactions.py",
+      "state": "modified",
+      "sha256": "88ac5a30f2554baca0b1695049b156776f4ed027ab93d0bc8fcce4bdef147560"
+    },
+    {
+      "path": "pyproject.toml",
+      "state": "modified",
+      "sha256": "f8262e1d193b4de94b0ceb60c136a1ee6b3b4d0917363685dfec0793b7596f2b"
+    },
+    {
+      "path": "tests/test_accounting_integrity.py",
+      "state": "untracked",
+      "sha256": "ea9f66f35808034f0b1daeaf7b527fa771359f77ad725faceb023f005d49d015"
+    },
+    {
+      "path": "tests/test_category_resolver.py",
+      "state": "modified",
+      "sha256": "7351131d53bf7a4ba09b98b44982a11e38b62baa806664f5b5170b1bfec72c0a"
+    },
+    {
+      "path": "tests/test_dashboard_accounting.py",
+      "state": "untracked",
+      "sha256": "644fd3b4c7c8300efebad843b2fecee24ab9a83166502e2ff200d32ec3eb91ac"
+    },
+    {
+      "path": "tests/test_insights_analytics.py",
+      "state": "modified",
+      "sha256": "ed843585bb2059dc1d7e6e6cf669c756a23c73e1cf68161f4e3f42a2e50dc27d"
+    },
+    {
+      "path": "tests/test_mobile_analytics.py",
+      "state": "modified",
+      "sha256": "9505f09842696d706fbca5221d6e889e90b50f43faab553ccc602a478b5f928e"
+    },
+    {
+      "path": "tests/test_needs_attention_drilldown.py",
+      "state": "modified",
+      "sha256": "189c07e53e7d2b80a01fa838ec18c0fa0211844d0a6c9c39fdb2605f437afa1e"
+    },
+    {
+      "path": "tests/test_plaid_client.py",
+      "state": "untracked",
+      "sha256": "0db231529df6bde35686ec73890938c6ef231b3c08e97099bacf2c118a4c2827"
+    },
+    {
+      "path": "tests/test_recurring_api.py",
+      "state": "modified",
+      "sha256": "e8a363b2b57f0a61610525fcd0e3a95dd8fada51618babf109fca4c9243e3147"
+    },
+    {
+      "path": "tests/test_refund_detector.py",
+      "state": "modified",
+      "sha256": "f207fd7a2b5031f6b14a4b523fcc88402558b50e39daf29220fcc75884c0117c"
+    },
+    {
+      "path": "tests/test_sync_and_annotations.py",
+      "state": "modified",
+      "sha256": "a8c2449671bc6d540e5ec98c3af9a1be7221e92c4e6a73d985653bca901bb1d6"
+    },
+    {
+      "path": "tests/test_sync_service.py",
+      "state": "modified",
+      "sha256": "d887eddb6fc8ce1f6a69aed0a69912cc7b3ed8f71596cc73a7f72ad303a3b9e3"
+    },
+    {
+      "path": "tests/test_transfer_detector.py",
+      "state": "modified",
+      "sha256": "781c759aae893e6d2d26f3887fb709f75d4ebac0f3193a40b911773bee79b6f1"
+    },
+    {
+      "path": "tests/test_transfers_api.py",
+      "state": "modified",
+      "sha256": "3a9a10c93bd44d621af1156a4e1db9c8ff9febf7d2659536c0c6af578f2342b3"
+    }
+  ]
+}

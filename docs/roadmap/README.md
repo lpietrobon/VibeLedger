@@ -6,6 +6,23 @@ Read its [spirit](epics/010-trustworthy-cashflow/spirit.md) before choosing an
 implementation. The [earlier feature backlog](../finance-intelligence-roadmap.md)
 is preserved and deferred; it is not the current execution queue.
 
+Earlier partial work is inventoried in the epic's
+[recovered progress report](epics/010-trustworthy-cashflow/artifacts/CF-01-recovered-progress.md).
+Read it before redoing an audit or starting a draft implementation.
+
+## Deliverable locations
+
+- Progress, decisions, commands, verdicts, and evidence links live in the task's
+  append-only `Execution Log`.
+- Substantive audit reports, accounting examples, UX findings, and synthetic-data
+  screenshots live in the epic's `artifacts/`, prefixed with the task ID. Link
+  each deliverable from its task. Draft snapshots must say whether they are applied
+  to the branch and identify their source revision.
+- Executable tests/fixtures belong in existing test directories. Lasting product
+  instructions belong in existing project documentation.
+- A recoverable patch in `artifacts/` is evidence, not accepted application code.
+  Keep earlier snapshots intact; give later versions distinct filenames.
+
 ## Refresh and validate
 
 From the repository root, using the project's Python environment:
@@ -18,8 +35,8 @@ python docs/roadmap/scan.py
 The scanner regenerates `_registry.md` and `_blocked.md` and exits nonzero on
 invalid metadata or dependency/status issues. Run it at session start, after
 task changes, and before committing roadmap changes. Never hand-edit its output.
-It reads `_epic.md` and `tasks/*.md`; supporting prose such as `spirit.md` is not
-a task. This is the only extra epic document requested for this roadmap.
+It reads `_epic.md` and `tasks/*.md`; supporting prose such as `spirit.md` and
+documents in `artifacts/` are not tasks.
 
 ## Coordination
 
