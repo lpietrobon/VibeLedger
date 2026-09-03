@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
 from app.core.time import utcnow
 from app.db.session import SessionLocal
@@ -8,6 +9,7 @@ from app.models.models import (
     AnnotationFingerprint,
     CategoryDecisionEvent,
     Item,
+    RejectedTransferPair,
     SyncRun,
     SyncState,
     Transaction,
@@ -613,6 +615,7 @@ def test_removed_transaction_takes_its_dependent_rows_with_it():
             refund_reason="Exact account, amount, and transaction-name match",
         ))
         db.add(TransferPair(txn_out_id=txn.id, txn_in_id=other.id))
+        db.add(RejectedTransferPair(txn_out_id=txn.id, txn_in_id=other.id))
         db.add(CategoryDecisionEvent(
             transaction_id=txn.id,
             new_effective_category="FOOD/DINING",
@@ -629,6 +632,7 @@ def test_removed_transaction_takes_its_dependent_rows_with_it():
             TransactionAnnotation.transaction_id == removed_id
         ).count() == 0
         assert db.query(TransferPair).count() == 0
+        assert db.query(RejectedTransferPair).count() == 0
         assert db.query(CategoryDecisionEvent).filter(
             CategoryDecisionEvent.transaction_id == removed_id
         ).count() == 0
@@ -643,3 +647,111 @@ def test_removed_transaction_takes_its_dependent_rows_with_it():
 
         # And the manual edit is not lost — the fingerprint still carries it.
         assert db.query(AnnotationFingerprint).count() >= 0
+
+
+class LifecycleClient(FakePlaidClient):
+    """A mutable provider page for sync lifecycle regression tests."""
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def sync_transactions(self, _access_token, _cursor):
+        return self.payload
+
+
+def _lifecycle_record(transaction_id="posted", **changes):
+    return {
+        "transaction_id": transaction_id,
+        "account_id": "acct-100",
+        "date": "2026-04-10",
+        "amount": 25.31,
+        "name": "Cafe",
+        "merchant_name": "Cafe",
+        "plaid_category_primary": "FOOD_AND_DRINK",
+        "pending": False,
+        **changes,
+    }
+
+
+def _lifecycle_item(db, suffix="one"):
+    item = Item(
+        plaid_item_id=f"lifecycle-{suffix}",
+        access_token_encrypted=encrypt_token(f"token-{suffix}"),
+        status="active",
+    )
+    db.add(item)
+    db.commit()
+    return item
+
+
+def test_pending_posted_replacement_keeps_one_row_and_manual_annotation():
+    client = LifecycleClient({"added": [_lifecycle_record("pending", pending=True)], "next_cursor": "one"})
+    service = SyncService(client)
+    with SessionLocal() as db:
+        item = _lifecycle_item(db)
+        service.sync_item(db, item.id)
+        pending = db.query(Transaction).one()
+        local_id = pending.id
+        db.add(TransactionAnnotation(transaction_id=pending.id, user_category="FOOD/DINING", reviewed=True))
+        db.add(AnnotationFingerprint(
+            txn_hash=pending.txn_hash,
+            txn_occurrence=pending.txn_occurrence,
+            account_mask="1234",
+            txn_date=pending.date,
+            amount=pending.amount,
+            name=pending.name,
+            user_category="FOOD/DINING",
+            reviewed=True,
+            source_transaction_id=pending.id,
+            applied_transaction_id=pending.id,
+        ))
+        db.commit()
+
+        client.payload = {
+            "added": [_lifecycle_record(
+                "posted", amount=30.0, date="2026-04-12", _source={"pending_transaction_id": "pending"}
+            )],
+            "removed": [{"transaction_id": "pending"}],
+            "next_cursor": "two",
+        }
+        result = service.sync_item(db, item.id)
+
+        assert result == {"status": "success", "added": 0, "modified": 1, "removed": 0, "cursor": "two"}
+        posted = db.query(Transaction).one()
+        assert (posted.id, posted.plaid_transaction_id, posted.pending) == (local_id, "posted", False)
+        assert (posted.amount, posted.date) == (Decimal("30.00"), date(2026, 4, 12))
+        assert db.query(TransactionAnnotation).filter_by(transaction_id=posted.id).one().user_category == "FOOD/DINING"
+        fingerprint = db.query(AnnotationFingerprint).one()
+        assert (fingerprint.applied_transaction_id, fingerprint.txn_hash) == (posted.id, posted.txn_hash)
+
+
+def test_source_update_invalidates_derived_matches_but_keeps_notes():
+    client = LifecycleClient({"added": [_lifecycle_record()], "next_cursor": "one"})
+    service = SyncService(client)
+    with SessionLocal() as db:
+        item = _lifecycle_item(db)
+        service.sync_item(db, item.id)
+        tx = db.query(Transaction).one()
+        account = Account(plaid_account_id="lifecycle-counterparty", item_id=item.id, name="Card")
+        db.add(account)
+        db.flush()
+        counterparty = Transaction(
+            plaid_transaction_id="lifecycle-payment", account_id=account.id, item_id=item.id,
+            date=tx.date, amount=-tx.amount, name="Payment", pending=False,
+        )
+        db.add(counterparty)
+        db.add(TransactionAnnotation(transaction_id=tx.id, notes="keep this note", reviewed=True))
+        db.flush()
+        db.add(TransferPair(txn_out_id=tx.id, txn_in_id=counterparty.id, confirmed=True, detected_by="manual"))
+        db.add(TransactionAnnotation(
+            transaction_id=counterparty.id, refund_status="likely", refund_match_transaction_id=tx.id,
+        ))
+        db.commit()
+
+        client.payload = {"modified": [_lifecycle_record(date="2026-04-13")], "next_cursor": "two"}
+        assert service.sync_item(db, item.id)["modified"] == 1
+
+        assert db.query(TransferPair).count() == 0
+        assert db.query(TransactionAnnotation).filter_by(transaction_id=tx.id).one().notes == "keep this note"
+        refund = db.query(TransactionAnnotation).filter_by(transaction_id=counterparty.id).one()
+        assert refund.refund_match_transaction_id is None

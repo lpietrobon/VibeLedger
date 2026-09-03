@@ -27,8 +27,8 @@ def test_sync_all_no_items():
 
 def test_sync_all_syncs_active_items():
     with SessionLocal() as db:
-        db.add(Item(plaid_item_id="all-1", access_token_encrypted=encrypt_token("tok"), status="active"))
-        db.add(Item(plaid_item_id="all-2", access_token_encrypted=encrypt_token("tok"), status="active"))
+        db.add(Item(plaid_item_id="all-1", access_token_encrypted=encrypt_token("tok-1"), status="active"))
+        db.add(Item(plaid_item_id="all-2", access_token_encrypted=encrypt_token("tok-2"), status="active"))
         db.commit()
 
     with TestClient(app) as client:

@@ -8,8 +8,8 @@ from app.services.scheduler import _sync_all_items
 
 def test_sync_all_items_syncs_active_items():
     with SessionLocal() as db:
-        item1 = Item(plaid_item_id="sched-1", access_token_encrypted=encrypt_token("tok"), status="active")
-        item2 = Item(plaid_item_id="sched-2", access_token_encrypted=encrypt_token("tok"), status="active")
+        item1 = Item(plaid_item_id="sched-1", access_token_encrypted=encrypt_token("tok-1"), status="active")
+        item2 = Item(plaid_item_id="sched-2", access_token_encrypted=encrypt_token("tok-2"), status="active")
         inactive = Item(plaid_item_id="sched-3", access_token_encrypted=encrypt_token("tok"), status="inactive")
         db.add_all([item1, item2, inactive])
         db.commit()

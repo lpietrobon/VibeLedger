@@ -12,6 +12,7 @@ from app.models.models import (
     AnnotationFingerprint,
     CategoryDecisionEvent,
     Item,
+    RejectedTransferPair,
     SyncRun,
     SyncState,
     Transaction,
@@ -200,6 +201,8 @@ class SyncService:
                 )
                 db.add(existing)
                 db.flush()
+            elif existing.item_id != item_id:
+                raise ValueError("account belongs to a different linked item")
 
             existing.item_id = item_id
             existing.name = a.get("name") or existing.name
@@ -239,63 +242,124 @@ class SyncService:
         removed_count = 0
         occurrence_counts: dict[str, int] = {}
 
-        for t in payload.get("added", []):
-            existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
-            if existing:
-                continue
+        for records in (payload.get("added", []), payload.get("modified", [])):
+            for t in records:
+                account = self._ensure_account(db, item_id, t["account_id"])
+                existing = db.query(Transaction).filter(
+                    Transaction.plaid_transaction_id == t["transaction_id"]
+                ).first()
+                source = t.get("_source") or t
+                pending_id = source.get("pending_transaction_id")
+                if existing is None and pending_id and not t.get("pending", False):
+                    existing = db.query(Transaction).filter(
+                        Transaction.plaid_transaction_id == pending_id,
+                        Transaction.item_id == item_id,
+                        Transaction.account_id == account.id,
+                        Transaction.pending.is_(True),
+                    ).first()
+                if existing is not None and existing.item_id != item_id:
+                    raise ValueError("transaction belongs to a different linked item")
 
-            account = self._ensure_account(db, item_id, t["account_id"])
-            added_count += 1
-            tx_date = t.get("date")
-            if isinstance(tx_date, str):
-                tx_date = date.fromisoformat(tx_date)
+                tx_date = t.get("date")
+                if isinstance(tx_date, str):
+                    tx_date = date.fromisoformat(tx_date)
+                txn_hash = compute_txn_hash(account.mask, tx_date, t["amount"], t["name"])
+                values = {
+                    "plaid_transaction_id": t["transaction_id"],
+                    "account_id": account.id,
+                    "item_id": item_id,
+                    "date": tx_date,
+                    "amount": t["amount"],
+                    "name": t["name"],
+                    "merchant_name": t.get("merchant_name"),
+                    "plaid_category_primary": t.get("plaid_category_primary"),
+                    "pending": t.get("pending", False),
+                    "raw_json": self._serialize_raw(t),
+                }
 
-            txn_hash = compute_txn_hash(account.mask, tx_date, t["amount"], t["name"])
-            if txn_hash not in occurrence_counts:
-                occurrence_counts[txn_hash] = (
-                    db.query(Transaction).filter(Transaction.txn_hash == txn_hash).count()
-                )
-            txn_occurrence = occurrence_counts[txn_hash]
-            occurrence_counts[txn_hash] += 1
+                if existing is None:
+                    if txn_hash not in occurrence_counts:
+                        occurrence_counts[txn_hash] = db.query(Transaction).filter(
+                            Transaction.txn_hash == txn_hash
+                        ).count()
+                    txn_occurrence = occurrence_counts[txn_hash]
+                    occurrence_counts[txn_hash] += 1
+                    new_txn = Transaction(**values, txn_hash=txn_hash, txn_occurrence=txn_occurrence)
+                    db.add(new_txn)
+                    db.flush()
+                    self._reapply_fingerprint(db, new_txn, txn_hash, txn_occurrence)
+                    added_count += 1
+                    continue
 
-            new_txn = Transaction(
-                plaid_transaction_id=t["transaction_id"],
-                account_id=account.id,
-                item_id=item_id,
-                date=tx_date,
-                amount=t["amount"],
-                name=t["name"],
-                merchant_name=t.get("merchant_name"),
-                plaid_category_primary=t.get("plaid_category_primary"),
-                pending=t.get("pending", False),
-                raw_json=self._serialize_raw(t),
-                txn_hash=txn_hash,
-                txn_occurrence=txn_occurrence,
-            )
-            db.add(new_txn)
-            db.flush()
+                # A repeated provider record is a no-op.  Content-based hashes
+                # are only for restoring annotations after relinking; they must
+                # never collapse two legitimate purchases.
+                changed = any(getattr(existing, key) != value for key, value in values.items())
+                if not changed:
+                    continue
 
-            self._reapply_fingerprint(db, new_txn, txn_hash, txn_occurrence)
+                if (
+                    existing.amount != values["amount"]
+                    or existing.date != tx_date
+                    or existing.account_id != account.id
+                    or existing.pending != values["pending"]
+                ):
+                    self._clear_reconciliation(db, existing.id)
 
-        for t in payload.get("modified", []):
-            existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
-            if existing:
+                old_hash = existing.txn_hash
+                for key, value in values.items():
+                    setattr(existing, key, value)
+                if old_hash != txn_hash:
+                    highest = db.query(Transaction.txn_occurrence).filter(
+                        Transaction.txn_hash == txn_hash,
+                        Transaction.id != existing.id,
+                    ).order_by(Transaction.txn_occurrence.desc()).first()
+                    existing.txn_hash = txn_hash
+                    existing.txn_occurrence = 0 if highest is None else (highest[0] or 0) + 1
+                db.flush()
+                self._update_applied_fingerprint(db, existing)
                 modified_count += 1
-                existing.amount = t["amount"]
-                existing.name = t["name"]
-                existing.merchant_name = t.get("merchant_name")
-                existing.plaid_category_primary = t.get("plaid_category_primary")
-                existing.pending = t.get("pending", False)
-                existing.raw_json = self._serialize_raw(t)
 
         for t in payload.get("removed", []):
-            existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
+            existing = db.query(Transaction).filter(
+                Transaction.plaid_transaction_id == t["transaction_id"], Transaction.item_id == item_id
+            ).first()
             if existing:
                 removed_count += 1
                 self._delete_dependent_rows(db, existing.id)
                 db.delete(existing)
 
         return added_count, modified_count, removed_count
+
+    def _clear_reconciliation(self, db: Session, txn_id: int) -> None:
+        """Source changes invalidate derived matches without discarding user notes."""
+        db.query(TransferPair).filter(
+            or_(TransferPair.txn_out_id == txn_id, TransferPair.txn_in_id == txn_id)
+        ).delete(synchronize_session=False)
+        db.query(TransactionAnnotation).filter(
+            TransactionAnnotation.refund_match_transaction_id == txn_id
+        ).update(
+            {
+                TransactionAnnotation.refund_match_transaction_id: None,
+                TransactionAnnotation.refund_reason: None,
+            },
+            synchronize_session=False,
+        )
+
+    def _update_applied_fingerprint(self, db: Session, txn: Transaction) -> None:
+        """Keep a saved manual correction attached through a provider update."""
+        fingerprint = db.query(AnnotationFingerprint).filter(
+            AnnotationFingerprint.applied_transaction_id == txn.id
+        ).first()
+        if not fingerprint:
+            return
+        fingerprint.txn_hash = txn.txn_hash
+        fingerprint.txn_occurrence = txn.txn_occurrence
+        fingerprint.txn_date = txn.date
+        fingerprint.amount = txn.amount
+        fingerprint.name = txn.name
+        account = db.get(Account, txn.account_id)
+        fingerprint.account_mask = account.mask if account else None
 
     def _delete_dependent_rows(self, db: Session, txn_id: int) -> None:
         """Drop rows that point at a transaction about to be deleted.
@@ -319,6 +383,15 @@ class SyncService:
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id == txn_id, TransferPair.txn_in_id == txn_id)
         ).delete(synchronize_session=False)
+        db.query(RejectedTransferPair).filter(
+            or_(RejectedTransferPair.txn_out_id == txn_id, RejectedTransferPair.txn_in_id == txn_id)
+        ).delete(synchronize_session=False)
+        db.query(AnnotationFingerprint).filter(
+            AnnotationFingerprint.applied_transaction_id == txn_id
+        ).update(
+            {AnnotationFingerprint.applied_transaction_id: None, AnnotationFingerprint.applied_at: None},
+            synchronize_session=False,
+        )
         db.query(CategoryDecisionEvent).filter(
             CategoryDecisionEvent.transaction_id == txn_id
         ).delete(synchronize_session=False)
@@ -378,6 +451,8 @@ class SyncService:
             account = Account(plaid_account_id=plaid_account_id, item_id=item_id, name="Account")
             db.add(account)
             db.flush()
+        elif account.item_id != item_id:
+            raise ValueError("account belongs to a different linked item")
         return account
 
     @staticmethod
