@@ -1223,10 +1223,12 @@ def recompute_all_category_rules(payload: CategoryRuleRecomputeRequest, db: Sess
 
 
 def _apply_transfer_exclusion(q, include_transfers: bool):
-    """Filter out transactions participating in a TransferPair.
+    """Filter out transactions participating in a confirmed TransferPair.
 
     A transfer is a *matched pair* across two covered accounts — that is the only
-    thing that can double-count money as both income and expense. The legacy
+    thing that can double-count money as both income and expense. An automatic
+    candidate is evidence for review, not an accounting conclusion, so it stays
+    in realized totals until the user confirms it. The legacy
     one-sided `is_transfer_override` flag is deliberately no longer honored: it
     removed single transactions from every analytic with no counterparty, could
     not be set or cleared through any API, and survived re-sync via annotation
@@ -1236,8 +1238,8 @@ def _apply_transfer_exclusion(q, include_transfers: bool):
     if include_transfers:
         return q
     return q.filter(
-        ~Transaction.id.in_(select(TransferPair.txn_out_id)),
-        ~Transaction.id.in_(select(TransferPair.txn_in_id)),
+        ~Transaction.id.in_(select(TransferPair.txn_out_id).where(TransferPair.confirmed == True)),  # noqa: E712
+        ~Transaction.id.in_(select(TransferPair.txn_in_id).where(TransferPair.confirmed == True)),  # noqa: E712
     )
 
 
@@ -1978,8 +1980,10 @@ def transfers_confirm(pair_id: int, db: Session = Depends(get_db)):
     pair = db.get(TransferPair, pair_id)
     if not pair:
         raise HTTPException(status_code=404, detail="pair not found")
-    pair.confirmed = True
-    db.commit()
+    try:
+        pair = transfer_detector.confirm_pair(db, pair)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"id": pair.id, "confirmed": True}
 
 

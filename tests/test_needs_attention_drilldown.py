@@ -120,8 +120,8 @@ def _seed_ledger() -> None:
             db.add(TransactionAnnotation(transaction_id=t.id, reviewed=True))
         for t in refunds:
             db.add(TransactionAnnotation(transaction_id=t.id, refund_status="likely", reviewed=False))
-        # Paired transfers are excluded from the unreviewed count, so the
-        # drill-down has to exclude them too.
+        # An unconfirmed transfer is still an accounting and review candidate;
+        # it becomes excluded only after the user confirms the pair.
         db.add(TransferPair(txn_out_id=transfer_out.id, txn_in_id=transfer_in.id, confirmed=False))
         db.commit()
 
@@ -147,7 +147,7 @@ def test_every_attention_count_is_reproduced_by_its_drilldown():
         # Guards the fixture itself: if these stop being non-zero and older than
         # one page, the test would pass without exercising anything.
         assert needs_attention["likely_refunds"] == 9
-        assert needs_attention["unreviewed_transactions"] == 12  # 9 refunds + 3 uncategorized
+        assert needs_attention["unreviewed_transactions"] == 14  # 9 refunds + 3 uncategorized + 2 candidates
         assert needs_attention["uncategorized_transactions"] == 3
 
         for key, ui_filter in ATTENTION_ROWS.items():
@@ -168,7 +168,7 @@ def test_every_attention_count_is_reproduced_by_its_drilldown():
         assert {t["effective_category"].lower() for t in uncategorized} == {"uncategorized"}
         unreviewed = _drilldown(client, ui_queries["unreviewed"])["items"]
         assert not any(t["annotation"]["reviewed"] for t in unreviewed)
-        assert "att-xfer-out" not in {t["plaid_transaction_id"] for t in unreviewed}
+        assert "att-xfer-out" in {t["plaid_transaction_id"] for t in unreviewed}
 
 
 def test_overview_rows_only_link_to_filters_the_transactions_screen_implements():

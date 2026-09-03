@@ -84,7 +84,7 @@ def test_transfers_detect_and_list():
         assert body["items"][0]["confirmed"] is False
 
 
-def test_analytics_excludes_transfers_by_default():
+def test_analytics_excludes_only_confirmed_transfers_by_default():
     _seed_transfer_ledger()
     with TestClient(app) as client:
         # Before detection: the $200 transfer is counted as spend
@@ -93,7 +93,14 @@ def test_analytics_excludes_transfers_by_default():
 
         client.post("/transfers/detect", headers=AUTH_HEADERS)
 
-        # After detection: transfer is excluded, only the $50 spend remains
+        # Detection is only a candidate: it remains in the trusted total until
+        # the user confirms that the two rows are really an internal movement.
+        r = client.get("/analytics/monthly-spend", headers=AUTH_HEADERS)
+        assert r.json() == [{"month": "2026-03", "spend": 250.0}]
+
+        pair_id = client.get("/transfers", headers=AUTH_HEADERS).json()["items"][0]["id"]
+        assert client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS).status_code == 200
+
         r = client.get("/analytics/monthly-spend", headers=AUTH_HEADERS)
         assert r.json() == [{"month": "2026-03", "spend": 50.0}]
 
@@ -110,6 +117,8 @@ def test_cashflow_excludes_transfer_both_sides():
     _seed_transfer_ledger()
     with TestClient(app) as client:
         client.post("/transfers/detect", headers=AUTH_HEADERS)
+        pair_id = client.get("/transfers", headers=AUTH_HEADERS).json()["items"][0]["id"]
+        client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS)
         r = client.get("/analytics/cashflow-trend", headers=AUTH_HEADERS)
     data = {row["month"]: row for row in r.json()}
     # Transfer's $200 income side AND $200 expense side should both be gone
@@ -154,6 +163,25 @@ def test_transfers_confirm_and_delete():
         # otherwise every correction is undone by the next sync.
         r = client.post("/transfers/detect", headers=AUTH_HEADERS)
         assert r.json()["created"] == 0
+
+
+def test_stale_candidate_cannot_be_confirmed():
+    _seed_transfer_ledger()
+    with TestClient(app) as client:
+        client.post("/transfers/detect", headers=AUTH_HEADERS)
+        pair_id = client.get("/transfers", headers=AUTH_HEADERS).json()["items"][0]["id"]
+
+    with SessionLocal() as db:
+        out = db.query(Transaction).filter_by(plaid_transaction_id="tx-out").one()
+        out.amount = Decimal("199.99")
+        db.commit()
+
+    with TestClient(app) as client:
+        r = client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS)
+    assert r.status_code == 400
+    assert "opposite and equal" in r.json()["detail"]
+    with SessionLocal() as db:
+        assert db.get(TransferPair, pair_id).confirmed is False
 
 
 def test_manual_pair_validates_amounts_and_accounts():

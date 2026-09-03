@@ -27,7 +27,7 @@ from decimal import Decimal
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.models import RejectedTransferPair, Transaction, TransferPair
+from app.models.models import Account, RejectedTransferPair, Transaction, TransferPair
 
 
 def _paired_ids(db: Session) -> set[int]:
@@ -197,6 +197,31 @@ def manual_pair(db: Session, txn_a_id: int, txn_b_id: int) -> TransferPair:
         confirmed=True,
     )
     db.add(pair)
+    db.commit()
+    db.refresh(pair)
+    return pair
+
+
+def confirm_pair(db: Session, pair: TransferPair) -> TransferPair:
+    """Confirm an existing candidate only while its source evidence is valid."""
+    out = db.get(Transaction, pair.txn_out_id)
+    inn = db.get(Transaction, pair.txn_in_id)
+    if not out or not inn:
+        raise ValueError("transfer pair transaction no longer exists")
+    if out.pending or inn.pending:
+        raise ValueError("pending transactions cannot form a confirmed transfer")
+    if out.account_id == inn.account_id:
+        raise ValueError("transfer pair must span two accounts")
+    if out.amount <= 0 or inn.amount >= 0 or out.amount + inn.amount != 0:
+        raise ValueError("transfer pair amounts must be opposite and equal")
+
+    out_account = db.get(Account, out.account_id)
+    in_account = db.get(Account, inn.account_id)
+    if out_account and in_account and out_account.currency and in_account.currency:
+        if out_account.currency != in_account.currency:
+            raise ValueError("transfer pair currencies must match")
+
+    pair.confirmed = True
     db.commit()
     db.refresh(pair)
     return pair
