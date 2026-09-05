@@ -140,21 +140,14 @@ def load_transactions(db_path: str) -> pd.DataFrame:
     try:
         # All COALESCE/effective-field logic lives in the effective_transactions
         # view (defined in schema_patches.py). Add new correctable fields there.
-        q = """
-        SELECT et.*,
-               tp_out.id AS pair_as_out, tp_in.id AS pair_as_in
-        FROM effective_transactions et
-        LEFT JOIN transfer_pairs tp_out ON tp_out.txn_out_id = et.id
-        LEFT JOIN transfer_pairs tp_in  ON tp_in.txn_in_id  = et.id
-        """
+        q = "SELECT * FROM effective_transactions"
         df = pd.read_sql_query(q, conn)
     finally:
         conn.close()
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"]).dt.date
-        # A transfer is a matched pair across two covered accounts. The legacy
-        # one-sided is_transfer_override flag is no longer honored.
-        df["is_transfer"] = df["pair_as_out"].notna() | df["pair_as_in"].notna()
+        for column in ("is_transfer", "is_transfer_candidate", "pending"):
+            df[column] = df[column].fillna(False).astype(bool)
     return df
 
 
@@ -393,6 +386,8 @@ def apply_transaction_filter_tokens(
 
 def spend_transactions(df: pd.DataFrame) -> pd.DataFrame:
     """Expense-side rows, including negative refunds that reduce spend."""
+    if "pending" in df.columns:
+        df = df[~df["pending"].fillna(False).astype(bool)]
     is_refund = (
         df["is_refund"].fillna(0).astype(bool)
         if "is_refund" in df.columns
@@ -403,6 +398,8 @@ def spend_transactions(df: pd.DataFrame) -> pd.DataFrame:
 
 def add_cashflow_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Add signed expense and positive income columns with refunds netted to spend."""
+    if "pending" in df.columns:
+        df = df[~df["pending"].fillna(False).astype(bool)]
     out = df.copy()
     is_refund = (
         out["is_refund"].fillna(0).astype(bool)

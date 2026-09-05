@@ -197,6 +197,7 @@ def apply_patches(engine: Engine) -> None:
         conn.execute(text("DROP VIEW IF EXISTS effective_transactions"))
         conn.execute(text(f"""
             CREATE VIEW effective_transactions AS
+            WITH categorized AS (
             SELECT
                 t.id,
                 t.plaid_transaction_id,
@@ -220,7 +221,7 @@ def apply_patches(engine: Engine) -> None:
                     ELSE t.plaid_category_primary
                     END,
                     'uncategorized'
-                ) AS effective_category,
+                ) AS base_category,
                 COALESCE(ta.merchant_name_override, t.merchant_name)
                     AS effective_merchant,
                 COALESCE(a.nickname, a.name || ' \xb7\xb7' || a.mask)
@@ -229,8 +230,12 @@ def apply_patches(engine: Engine) -> None:
                 ta.refund_status,
                 ta.refund_match_transaction_id,
                 ta.refund_reason,
-                CASE WHEN ta.refund_status IN ('confirmed', 'likely') THEN 1 ELSE 0 END
+                CASE WHEN t.amount < 0 AND ta.refund_status IN ('confirmed', 'likely') THEN 1 ELSE 0 END
                     AS is_refund,
+                EXISTS (SELECT 1 FROM transfer_pairs p WHERE p.confirmed = 1
+                    AND (p.txn_out_id = t.id OR p.txn_in_id = t.id)) AS is_transfer,
+                EXISTS (SELECT 1 FROM transfer_pairs p WHERE p.confirmed = 0
+                    AND (p.txn_out_id = t.id OR p.txn_in_id = t.id)) AS is_transfer_candidate,
                 ta.merchant_name_override,
                 ta.user_category,
                 ta.rule_category,
@@ -245,6 +250,21 @@ def apply_patches(engine: Engine) -> None:
             FROM transactions t
             LEFT JOIN transaction_annotations ta ON ta.transaction_id = t.id
             LEFT JOIN accounts a ON a.id = t.account_id
+            ), effective AS (
+                SELECT c.*,
+                    COALESCE(c.user_category,
+                        CASE WHEN c.is_refund = 1 AND original.amount > 0
+                            THEN original.base_category END,
+                        c.base_category) AS effective_category
+                FROM categorized c
+                LEFT JOIN categorized original ON original.id = c.refund_match_transaction_id
+            )
+            SELECT effective.*,
+                CASE WHEN pending = 0 AND is_transfer = 0 AND (amount > 0 OR is_refund = 1)
+                    THEN amount ELSE 0 END AS expense_amount,
+                CASE WHEN pending = 0 AND is_transfer = 0 AND amount < 0 AND is_refund = 0
+                    THEN -amount ELSE 0 END AS income_amount
+            FROM effective
         """))
 
     with engine.begin() as conn:

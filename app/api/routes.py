@@ -51,6 +51,13 @@ from app.services.security import decrypt_token, encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
+from app.services.accounting import (
+    exclude_confirmed_transfers,
+    expense_amount,
+    income_amount,
+    is_refund,
+    posted_activity,
+)
 from app.services.refund_detector import classify_refunds
 from app.services.category_catalog import merge_catalog
 from app.services.recurring_detector import detect_recurring
@@ -500,13 +507,15 @@ def _apply_search_query(query, parsed):
     if "uncategorized" in parsed.flags:
         query = query.filter(func.lower(_effective_category_expr()) == "uncategorized")
     if "refund" in parsed.flags:
-        query = query.filter(_is_refund_expr())
+        query = query.filter(is_refund())
     if "likely-refund" in parsed.flags:
         query = query.filter(TransactionAnnotation.refund_status == "likely")
     if "not-transfer" in parsed.flags:
         # Same exclusion the analytics counts use, so a count and the search
         # that drills into it can describe the same set.
         query = _apply_transfer_exclusion(query, include_transfers=False)
+    if "spend" in parsed.flags:
+        query = posted_activity(query, include_transfers=False).filter(expense_amount() != 0)
     if "pending" in parsed.flags:
         query = query.filter(Transaction.pending == True)  # noqa: E712
 
@@ -686,19 +695,19 @@ def list_transactions(
     # excluded from spend/income analytics should say so, otherwise money
     # silently goes missing from the totals with no visible cause.
     page_ids = [row[0].id for row in rows]
-    pair_by_txn: dict[int, int] = {}
+    pair_by_txn: dict[int, tuple[int, bool]] = {}
     if page_ids:
         pair_rows = db.query(
-            TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id
+            TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id, TransferPair.confirmed
         ).filter(
             or_(
                 TransferPair.txn_out_id.in_(page_ids),
                 TransferPair.txn_in_id.in_(page_ids),
             )
         ).all()
-        for pair_id, out_id, in_id in pair_rows:
-            pair_by_txn[out_id] = pair_id
-            pair_by_txn[in_id] = pair_id
+        for pair_id, out_id, in_id, confirmed in pair_rows:
+            pair_by_txn[out_id] = (pair_id, confirmed)
+            pair_by_txn[in_id] = (pair_id, confirmed)
 
     return {
         "total": total,
@@ -719,8 +728,9 @@ def list_transactions(
                 "effective_category": resolved_category,
                 "category_source": resolved_source,
                 "rule_id": a.rule_id if (a and resolved_source == "rule") else None,
-                "transfer_pair_id": pair_by_txn.get(t.id),
-                "is_transfer": t.id in pair_by_txn,
+                "transfer_pair_id": pair_by_txn.get(t.id, (None, None))[0],
+                "is_transfer": pair_by_txn.get(t.id, (None, False))[1] is True,
+                "is_transfer_candidate": pair_by_txn.get(t.id, (None, False))[1] is False and t.id in pair_by_txn,
                 "refund_status": a.refund_status if a else None,
                 "refund_match_transaction_id": a.refund_match_transaction_id if a else None,
                 "refund_reason": a.refund_reason if a else None,
@@ -1235,16 +1245,11 @@ def _apply_transfer_exclusion(q, include_transfers: bool):
     fingerprints, so anything carrying it was silently and permanently missing
     from spend and income.
     """
-    if include_transfers:
-        return q
-    return q.filter(
-        ~Transaction.id.in_(select(TransferPair.txn_out_id).where(TransferPair.confirmed == True)),  # noqa: E712
-        ~Transaction.id.in_(select(TransferPair.txn_in_id).where(TransferPair.confirmed == True)),  # noqa: E712
-    )
+    return q if include_transfers else exclude_confirmed_transfers(q)
 
 
 def _is_refund_expr():
-    return TransactionAnnotation.refund_status.in_(["confirmed", "likely"])
+    return is_refund()
 
 
 @router.post("/refunds/detect")
@@ -1263,15 +1268,11 @@ def monthly_spend(
     q = (
         db.query(
             month_col,
-            func.sum(case(
-                (_is_refund_expr(), Transaction.amount),
-                (Transaction.amount > 0, Transaction.amount),
-                else_=0,
-            )),
+            func.sum(expense_amount()),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
-    q = _apply_transfer_exclusion(q, include_transfers)
+    q = posted_activity(q, include_transfers=include_transfers)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1291,15 +1292,11 @@ def category_spend(
     q = (
         db.query(
             effective_category,
-            func.sum(case(
-                (_is_refund_expr(), Transaction.amount),
-                (Transaction.amount > 0, Transaction.amount),
-                else_=0,
-            )),
+            func.sum(expense_amount()),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
-    q = _apply_transfer_exclusion(q, include_transfers)
+    q = posted_activity(q, include_transfers=include_transfers)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1319,26 +1316,12 @@ def cashflow_trend(
     q = (
         db.query(
             month_col,
-            func.sum(case(
-                (_is_refund_expr(), Transaction.amount),
-                (Transaction.amount > 0, Transaction.amount),
-                else_=0,
-            )).label("expenses"),
-            func.sum(case(
-                (
-                    (Transaction.amount < 0)
-                    & or_(
-                        TransactionAnnotation.refund_status.is_(None),
-                        ~TransactionAnnotation.refund_status.in_(["confirmed", "likely"]),
-                    ),
-                    -Transaction.amount,
-                ),
-                else_=0,
-            )).label("income"),
+            func.sum(expense_amount()).label("expenses"),
+            func.sum(income_amount()).label("income"),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
-    q = _apply_transfer_exclusion(q, include_transfers)
+    q = posted_activity(q, include_transfers=include_transfers)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:

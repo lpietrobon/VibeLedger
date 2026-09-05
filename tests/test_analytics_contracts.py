@@ -1,10 +1,11 @@
 from datetime import date
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from app.db.session import SessionLocal
 from app.main import app
-from app.models.models import Account, Item, Transaction, TransactionAnnotation
+from app.models.models import Account, Item, Transaction, TransactionAnnotation, TransferPair
 from app.services.security import encrypt_token
 from tests.conftest import AUTH_HEADERS
 
@@ -143,6 +144,65 @@ def test_category_spend_prefers_annotation_over_plaid():
     by_cat = {row["category"]: row["spend"] for row in r.json()}
     assert by_cat["groceries"] == 400.0
     assert by_cat["FOOD/OTHER"] == 200.0
+
+
+def test_posted_analytics_and_spend_drilldown_share_the_same_rows():
+    """Pending rows and confirmed transfers cannot inflate the trusted total."""
+    _seed_ledger()
+    with SessionLocal() as db:
+        item = db.query(Item).filter_by(plaid_item_id="i-analytics").one()
+        checking = db.query(Account).filter_by(plaid_account_id="a-analytics").one()
+        savings = Account(plaid_account_id="a-analytics-savings", item_id=item.id, name="Savings")
+        db.add(savings)
+        db.flush()
+
+        pending = Transaction(
+            plaid_transaction_id="tx-pending", account_id=checking.id, item_id=item.id,
+            date=date(2026, 3, 16), amount=99.0, name="Pending card authorization", pending=True,
+        )
+        candidate_out = Transaction(
+            plaid_transaction_id="tx-candidate-out", account_id=checking.id, item_id=item.id,
+            date=date(2026, 3, 17), amount=50.0, name="Possible transfer", pending=False,
+        )
+        candidate_in = Transaction(
+            plaid_transaction_id="tx-candidate-in", account_id=savings.id, item_id=item.id,
+            date=date(2026, 3, 17), amount=-50.0, name="Possible transfer", pending=False,
+        )
+        confirmed_out = Transaction(
+            plaid_transaction_id="tx-confirmed-out", account_id=checking.id, item_id=item.id,
+            date=date(2026, 3, 18), amount=30.0, name="Confirmed transfer", pending=False,
+        )
+        confirmed_in = Transaction(
+            plaid_transaction_id="tx-confirmed-in", account_id=savings.id, item_id=item.id,
+            date=date(2026, 3, 18), amount=-30.0, name="Confirmed transfer", pending=False,
+        )
+        db.add_all([pending, candidate_out, candidate_in, confirmed_out, confirmed_in])
+        db.flush()
+        db.add(TransferPair(txn_out_id=candidate_out.id, txn_in_id=candidate_in.id, confirmed=False))
+        db.add(TransferPair(txn_out_id=confirmed_out.id, txn_in_id=confirmed_in.id, confirmed=True))
+        db.commit()
+
+    with TestClient(app) as client:
+        month = client.get("/analytics/monthly-spend", headers=AUTH_HEADERS).json()
+        cashflow = client.get("/analytics/cashflow-trend", headers=AUTH_HEADERS).json()
+        drilldown = client.get("/transactions", params={"q": "is:spend", "limit": 100}, headers=AUTH_HEADERS).json()
+
+    with SessionLocal() as db:
+        view_expense, view_income = db.execute(text("""
+            SELECT COALESCE(SUM(expense_amount), 0), COALESCE(SUM(income_amount), 0)
+            FROM effective_transactions WHERE date >= '2026-03-01' AND date <= '2026-03-31'
+        """)).one()
+
+    # Original March spend is 600. The unresolved candidate remains counted;
+    # the pending authorization and confirmed transfer do not.
+    assert {row["month"]: row["spend"] for row in month}["2026-03"] == 650.0
+    march = {row["month"]: row for row in cashflow}["2026-03"]
+    assert (march["expenses"], march["income"], march["net"]) == (650.0, 1050.0, 400.0)
+    assert (float(view_expense), float(view_income)) == (650.0, 1050.0)
+    ids = {row["plaid_transaction_id"] for row in drilldown["items"]}
+    assert "tx-pending" not in ids
+    assert "tx-confirmed-out" not in ids
+    assert "tx-candidate-out" in ids
 
 
 def test_category_spend_reflects_rule_apply_outcomes():
