@@ -125,6 +125,39 @@ def test_cashflow_sankey_date_filter():
     assert body["total_spend"] == 600.0  # restaurant (100) + rent (500)
 
 
+def test_cashflow_sankey_ignores_pending_activity():
+    item_id, account_id = _seed_sankey_ledger()
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                Transaction(
+                    plaid_transaction_id="tx-pending-sankey-spend",
+                    account_id=account_id,
+                    item_id=item_id,
+                    date=date(2026, 3, 20),
+                    amount=250.0,
+                    name="Pending purchase",
+                    pending=True,
+                ),
+                Transaction(
+                    plaid_transaction_id="tx-pending-sankey-income",
+                    account_id=account_id,
+                    item_id=item_id,
+                    date=date(2026, 3, 20),
+                    amount=-500.0,
+                    name="Pending deposit",
+                    pending=True,
+                ),
+            ]
+        )
+        db.commit()
+
+    with TestClient(app) as client:
+        body = client.get("/analytics/cashflow-sankey", headers=AUTH_HEADERS).json()
+    assert body["income"] == 1000.0
+    assert body["total_spend"] == 900.0
+
+
 def _seed_movers_ledger():
     item_id, account_id = _seed_item_and_account("i-movers", "a-movers")
     rows = [
@@ -257,3 +290,30 @@ def test_daily_spend_excludes_transfers():
         r = client.get("/analytics/daily-spend", params={"year": 2026}, headers=AUTH_HEADERS)
     by_date = {row["date"]: row["amount"] for row in r.json()["days"]}
     assert by_date["2026-02-01"] == 0.0
+
+
+def test_pending_rows_do_not_choose_or_contribute_to_analytics_periods():
+    item_id, account_id = _seed_item_and_account("i-pending-period", "a-pending-period")
+    _add_txn(account_id, item_id, date(2026, 3, 15), 240.0, "Posted purchase", "FOOD_AND_DRINK")
+    with SessionLocal() as db:
+        db.add(
+            Transaction(
+                plaid_transaction_id="tx-pending-future",
+                account_id=account_id,
+                item_id=item_id,
+                date=date(2027, 1, 1),
+                amount=999.0,
+                name="Pending future purchase",
+                pending=True,
+            )
+        )
+        db.commit()
+
+    with TestClient(app) as client:
+        daily = client.get("/analytics/daily-spend", headers=AUTH_HEADERS).json()
+        movers = client.get("/analytics/category-movers", headers=AUTH_HEADERS).json()
+        sankey = client.get("/analytics/cashflow-sankey", headers=AUTH_HEADERS).json()
+
+    assert daily["year"] == 2026
+    assert movers["month"] == "2026-03"
+    assert sankey["total_spend"] == 240.0

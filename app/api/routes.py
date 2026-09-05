@@ -1390,12 +1390,14 @@ def _month_label(month: str) -> str:
 
 
 def _expense_value_case():
-    """Signed per-transaction expense: positive charges add, refunds subtract."""
-    return case(
-        (_is_refund_expr(), Transaction.amount),
-        (Transaction.amount > 0, Transaction.amount),
-        else_=0,
-    )
+    """Compatibility alias for the shared realized-expense expression."""
+    return expense_amount()
+
+
+def _latest_realized_activity_date(db: Session):
+    """Latest posted, non-transfer activity used to choose analytic periods."""
+    q = db.query(func.max(Transaction.date))
+    return posted_activity(q, include_transfers=False).scalar()
 
 
 def _project_month(month: str, total: float) -> float:
@@ -1545,7 +1547,7 @@ def _daily_expense(db: Session, start: date, end: date, bucket: str) -> dict[int
     q = db.query(bucket_col, func.sum(_expense_value_case())).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
-    q = _apply_transfer_exclusion(q, include_transfers=False)
+    q = posted_activity(q, include_transfers=False)
     q = q.filter(Transaction.date >= start, Transaction.date <= end)
     rows = q.group_by(bucket_col).all()
     return {int(b): float(total or 0) for b, total in rows if b is not None}
@@ -1570,7 +1572,7 @@ def analytics_cumulative_spend(
     granularity: str = Query(default="monthly"),
 ):
     """Cumulative spend pace for the current period vs the prior three."""
-    anchor = db.query(func.max(Transaction.date)).scalar() or date.today()
+    anchor = _latest_realized_activity_date(db) or date.today()
     keys = ("current", "previous1", "previous2", "previous3")
 
     if granularity == "yearly":
@@ -1616,10 +1618,9 @@ def analytics_recurring(
         db.query(Transaction, effective_merchant, effective_category)
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
-        .filter(Transaction.pending == False)  # noqa: E712
-        .filter(Transaction.amount > 0)
+        .filter(expense_amount() > 0)
     )
-    q = _apply_transfer_exclusion(q, include_transfers=False)
+    q = posted_activity(q, include_transfers=False)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1739,24 +1740,14 @@ def analytics_cashflow_sankey(
     are always excluded; refunds net against their expense category rather than
     counting as income (same rule as every other analytics endpoint)."""
     effective_category = _effective_category_expr().label("category")
-    income_expr = case(
-        (
-            (Transaction.amount < 0)
-            & or_(
-                TransactionAnnotation.refund_status.is_(None),
-                ~TransactionAnnotation.refund_status.in_(["confirmed", "likely"]),
-            ),
-            -Transaction.amount,
-        ),
-        else_=0,
-    )
-    expense_expr = _expense_value_case()
+    income_expr = income_amount()
+    expense_expr = expense_amount()
 
     q = (
         db.query(effective_category, func.sum(income_expr), func.sum(expense_expr))
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
-    q = _apply_transfer_exclusion(q, include_transfers=False)
+    q = posted_activity(q, include_transfers=False)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1825,7 +1816,7 @@ def analytics_category_movers(
     limit: int = Query(default=12, ge=1, le=50),
 ):
     """Top categories by absolute change in spend vs the previous month."""
-    anchor = month or _month_key(db.query(func.max(Transaction.date)).scalar() or date.today())
+    anchor = month or _month_key(_latest_realized_activity_date(db) or date.today())
     previous = _prev_month_key(anchor)
     cur_start, cur_end = _month_bounds(anchor)
     prev_start, prev_end = _month_bounds(previous)
@@ -1857,7 +1848,7 @@ def analytics_daily_spend(
     year: int | None = Query(default=None),
 ):
     """Daily expense totals for one calendar year (refund-netted, transfers excluded)."""
-    anchor_year = year or (db.query(func.max(Transaction.date)).scalar() or date.today()).year
+    anchor_year = year or (_latest_realized_activity_date(db) or date.today()).year
     start, end = date(anchor_year, 1, 1), date(anchor_year, 12, 31)
     by_day_of_year = _daily_expense(db, start, end, "%j")
 
