@@ -16,7 +16,7 @@ def _seed_item_and_account(item_id: str, account_id: str, name: str = "Checking"
         item = Item(plaid_item_id=item_id, access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id=account_id, item_id=item.id, name=name)
+        account = Account(plaid_account_id=account_id, item_id=item.id, name=name, currency="USD")
         db.add(account)
         db.flush()
         db.commit()

@@ -18,6 +18,7 @@ from app.models.models import (
     TransferPair,
 )
 from app.services.security import encrypt_token
+from app.services import transfer_detector
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.txn_fingerprint import compute_txn_hash
 
@@ -502,6 +503,23 @@ def test_historical_sync_adds_without_advancing_sync_state():
 def test_historical_counterpart_is_reconciliable_and_visible_without_rebuild():
     """New historical evidence is queried directly; it is not a report-cache rebuild."""
     class CounterpartHistoryClient(FakeHistoricalClient):
+        def get_accounts(self, _access_token):
+            return [
+                *super().get_accounts(_access_token),
+                {
+                    "account_id": "acct-card",
+                    "name": "Card",
+                    "official_name": None,
+                    "mask": "9876",
+                    "type": "credit",
+                    "subtype": "credit card",
+                    "current_balance": 50.0,
+                    "available_balance": None,
+                    "iso_currency_code": "USD",
+                    "limit": 1000.0,
+                },
+            ]
+
         def get_historical_transactions(self, _access_token, start_date, end_date):
             return [
                 {
@@ -521,7 +539,7 @@ def test_historical_counterpart_is_reconciliable_and_visible_without_rebuild():
         item = Item(plaid_item_id="item-history-counterpart", access_token_encrypted=encrypt_token("tok"), status="active")
         db.add(item)
         db.flush()
-        checking = Account(plaid_account_id="acct-100", item_id=item.id, name="Checking")
+        checking = Account(plaid_account_id="acct-100", item_id=item.id, name="Checking", currency="USD")
         db.add(checking)
         db.flush()
         db.add(Transaction(
@@ -804,3 +822,93 @@ def test_source_update_invalidates_derived_matches_but_keeps_notes():
         assert db.query(TransactionAnnotation).filter_by(transaction_id=tx.id).one().notes == "keep this note"
         refund = db.query(TransactionAnnotation).filter_by(transaction_id=counterparty.id).one()
         assert refund.refund_match_transaction_id is None
+
+
+def test_source_correction_unrejects_stale_evidence_and_redetects():
+    client = LifecycleClient({"added": [_lifecycle_record("out")], "next_cursor": "one"})
+    service = SyncService(client)
+    with SessionLocal() as db:
+        item = _lifecycle_item(db, "correction")
+        service.sync_item(db, item.id)
+        out = db.query(Transaction).filter_by(plaid_transaction_id="out").one()
+        counterparty_account = Account(
+            plaid_account_id="correction-counterparty", item_id=item.id,
+            name="Savings", type="depository", currency="USD",
+        )
+        db.add(counterparty_account)
+        db.flush()
+        inn = Transaction(
+            plaid_transaction_id="old-in", account_id=counterparty_account.id, item_id=item.id,
+            date=date(2026, 4, 13), amount=-out.amount, name="Old counterpart", pending=False,
+        )
+        db.add(inn)
+        db.flush()
+        candidate = transfer_detector.detect_candidates(db)[0]
+        transfer_detector.reject_pair(db, candidate.txn_out_id, candidate.txn_in_id)
+        db.delete(candidate)
+        db.commit()
+        assert db.query(RejectedTransferPair).count() == 1
+
+        # This is a material provider correction to the same transaction ID.
+        # Its old rejection is no longer evidence about the corrected record.
+        client.payload = {
+            "modified": [_lifecycle_record("out", date="2026-04-12")],
+            "next_cursor": "two",
+        }
+        result = service.sync_item(db, item.id)
+
+        assert result["modified"] == 1
+        assert db.query(RejectedTransferPair).count() == 0
+        pair = db.query(TransferPair).one()
+        assert (pair.txn_out_id, pair.txn_in_id, pair.confirmed) == (out.id, inn.id, False)
+
+
+def test_new_history_replaces_an_unconfirmed_auto_candidate():
+    class TwoAccountLifecycleClient(LifecycleClient):
+        def get_accounts(self, access_token):
+            return super().get_accounts(access_token) + [{
+                "account_id": "acct-200",
+                "name": "Savings",
+                "official_name": None,
+                "mask": "2222",
+                "type": "depository",
+                "subtype": "savings",
+                "current_balance": 500.0,
+                "available_balance": 500.0,
+                "iso_currency_code": "USD",
+                "limit": None,
+            }]
+
+    client = TwoAccountLifecycleClient({"added": [_lifecycle_record("out")], "next_cursor": "one"})
+    service = SyncService(client)
+    with SessionLocal() as db:
+        item = _lifecycle_item(db, "history")
+        service.sync_item(db, item.id)
+        out = db.query(Transaction).filter_by(plaid_transaction_id="out").one()
+        savings = db.query(Account).filter_by(plaid_account_id="acct-200").one()
+        old_in = Transaction(
+            plaid_transaction_id="old-in", account_id=savings.id, item_id=item.id,
+            date=date(2026, 4, 13), amount=-out.amount, name="Older counterpart", pending=False,
+        )
+        db.add(old_in)
+        db.commit()
+        assert transfer_detector.detect_candidates(db)[0].txn_in_id == old_in.id
+
+        # A newly imported counterpart is closer. Sync clears only automatic
+        # candidates and recomputes; it must not retain the older guess.
+        client.payload = {
+            "added": [_lifecycle_record(
+                "new-in", account_id="acct-200", amount=-25.31, date="2026-04-11",
+                name="New counterpart",
+            )],
+            "next_cursor": "two",
+        }
+        result = service.sync_item(db, item.id)
+
+        assert result["added"] == 1
+        pairs = db.query(TransferPair).all()
+        assert len(pairs) == 1
+        new_in = db.query(Transaction).filter_by(plaid_transaction_id="new-in").one()
+        assert (pairs[0].txn_out_id, pairs[0].txn_in_id, pairs[0].confirmed) == (
+            out.id, new_in.id, False,
+        )

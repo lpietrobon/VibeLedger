@@ -1913,7 +1913,7 @@ def _transfer_side(db: Session, txn_id: int) -> dict:
     txn = db.get(Transaction, txn_id)
     if not txn:
         return {"transaction_id": txn_id, "account_id": None, "account_name": None,
-                "account_type": None, "date": None, "name": None, "amount": None}
+                "account_type": None, "currency": None, "date": None, "name": None, "amount": None}
     account = db.get(Account, txn.account_id)
     account_name = None
     if account:
@@ -1925,6 +1925,7 @@ def _transfer_side(db: Session, txn_id: int) -> dict:
         "account_id": txn.account_id,
         "account_name": account_name,
         "account_type": account.type if account else None,
+        "currency": account.currency if account else None,
         "date": str(txn.date),
         "name": txn.name,
         "amount": round(float(txn.amount), 2) if txn.amount is not None else None,

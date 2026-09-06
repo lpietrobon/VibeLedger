@@ -22,7 +22,7 @@ from app.models.models import (
 from app.services.plaid_client import PlaidClient
 from app.services.refund_detector import classify_refunds
 from app.services.security import decrypt_token
-from app.services.transfer_detector import detect_candidates
+from app.services.transfer_detector import clear_auto_pairs, detect_candidates
 from app.services.txn_fingerprint import compute_txn_hash
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,11 @@ class SyncService:
 
         db.commit()
 
-        if added_count > 0:
+        if added_count or modified_count:
+            # Candidates are provisional evidence. Rebuild them whenever the
+            # source universe changes so later history can replace an earlier
+            # guess; confirmed/manual decisions and rejection memory remain.
+            clear_auto_pairs(db)
             new_pairs = detect_candidates(db)
             if new_pairs:
                 db.commit()
@@ -173,7 +177,8 @@ class SyncService:
 
         db.commit()
 
-        if added_count > 0:
+        if added_count or modified_count:
+            clear_auto_pairs(db)
             new_pairs = detect_candidates(db)
             if new_pairs:
                 db.commit()
@@ -204,6 +209,10 @@ class SyncService:
             elif existing.item_id != item_id:
                 raise ValueError("account belongs to a different linked item")
 
+            new_currency = a.get("iso_currency_code")
+            if existing.id and (existing.currency or "").upper() != (new_currency or "").upper():
+                self._clear_account_transfer_reconciliation(db, existing.id)
+
             existing.item_id = item_id
             existing.name = a.get("name") or existing.name
             existing.official_name = a.get("official_name")
@@ -212,7 +221,7 @@ class SyncService:
             existing.subtype = a.get("subtype")
             existing.current_balance = a.get("current_balance")
             existing.available_balance = a.get("available_balance")
-            existing.currency = a.get("iso_currency_code")
+            existing.currency = new_currency
             existing.credit_limit = a.get("limit")
 
             snap = (
@@ -336,6 +345,12 @@ class SyncService:
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id == txn_id, TransferPair.txn_in_id == txn_id)
         ).delete(synchronize_session=False)
+        # A rejection records the evidence available at that time. A material
+        # provider correction makes that evidence stale, so let the changed
+        # record be considered again; unchanged IDs stay durably rejected.
+        db.query(RejectedTransferPair).filter(
+            or_(RejectedTransferPair.txn_out_id == txn_id, RejectedTransferPair.txn_in_id == txn_id)
+        ).delete(synchronize_session=False)
         db.query(TransactionAnnotation).filter(
             TransactionAnnotation.refund_match_transaction_id == txn_id
         ).update(
@@ -345,6 +360,20 @@ class SyncService:
             },
             synchronize_session=False,
         )
+
+    def _clear_account_transfer_reconciliation(self, db: Session, account_id: int) -> None:
+        """Currency is transfer evidence too; a source currency change invalidates it."""
+        txn_ids = [
+            txn_id for (txn_id,) in db.query(Transaction.id).filter(Transaction.account_id == account_id)
+        ]
+        if not txn_ids:
+            return
+        db.query(TransferPair).filter(
+            or_(TransferPair.txn_out_id.in_(txn_ids), TransferPair.txn_in_id.in_(txn_ids))
+        ).delete(synchronize_session=False)
+        db.query(RejectedTransferPair).filter(
+            or_(RejectedTransferPair.txn_out_id.in_(txn_ids), RejectedTransferPair.txn_in_id.in_(txn_ids))
+        ).delete(synchronize_session=False)
 
     def _update_applied_fingerprint(self, db: Session, txn: Transaction) -> None:
         """Keep a saved manual correction attached through a provider update."""
