@@ -81,6 +81,11 @@ def _purge_orphan_transaction_rows(engine: Engine) -> None:
                 "DELETE FROM transfer_pairs WHERE txn_out_id NOT IN (SELECT id FROM transactions) "
                 "   OR txn_in_id NOT IN (SELECT id FROM transactions)"
             ))
+        if "rejected_transfer_pairs" in tables:
+            conn.execute(text(
+                "DELETE FROM rejected_transfer_pairs WHERE txn_out_id NOT IN (SELECT id FROM transactions) "
+                "   OR txn_in_id NOT IN (SELECT id FROM transactions)"
+            ))
         if "category_decision_events" in tables:
             conn.execute(text(
                 "DELETE FROM category_decision_events WHERE transaction_id NOT IN "

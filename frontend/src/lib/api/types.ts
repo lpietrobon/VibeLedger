@@ -56,6 +56,10 @@ export type AccountSummary = {
   liabilities: Money;
   net_worth: Money;
   groups: Record<string, Account[]>;
+  coverage: {
+    duplicate_account_coverage: "unverified";
+    history_coverage: "unverified";
+  };
 };
 
 export type Transaction = {

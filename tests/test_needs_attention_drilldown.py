@@ -28,6 +28,7 @@ from app.models.models import (
     Account,
     CategoryDecisionEvent,
     Item,
+    RejectedTransferPair,
     Transaction,
     TransactionAnnotation,
     TransferPair,
@@ -261,3 +262,32 @@ def test_schema_patches_purge_orphaned_rows():
         )
         assert refreshed.refund_match_transaction_id is None
         assert refreshed.refund_status is None
+
+
+def test_schema_patches_purge_orphaned_rejected_transfer_pairs():
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="orphan-rejection", access_token_encrypted=encrypt_token("t"))
+        db.add(item)
+        db.flush()
+        account = Account(plaid_account_id="orphan-rejection-account", item_id=item.id, name="Checking")
+        db.add(account)
+        db.flush()
+        doomed = Transaction(
+            plaid_transaction_id="orphan-rejection-doomed", account_id=account.id, item_id=item.id,
+            date=date(2026, 4, 1), amount=10, name="Out",
+        )
+        survivor = Transaction(
+            plaid_transaction_id="orphan-rejection-survivor", account_id=account.id, item_id=item.id,
+            date=date(2026, 4, 2), amount=-10, name="In",
+        )
+        db.add_all([doomed, survivor])
+        db.flush()
+        db.add(RejectedTransferPair(txn_out_id=doomed.id, txn_in_id=survivor.id))
+        db.commit()
+        db.delete(doomed)
+        db.commit()
+
+    apply_patches(engine)
+
+    with SessionLocal() as db:
+        assert db.query(RejectedTransferPair).count() == 0

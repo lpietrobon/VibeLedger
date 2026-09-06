@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applySuggestion,
   getCategoryCatalog,
+  getAccountsSummary,
   getOverviewSummary,
   getCumulativeSpending,
   getSpendingSummary,
@@ -53,6 +54,27 @@ describe("getOverviewSummary", () => {
     expect(s.previousMonthSpend).toBe(400);
     expect(s.needsAttention.unreviewedTransactions).toBe(5);
     expect(s.needsAttention.transferPairsPending).toBe(3);
+  });
+});
+
+describe("getAccountsSummary", () => {
+  it("preserves explicit account/history coverage metadata", async () => {
+    mockFetch({
+      assets: 1000,
+      liabilities: 200,
+      net_worth: 800,
+      groups: {},
+      coverage: {
+        duplicate_account_coverage: "unverified",
+        history_coverage: "unverified",
+      },
+    });
+
+    const summary = await getAccountsSummary();
+    expect(summary.coverage).toEqual({
+      duplicate_account_coverage: "unverified",
+      history_coverage: "unverified",
+    });
   });
 });
 

@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+from app.api.routes import cashflow_trend
 from app.core.time import utcnow
 from app.db.session import SessionLocal
 from app.models.models import (
@@ -496,6 +497,54 @@ def test_historical_sync_adds_without_advancing_sync_state():
         assert run.status == "success"
         assert run.is_historical is True
         assert run.added_count == 1
+
+
+def test_historical_counterpart_is_reconciliable_and_visible_without_rebuild():
+    """New historical evidence is queried directly; it is not a report-cache rebuild."""
+    class CounterpartHistoryClient(FakeHistoricalClient):
+        def get_historical_transactions(self, _access_token, start_date, end_date):
+            return [
+                {
+                    "transaction_id": "txn-historical-counterpart",
+                    "account_id": "acct-card",
+                    "date": "2026-04-11",
+                    "amount": -50.0,
+                    "name": "Card payment",
+                    "merchant_name": None,
+                    "plaid_category_primary": "TRANSFER",
+                    "pending": False,
+                }
+            ]
+
+    service = SyncService(client=CounterpartHistoryClient())
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-history-counterpart", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.flush()
+        checking = Account(plaid_account_id="acct-100", item_id=item.id, name="Checking")
+        db.add(checking)
+        db.flush()
+        db.add(Transaction(
+            plaid_transaction_id="txn-existing-outflow", account_id=checking.id, item_id=item.id,
+            date=date(2026, 4, 10), amount=50.0, name="Card payment", pending=False,
+        ))
+        db.commit()
+
+        before = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False)
+        assert before == [{"month": "2026-04", "expenses": 50.0, "income": 0.0, "net": -50.0}]
+
+        result = service.sync_item_historical(db, item.id, date(2026, 4, 1), date(2026, 4, 30))
+
+        assert result == {"status": "success", "added": 1, "modified": 0, "removed": 0}
+        pair = db.query(TransferPair).one()
+        assert (pair.txn_out_id, pair.confirmed) == (
+            db.query(Transaction).filter_by(plaid_transaction_id="txn-existing-outflow").one().id,
+            False,
+        )
+        # Candidates remain realized until confirmation, but the historical
+        # counterparty is immediately available to reports and reconciliation.
+        after = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False)
+        assert after == [{"month": "2026-04", "expenses": 50.0, "income": 50.0, "net": 0.0}]
 
 
 def test_historical_sync_rejects_concurrent_run():

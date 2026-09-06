@@ -26,6 +26,7 @@ from app.models.models import (
     CategoryRule,
     ConnectSession,
     Item,
+    RejectedTransferPair,
     RecurringOverride,
     SyncRun,
     SyncState,
@@ -379,6 +380,21 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id.in_(txn_ids), TransferPair.txn_in_id.in_(txn_ids))
         ).delete(synchronize_session=False)
+        db.query(RejectedTransferPair).filter(
+            or_(RejectedTransferPair.txn_out_id.in_(txn_ids), RejectedTransferPair.txn_in_id.in_(txn_ids))
+        ).delete(synchronize_session=False)
+        # Fingerprints intentionally survive item removal so a later relink can
+        # restore a user decision.  They must not remain marked as applied to
+        # the transaction row that is about to disappear.
+        db.query(AnnotationFingerprint).filter(
+            AnnotationFingerprint.applied_transaction_id.in_(txn_ids)
+        ).update(
+            {
+                AnnotationFingerprint.applied_transaction_id: None,
+                AnnotationFingerprint.applied_at: None,
+            },
+            synchronize_session=False,
+        )
         db.query(CategoryDecisionEvent).filter(CategoryDecisionEvent.transaction_id.in_(txn_ids)).delete(
             synchronize_session=False
         )
@@ -1364,6 +1380,13 @@ def accounts_summary(db: Session = Depends(get_db)):
         "liabilities": round(liabilities, 2),
         "net_worth": round(assets - liabilities, 2),
         "groups": by_type,
+        # Provider IDs are authoritative for a single link, but two provider
+        # IDs can still describe the same real-world account.  Do not guess
+        # from weak fields such as name or mask; make this uncertainty visible.
+        "coverage": {
+            "duplicate_account_coverage": "unverified",
+            "history_coverage": "unverified",
+        },
     }
 
 

@@ -66,6 +66,10 @@ def test_accounts_summary_groups_and_net_worth():
     assert data["liabilities"] == 300.0
     assert data["net_worth"] == 700.0
     assert set(data["groups"].keys()) == {"depository", "credit"}
+    assert data["coverage"] == {
+        "duplicate_account_coverage": "unverified",
+        "history_coverage": "unverified",
+    }
 
 
 def test_transfers_detect_and_list():
