@@ -16,7 +16,7 @@ def _seed_item_and_account(item_id: str, account_id: str, name: str = "Checking"
         item = Item(plaid_item_id=item_id, access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id=account_id, item_id=item.id, name=name, currency="USD")
+        account = Account(currency="USD", plaid_account_id=account_id, item_id=item.id, name=name)
         db.add(account)
         db.flush()
         db.commit()
@@ -171,10 +171,10 @@ def _seed_movers_ledger():
         _add_txn(account_id, item_id, d, amt, name, cat)
 
 
-def test_category_movers_defaults_to_latest_month():
+def test_category_movers_uses_reporting_month():
     _seed_movers_ledger()
     with TestClient(app) as client:
-        r = client.get("/analytics/category-movers", headers=AUTH_HEADERS)
+        r = client.get("/analytics/category-movers", params={"reporting_date": "2026-06-30"}, headers=AUTH_HEADERS)
     assert r.status_code == 200
     body = r.json()
     assert body["month"] == "2026-06"
@@ -191,7 +191,7 @@ def test_category_movers_defaults_to_latest_month():
 def test_category_movers_sorted_by_absolute_change_desc():
     _seed_movers_ledger()
     with TestClient(app) as client:
-        r = client.get("/analytics/category-movers", headers=AUTH_HEADERS)
+        r = client.get("/analytics/category-movers", params={"reporting_date": "2026-06-30"}, headers=AUTH_HEADERS)
     items = r.json()["items"]
     changes = [abs(row["change"]) for row in items]
     assert changes == sorted(changes, reverse=True)
@@ -201,7 +201,7 @@ def test_category_movers_sorted_by_absolute_change_desc():
 def test_category_movers_respects_limit():
     _seed_movers_ledger()
     with TestClient(app) as client:
-        r = client.get("/analytics/category-movers", params={"limit": 1}, headers=AUTH_HEADERS)
+        r = client.get("/analytics/category-movers", params={"limit": 1, "reporting_date": "2026-06-30"}, headers=AUTH_HEADERS)
     assert len(r.json()["items"]) == 1
 
 
@@ -311,7 +311,7 @@ def test_pending_rows_do_not_choose_or_contribute_to_analytics_periods():
 
     with TestClient(app) as client:
         daily = client.get("/analytics/daily-spend", headers=AUTH_HEADERS).json()
-        movers = client.get("/analytics/category-movers", headers=AUTH_HEADERS).json()
+        movers = client.get("/analytics/category-movers", params={"reporting_date": "2026-03-31"}, headers=AUTH_HEADERS).json()
         sankey = client.get("/analytics/cashflow-sankey", headers=AUTH_HEADERS).json()
 
     assert daily["year"] == 2026

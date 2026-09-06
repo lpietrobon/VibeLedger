@@ -27,7 +27,7 @@ def _seed_ledger():
         item = Item(plaid_item_id="i-analytics", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id="a-analytics", item_id=item.id, name="Checking")
+        account = Account(currency="USD", plaid_account_id="a-analytics", item_id=item.id, name="Checking")
         db.add(account)
         db.flush()
 
@@ -152,7 +152,7 @@ def test_posted_analytics_and_spend_drilldown_share_the_same_rows():
     with SessionLocal() as db:
         item = db.query(Item).filter_by(plaid_item_id="i-analytics").one()
         checking = db.query(Account).filter_by(plaid_account_id="a-analytics").one()
-        savings = Account(plaid_account_id="a-analytics-savings", item_id=item.id, name="Savings")
+        savings = Account(currency="USD", plaid_account_id="a-analytics-savings", item_id=item.id, name="Savings")
         db.add(savings)
         db.flush()
 
@@ -210,7 +210,7 @@ def test_category_spend_reflects_rule_apply_outcomes():
         item = Item(plaid_item_id="i-rule-analytics", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id="a-rule-analytics", item_id=item.id, name="Rewards Card")
+        account = Account(currency="USD", plaid_account_id="a-rule-analytics", item_id=item.id, name="Rewards Card")
         db.add(account)
         db.flush()
         db.add_all(

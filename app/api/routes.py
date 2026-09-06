@@ -53,11 +53,15 @@ from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
 from app.services.accounting import (
+    comparison_bounds,
+    comparison_reporting,
+    currency_reporting,
     exclude_confirmed_transfers,
     expense_amount,
     income_amount,
     is_refund,
     posted_activity,
+    reporting_scope,
 )
 from app.services.refund_detector import classify_refunds
 from app.services.category_catalog import merge_catalog
@@ -1280,6 +1284,7 @@ def monthly_spend(
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
 ):
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
     month_col = func.strftime("%Y-%m", Transaction.date).label("month")
     q = (
         db.query(
@@ -1304,6 +1309,7 @@ def category_spend(
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
 ):
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
     effective_category = _effective_category_expr().label("category")
     q = (
         db.query(
@@ -1328,6 +1334,7 @@ def cashflow_trend(
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
 ):
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
     month_col = func.strftime("%Y-%m", Transaction.date).label("month")
     q = (
         db.query(
@@ -1357,6 +1364,11 @@ def cashflow_trend(
 @router.get("/analytics/accounts-summary")
 def accounts_summary(db: Session = Depends(get_db)):
     accounts = db.query(Account).all()
+    reporting = currency_reporting(
+        a.currency.strip().upper() if a.currency and a.currency.strip() else None
+        for a in accounts if a.current_balance is not None
+        and a.type in {"depository", "credit", "loan"}
+    )
     by_type: dict[str, list[dict]] = {}
     for a in accounts:
         bal = float(a.current_balance) if a.current_balance is not None else 0.0
@@ -1376,6 +1388,7 @@ def accounts_summary(db: Session = Depends(get_db)):
     liabilities = sum(x["current_balance"] for x in by_type.get("credit", []))
     liabilities += sum(x["current_balance"] for x in by_type.get("loan", []))
     return {
+        "reporting": reporting,
         "assets": round(assets, 2),
         "liabilities": round(liabilities, 2),
         "net_worth": round(assets - liabilities, 2),
@@ -1447,17 +1460,17 @@ def _merge_comparison(current: dict[str, float], previous: dict[str, float]) -> 
 
 
 @router.get("/analytics/overview")
-def analytics_overview(db: Session = Depends(get_db)):
+def analytics_overview(db: Session = Depends(get_db), reporting_date: date | None = Query(default=None)):
     """One-shot summary for the mobile Overview screen (KPIs + needs-attention)."""
     accounts = accounts_summary(db)
-    cash = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False)
-    by_month = {row["month"]: row for row in cash}
-    latest = cash[-1]["month"] if cash else _month_key(date.today())
-    previous = _prev_month_key(latest)
-    cur = by_month.get(latest, {})
-    pre = by_month.get(previous, {})
-
-    as_of = db.query(func.max(Transaction.date)).scalar() or date.today()
+    as_of = reporting_date if isinstance(reporting_date, date) else date.today()
+    bounds = comparison_bounds(as_of)
+    start, end, previous_start, previous_end = bounds
+    reporting = comparison_reporting(db, bounds)
+    current_rows = cashflow_trend(db, start, end, include_transfers=False)
+    prior_rows = cashflow_trend(db, previous_start, previous_end, include_transfers=False)
+    cur = current_rows[0] if current_rows else {}
+    pre = prior_rows[0] if prior_rows else {}
 
     # Counted over transactions, not annotations: an annotation whose transaction
     # is gone is invisible everywhere else, so counting it here would advertise
@@ -1493,6 +1506,8 @@ def analytics_overview(db: Session = Depends(get_db)):
     ) or 0
 
     return {
+        "reporting": reporting,
+        "balance_reporting": accounts["reporting"],
         "as_of_date": str(as_of),
         "net_worth": accounts["net_worth"],
         "assets": accounts["assets"],
@@ -1516,47 +1531,37 @@ def analytics_overview(db: Session = Depends(get_db)):
 def analytics_spending_summary(
     db: Session = Depends(get_db),
     granularity: str = Query(default="monthly"),
+    reporting_date: date | None = Query(default=None),
 ):
     """Period spend total, comparison, projection, top driver, and per-category diff."""
-    monthly = monthly_spend(db, start_date=None, end_date=None, include_transfers=False)
-    spend_by_month = {r["month"]: r["spend"] for r in monthly}
-    latest = monthly[-1]["month"] if monthly else _month_key(date.today())
-
-    if granularity == "yearly":
-        year = int(latest.split("-")[0])
-        prev_year = year - 1
-        total = round(sum(v for m, v in spend_by_month.items() if m.startswith(f"{year}-")), 2)
-        previous_total = round(
-            sum(v for m, v in spend_by_month.items() if m.startswith(f"{prev_year}-")), 2
-        )
-        months_with_data = sum(1 for m in spend_by_month if m.startswith(f"{year}-"))
-        projection = round(total / months_with_data * 12, 2) if months_with_data else 0.0
-        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, date(year, 1, 1), date(year, 12, 31), include_transfers=False)}
-        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, date(prev_year, 1, 1), date(prev_year, 12, 31), include_transfers=False)}
-        period_label = f"{year} YTD"
-    else:
-        previous = _prev_month_key(latest)
-        total = round(spend_by_month.get(latest, 0.0), 2)
-        previous_total = round(spend_by_month.get(previous, 0.0), 2)
-        projection = _project_month(latest, total)
-        cur_start, cur_end = _month_bounds(latest)
-        prev_start, prev_end = _month_bounds(previous)
-        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
-        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
-        period_label = _month_label(latest)
+    as_of = reporting_date if isinstance(reporting_date, date) else date.today()
+    bounds = comparison_bounds(as_of, granularity)
+    cur_start, cur_end, prev_start, prev_end = bounds
+    reporting = comparison_reporting(db, bounds)
+    cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
+    prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
+    total = round(sum(cur_cats.values()), 2)
+    previous_total = round(sum(prev_cats.values()), 2)
+    elapsed_days = (cur_end - cur_start).days + 1
+    full_end = date(as_of.year, 12, 31) if granularity == "yearly" else _month_bounds(_month_key(as_of))[1]
+    full_days = (full_end - cur_start).days + 1
+    projection = round(total / elapsed_days * full_days, 2)
+    period_label = f"{as_of.year} YTD through {as_of.isoformat()}" if granularity == "yearly" else f"{_month_label(_month_key(as_of))} through {as_of.isoformat()}"
+    reporting["projection_qualification"] = "Straight-line estimate from recorded activity, not observed spend; coverage is unverified."
 
     comparison = _merge_comparison(cur_cats, prev_cats)
     top_driver = None
-    if comparison:
+    if comparison and reporting["comparison_available"]:
         top = comparison[0]
         top_driver = {"category": top["category"], "amount": round(top["current"] - top["previous"], 2)}
-    change_pct = round((total - previous_total) / previous_total * 100, 2) if previous_total else None
+    change_pct = round((total - previous_total) / abs(previous_total) * 100, 2) if previous_total and reporting["comparison_available"] else None
 
     return {
+        "reporting": reporting,
         "period_label": period_label,
         "total": total,
         "previous_total": previous_total,
-        "change": round(total - previous_total, 2),
+        "change": round(total - previous_total, 2) if reporting["comparison_available"] else None,
         "change_pct": change_pct,
         "projection": projection,
         "top_driver": top_driver,
@@ -1566,6 +1571,7 @@ def analytics_spending_summary(
 
 def _daily_expense(db: Session, start: date, end: date, bucket: str) -> dict[int, float]:
     """Sum expense per day-of-month ('%d') or per month-of-year ('%m') in [start, end]."""
+    reporting_scope(db, start, end)
     bucket_col = func.strftime(bucket, Transaction.date)
     q = db.query(bucket_col, func.sum(_expense_value_case())).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
@@ -1593,15 +1599,16 @@ def _cumulative(daily: dict[int, float], length: int) -> list[float | None]:
 def analytics_cumulative_spend(
     db: Session = Depends(get_db),
     granularity: str = Query(default="monthly"),
+    reporting_date: date | None = Query(default=None),
 ):
     """Cumulative spend pace for the current period vs the prior three."""
-    anchor = _latest_realized_activity_date(db) or date.today()
+    anchor = reporting_date if isinstance(reporting_date, date) else date.today()
     keys = ("current", "previous1", "previous2", "previous3")
 
     if granularity == "yearly":
         years = [anchor.year - i for i in range(4)]
         series = [
-            _cumulative(_daily_expense(db, date(y, 1, 1), date(y, 12, 31), "%m"), 12)
+            _cumulative(_daily_expense(db, date(y, 1, 1), anchor if y == anchor.year else date(y, 12, 31), "%m"), 12)
             for y in years
         ]
         length = 12
@@ -1614,6 +1621,8 @@ def analytics_cumulative_spend(
         series = []
         for mkey in months:
             start, end = _month_bounds(mkey)
+            if mkey == anchor_month:
+                end = anchor
             series.append(_cumulative(_daily_expense(db, start, end, "%d"), length))
 
     return [
@@ -1635,6 +1644,7 @@ def analytics_recurring(
     Transfers and refunds are excluded (only positive expense-side transactions
     are considered). Detection is deterministic — see
     app/services/recurring_detector.py."""
+    reporting = reporting_scope(db, start_date, end_date, expense_only=True)
     effective_merchant = _effective_merchant_expr()
     effective_category = _effective_category_expr()
     q = (
@@ -1714,6 +1724,7 @@ def analytics_recurring(
     ]
     return {
         "items": items,
+        "reporting": reporting,
         "summary": {
             "count": len(items),
             "active_count": active_count,
@@ -1762,6 +1773,7 @@ def analytics_cashflow_sankey(
     Buckets are the part of the effective category before the first '/'. Transfers
     are always excluded; refunds net against their expense category rather than
     counting as income (same rule as every other analytics endpoint)."""
+    reporting = reporting_scope(db, start_date, end_date)
     effective_category = _effective_category_expr().label("category")
     income_expr = income_amount()
     expense_expr = expense_amount()
@@ -1796,8 +1808,11 @@ def analytics_cashflow_sankey(
             if expense_total > 0:
                 bucket_categories.setdefault(bucket, {})[category] = expense_total
 
-    bucket_totals = {b: a for b, a in bucket_totals.items() if a > 0}
     total_spend = sum(bucket_totals.values())
+    negative_categories = [
+        {"category": category, "amount": round(float(expense_total), 2)}
+        for category, _, expense_total in rows if expense_total is not None and expense_total < 0
+    ]
     savings = max(income - total_spend, 0.0)
     deficit = max(total_spend - income, 0.0)
 
@@ -1823,6 +1838,10 @@ def analytics_cashflow_sankey(
     ]
 
     return {
+        "reporting": reporting,
+        "negative_categories": negative_categories,
+        "sankey_supported": not negative_categories,
+        "visualization_qualification": "Use signed category detail when refunds produce negative categories; a positive-width Sankey cannot represent them faithfully." if negative_categories else None,
         "income": round(income, 2),
         "total_spend": round(total_spend, 2),
         "savings": round(savings, 2),
@@ -1835,14 +1854,22 @@ def analytics_cashflow_sankey(
 @router.get("/analytics/category-movers")
 def analytics_category_movers(
     db: Session = Depends(get_db),
-    month: str | None = Query(default=None, description="YYYY-MM anchor month; defaults to the latest transaction month"),
+    month: str | None = Query(default=None, description="YYYY-MM historical month; defaults to current month-to-date"),
     limit: int = Query(default=12, ge=1, le=50),
+    reporting_date: date | None = Query(default=None),
 ):
     """Top categories by absolute change in spend vs the previous month."""
-    anchor = month or _month_key(_latest_realized_activity_date(db) or date.today())
+    as_of = reporting_date if isinstance(reporting_date, date) else date.today()
+    if isinstance(month, str):
+        try:
+            as_of = _month_bounds(month)[1]
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+    anchor = _month_key(as_of)
     previous = _prev_month_key(anchor)
-    cur_start, cur_end = _month_bounds(anchor)
-    prev_start, prev_end = _month_bounds(previous)
+    bounds = comparison_bounds(as_of)
+    cur_start, cur_end, prev_start, prev_end = bounds
+    reporting = comparison_reporting(db, bounds)
     current = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
     previous_totals = {
         r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)
@@ -1859,6 +1886,7 @@ def analytics_category_movers(
     ]
     rows.sort(key=lambda r: abs(r["change"]), reverse=True)
     return {
+        "reporting": reporting,
         "month": anchor,
         "previous_month": previous,
         "items": rows[:limit],
@@ -1887,7 +1915,8 @@ def analytics_daily_spend(
         reverse=True,
     )
 
-    return {"year": anchor_year, "available_years": available_years, "days": days}
+    return {"year": anchor_year, "available_years": available_years, "days": days,
+            "reporting": reporting_scope(db, start, end)}
 
 
 @router.post("/transfers/detect")

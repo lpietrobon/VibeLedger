@@ -190,6 +190,12 @@ def apply_patches(engine: Engine) -> None:
     # Plaid->friendly category CASE is generated from the shared PLAID_FRIENDLY_MAP
     # (app/services/category_resolver.py) so the view and the API agree.
     from app.services.category_resolver import PLAID_DETAILED_FRIENDLY_MAP, PLAID_FRIENDLY_MAP
+    from app.services.accounting import currency_expression
+    from app.models.models import Account, Transaction
+
+    currency_sql = str(currency_expression(
+        Transaction.__table__.alias("t").c, Account.__table__.alias("a").c
+    ).compile(dialect=engine.dialect, compile_kwargs={"literal_binds": True}))
 
     friendly_when = "".join(
         f"WHEN '{plaid}' THEN '{friendly}' " for plaid, friendly in PLAID_FRIENDLY_MAP.items()
@@ -210,6 +216,7 @@ def apply_patches(engine: Engine) -> None:
                 t.item_id,
                 t.date,
                 t.amount,
+                {currency_sql} AS currency,
                 t.name,
                 t.merchant_name,
                 t.pending,
