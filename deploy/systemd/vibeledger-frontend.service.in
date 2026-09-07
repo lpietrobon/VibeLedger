@@ -1,0 +1,14 @@
+[Unit]
+Description=VibeLedger React frontend edge
+After=vibeledger.service
+
+[Service]
+WorkingDirectory=@REPO_ROOT@/frontend
+EnvironmentFile=@ENV_FILE@
+Environment=FRONTEND_HOST=127.0.0.1
+ExecStart=/usr/bin/npm run preview
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

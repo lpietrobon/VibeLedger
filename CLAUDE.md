@@ -32,28 +32,32 @@ pip install -e '.[dev,dashboard]'
 
 ## Running the app
 
-**Do not run uvicorn/streamlit manually** (`nohup`+`&` won't survive agent exec boundaries). Two systemd **user** services do this, with lingering enabled so they survive reboot/logout:
+**Do not run uvicorn/streamlit manually** (`nohup`+`&` won't survive agent exec boundaries). Three systemd **user** services do this, with lingering enabled so they survive reboot/logout:
 
 | Service | Port | What | URL |
 |---|---|---|---|
-| `vibeledger.service` | 8000 | FastAPI (`--reload`, `--root-path /vibeledger`) | `/vibeledger/` |
+| `vibeledger.service` | 8000 | FastAPI (`--root-path /vibeledger`) | `/vibeledger/` |
 | `vibeledger-dash.service` | 8501 | Streamlit dashboard | `/vibeledger/dash/` |
+| `vibeledger-frontend.service` | 5173 | React edge + API proxy | `/vibeledger/frontend/` |
 
 - **First action for agents:** `curl http://127.0.0.1:8000/health` and `curl http://127.0.0.1:8501/vibeledger/dash/_stcore/health` — both services are normally already up. Only restart on failure.
-- Restart after code changes: `systemctl --user restart vibeledger` (app/.env) or `vibeledger-dash` (dashboard files).
+- Deploy code with `scripts/deploy.sh <branch-or-sha>`; it rebuilds and restarts
+  API, dashboard, and frontend together, then runs `scripts/deploy_doctor.py`.
+  Do not declare deployment complete after restarting only one service.
+- `APP_BASE_URL` is the full browser-visible URL. It must include a non-default
+  Tailscale Serve port (for example `:8444`) and the `/vibeledger` prefix.
+- Host-specific Serve routes and secrets remain local; see `docs/deployment.md`.
 - Logs: `journalctl --user -u vibeledger -n 100` (also `/tmp/vibeledger.log`); same pattern for `-dash`.
 - **Never `pkill -f uvicorn/streamlit`** — use `systemctl --user restart <service>`.
 - Edited a unit file? `systemctl --user daemon-reload` first.
 - Requires `.env` (see `.env.example`); app refuses to start without `TOKEN_ENCRYPTION_KEY` (Fernet) and `VIBELEDGER_API_TOKEN`.
 
-**Tailnet access** (already configured, persists across reboots — don't re-run unless routes are removed):
-```bash
-sudo tailscale serve --bg --set-path /vibeledger http://127.0.0.1:8000
-sudo tailscale serve --bg --set-path /vibeledger/dash http://127.0.0.1:8501/vibeledger/dash
-```
-- `https://contabo.tail6fb821.ts.net/vibeledger/` → API, `.../vibeledger/dash/` → dashboard.
-- The dashboard target URL repeats `/vibeledger/dash` because `--set-path` strips that prefix before proxying, and Streamlit's `--server.baseUrlPath` expects it back. The API doesn't need this trick (uvicorn `--root-path` accepts a stripped prefix).
-- `.env`'s `APP_BASE_URL` must be exactly `https://contabo.tail6fb821.ts.net/vibeledger` (no trailing slash) — used to build Plaid Link `connect_url`.
+**Tailnet access:** Serve routes are host-owned and persist across reboots. Do not
+rewrite them as part of an application deploy. The `/vibeledger` route must target
+the frontend edge at `http://127.0.0.1:5173/vibeledger`; that process serves React
+and proxies API/Connect traffic. The optional `/vibeledger/dash` route targets
+`http://127.0.0.1:8501/vibeledger/dash`. Run `scripts/deploy_doctor.py` to prove
+the authority (including a non-default HTTPS port), path, services, and endpoints.
 
 **Troubleshooting:**
 - `502 Bad Gateway` → nothing listening on `127.0.0.1:8000`; check `systemctl --user status vibeledger` / journal.
