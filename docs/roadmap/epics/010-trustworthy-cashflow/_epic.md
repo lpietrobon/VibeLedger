@@ -4,7 +4,7 @@ title: Trustworthy cashflow across linked accounts
 status: in-progress
 owner: null
 created: 2026-09-02
-revision: 1
+revision: 2
 ---
 
 ## Goal
@@ -56,6 +56,10 @@ CF-01 and CF-02 are accepted. Application implementation remains unaccepted; CF-
   creation of this roadmap.
 
 ## Revision Log
+
+- rev 2 (2026-09-07): Add CF-14 so refund-heavy periods retain a truthful,
+  usable cashflow allocation. Residual category credits are shown as Net refund
+  credits, separate from income; CF-11 must verify the revised experience.
 
 - rev 1 (2026-09-02): Pause the broader finance-intelligence feature backlog and
   establish a hardening epic around trustworthy existing cashflow reporting.
