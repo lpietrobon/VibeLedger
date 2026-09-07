@@ -58,12 +58,21 @@ spend["bucket"] = (
 spend["category"] = spend["effective_category"].fillna("Uncategorized").astype(str).str.strip()
 spend.loc[spend["category"] == "", "category"] = "Uncategorized"
 bucket_totals = spend.groupby("bucket")["amount"].sum().sort_values(ascending=False)
-bucket_totals = bucket_totals[bucket_totals > 0]
 category_totals = (
     spend.groupby(["bucket", "category"], as_index=False)["amount"]
     .sum()
     .sort_values(["bucket", "amount"], ascending=[True, False])
 )
+total_spend = float(cashflow["expense"].sum())
+# A Sankey has non-negative link widths. Do not silently drop refund credits
+# just to make it render: the Spending view is the faithful signed breakdown.
+if (category_totals["amount"] < 0).any():
+    st.info(
+        f"Net spending is ${total_spend:,.2f}. Refund credits exceed charges in at least one category; "
+        "use Spending or Cashflow because this diagram cannot display negative categories faithfully."
+    )
+    st.stop()
+bucket_totals = bucket_totals[bucket_totals > 0]
 category_totals = category_totals[
     category_totals["bucket"].isin(bucket_totals.index) & (category_totals["amount"] > 0)
 ]
@@ -89,7 +98,6 @@ visible_category_totals = (
     else category_totals.iloc[0:0]
 )
 visible_income_totals = income_totals if selected_bucket == "Income sources" else income_totals.iloc[0:0]
-total_spend = float(bucket_totals.sum())
 savings = max(income - total_spend, 0.0)
 deficit = max(total_spend - income, 0.0)
 

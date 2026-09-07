@@ -1,7 +1,31 @@
 export type Money = number;
 
+export type ReportingScope = {
+  currency: string | null;
+  currencyStatus: "empty" | "unknown" | "mixed" | "single";
+  currencies: string[];
+  historyCoverage: "unverified";
+  duplicateAccountCoverage: "unverified";
+  qualification: string;
+  startDate: string | null;
+  endDate: string | null;
+  recordedRowCount: number;
+  firstRecordedDate: string | null;
+  lastRecordedDate: string | null;
+};
+
+export type ComparisonReporting = ReportingScope & {
+  reportingDate: string;
+  currentPeriod: ReportingScope;
+  previousPeriod: ReportingScope;
+  comparisonAvailable: boolean;
+  comparisonQualification: string;
+  projectionQualification?: string;
+};
+
 export type OverviewSummary = {
   asOfDate: string;
+  reporting: ComparisonReporting;
   netWorth: Money;
   assets: Money;
   liabilities: Money;
@@ -99,10 +123,11 @@ export type TransactionsResponse = {
 };
 
 export type SpendingSummary = {
+  reporting: ComparisonReporting;
   periodLabel: string;
   total: Money;
   previousTotal: Money;
-  change: Money;
+  change: Money | null;
   changePct: number | null;
   projection: Money;
   topDriver: {
@@ -239,6 +264,9 @@ export type SankeyBucket = {
 };
 
 export type CashflowSankey = {
+  sankeySupported: boolean;
+  visualizationQualification: string | null;
+  negativeCategories: SankeyFlow[];
   income: Money;
   totalSpend: Money;
   savings: Money;

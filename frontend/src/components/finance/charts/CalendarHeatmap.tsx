@@ -34,7 +34,7 @@ export default function CalendarHeatmap({ year, days }: { year: number; days: Da
     const firstWeekday = (firstDay.getUTCDay() + 6) % 7; // Monday = 0
     const weekZero = new Date(firstDay);
     weekZero.setUTCDate(weekZero.getUTCDate() - firstWeekday);
-    const weekIndex = (d: Date) => Math.round((d.getTime() - weekZero.getTime()) / (7 * 86400000));
+    const weekIndex = (d: Date) => Math.floor((d.getTime() - weekZero.getTime()) / (7 * 86400000));
 
     let max = 0;
     for (const d of days) max = Math.max(max, d.amount);

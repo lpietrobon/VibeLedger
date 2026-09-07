@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SearchBar } from "@/components/finance/SearchBar";
 import { AppShell } from "@/components/layout/AppShell";
 import { Section } from "@/components/finance/Section";
@@ -18,6 +18,7 @@ import {
 } from "@/lib/api/client";
 import type { Transaction } from "@/lib/api/types";
 import { formatCurrency } from "@/lib/format";
+import { invalidateLedger } from "@/lib/api/cache";
 
 const CumulativeChart = lazy(() => import("@/components/finance/charts/CumulativeChart"));
 
@@ -36,14 +37,14 @@ function activePeriodBounds(granularity: "monthly" | "yearly") {
   if (granularity === "yearly") {
     return { startDate: `${year}-01-01`, endDate: `${year}-${month}-${day}` };
   }
-  const end = new Date(year, today.getMonth() + 1, 0);
   return {
     startDate: `${year}-${month}-01`,
-    endDate: `${year}-${month}-${String(end.getDate()).padStart(2, "0")}`,
+    endDate: `${year}-${month}-${day}`,
   };
 }
 
 export default function SpendingPage() {
+  const queryClient = useQueryClient();
   const [granularity, setGranularity] = useState<"monthly" | "yearly">("monthly");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
@@ -57,21 +58,33 @@ export default function SpendingPage() {
     queryKey: ["cumulative", granularity],
     queryFn: () => getCumulativeSpending({ granularity }),
   });
-  const comparison = useQuery({ queryKey: ["comparison"], queryFn: getCategoryComparison });
-  const tx = useQuery({
-    queryKey: ["tx", query, category],
-    queryFn: () => getTransactions({ query, category, limit: 30 }),
+  const comparison = useQuery({
+    queryKey: ["comparison", granularity],
+    queryFn: () => getCategoryComparison(granularity),
   });
-
   const s = summary.data;
-  const periodBounds = activePeriodBounds(granularity);
+  const periodBounds = s
+    ? { startDate: s.reporting.currentPeriod.startDate ?? activePeriodBounds(granularity).startDate,
+        endDate: s.reporting.currentPeriod.endDate ?? activePeriodBounds(granularity).endDate }
+    : activePeriodBounds(granularity);
+  const tx = useQuery({
+    queryKey: ["tx", query, category, periodBounds.startDate, periodBounds.endDate],
+    queryFn: () => getTransactions({
+      query: query ? `is:spend ${query}` : "is:spend",
+      category,
+      startDate: periodBounds.startDate,
+      endDate: periodBounds.endDate,
+      limit: 30,
+    }),
+    enabled: Boolean(s),
+  });
 
   const handleSave = async (
     id: number,
     payload: Parameters<typeof patchTransactionAnnotation>[1],
   ) => {
     await patchTransactionAnnotation(id, payload);
-    tx.refetch();
+    await invalidateLedger(queryClient);
   };
 
   return (
@@ -112,10 +125,14 @@ export default function SpendingPage() {
               sublabel={s.periodLabel}
             />
             <KpiCard
-              label="vs previous"
-              value={formatCurrency(s.change, { sign: true, compact: true })}
-              sublabel={formatCurrency(s.previousTotal, { compact: true }) + " prior"}
-              delta={<Delta current={s.total} previous={s.previousTotal} goodDirection="down" />}
+              label="vs comparable prior period"
+              value={s.reporting.comparisonAvailable && s.change !== null
+                ? formatCurrency(s.change, { sign: true, compact: true })
+                : "—"}
+              sublabel={s.reporting.comparisonAvailable
+                ? formatCurrency(s.previousTotal, { compact: true }) + " prior"
+                : "No comparable recorded prior period"}
+              delta={s.reporting.comparisonAvailable ? <Delta current={s.total} previous={s.previousTotal} goodDirection="down" /> : undefined}
             />
             <KpiCard
               label="Projected"
@@ -141,6 +158,14 @@ export default function SpendingPage() {
         )}
       </div>
 
+      {summary.isError ? (
+        <p role="alert" className="mt-3 text-sm text-red-600">Could not load spending: {summary.error.message}</p>
+      ) : s ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {s.reporting.comparisonQualification} {s.reporting.projectionQualification}
+        </p>
+      ) : null}
+
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Section title="Cumulative spend pace vs last 3 periods">
           <div className="h-64">
@@ -155,12 +180,17 @@ export default function SpendingPage() {
         </Section>
 
         <Section title="Category change · current vs previous">
-          {comparison.data ? (
+          {comparison.isError ? (
+            <p role="alert" className="grid h-40 place-items-center text-sm text-red-600">Could not load category comparison: {comparison.error.message}</p>
+          ) : comparison.data ? (
             <CategoryComparison
               data={comparison.data}
+              currentLabel={granularity === "yearly" ? "This year to date" : "This month to date"}
+              previousLabel="Prior comparable period"
               getCategoryHref={(categoryName) =>
                 appHref("/transactions", {
                   category: categoryName,
+                  query: "is:spend",
                   startDate: periodBounds.startDate,
                   endDate: periodBounds.endDate,
                   sort: "date",
@@ -174,7 +204,12 @@ export default function SpendingPage() {
         </Section>
       </div>
 
-      <Section title="Transactions" className="mt-4">
+      <Section title="Spending transactions" className="mt-4">
+        {tx.data ? (
+          <p className="mb-2 text-xs text-muted-foreground">
+            Showing {tx.data.items.length} of {tx.data.total} posted spending transactions in this period.
+          </p>
+        ) : null}
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <SearchBar value={query} onChange={setQuery} placeholder="Search merchant, category…" />
           <select
@@ -190,7 +225,9 @@ export default function SpendingPage() {
             ))}
           </select>
         </div>
-        {tx.data ? (
+        {tx.isError ? (
+          <p role="alert" className="grid h-24 place-items-center text-sm text-red-600">Could not load spending transactions: {tx.error.message}</p>
+        ) : tx.data ? (
           tx.data.items.length ? (
             <div className="-mx-4 -mb-4">
               {tx.data.items.map((t) => (

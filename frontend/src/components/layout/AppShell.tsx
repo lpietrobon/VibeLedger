@@ -8,6 +8,9 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { syncAllAccounts } from "@/lib/api/client";
+import { invalidateLedger } from "@/lib/api/cache";
 
 const NAV = [
   { to: "/", label: "Overview", short: "Overview", icon: LayoutDashboard },
@@ -25,6 +28,11 @@ function appHref(path: string) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+  const sync = useMutation({
+    mutationFn: syncAllAccounts,
+    onSuccess: () => invalidateLedger(queryClient),
+  });
   let pathname = window.location.pathname;
   if (basePath && pathname.startsWith(basePath)) {
     pathname = pathname.slice(basePath.length) || "/";
@@ -67,15 +75,24 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
-            <span className="hidden text-xs text-muted-foreground sm:inline">
-              Synced 2m ago
+            <span className="hidden text-xs text-muted-foreground sm:inline" role="status" aria-live="polite">
+              {sync.isPending
+                ? "Fetching latest data…"
+                : sync.isSuccess
+                  ? sync.data.summary
+                  : sync.isError
+                    ? `Sync failed: ${sync.error.message}`
+                    : "Fetch latest data"}
             </span>
             <button
               type="button"
+              onClick={() => sync.mutate()}
+              disabled={sync.isPending}
               className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
-              aria-label="Sync"
+              aria-label={sync.isPending ? "Fetching latest data" : "Fetch latest data"}
+              title={sync.isError ? `Sync failed: ${sync.error.message}` : "Fetch latest data"}
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className={`h-4 w-4 ${sync.isPending ? "animate-spin" : ""}`} />
             </button>
           </div>
         </div>

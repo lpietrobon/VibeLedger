@@ -18,6 +18,8 @@ import type {
   CashflowSankey,
   CategoryMovers,
   DailySpend,
+  ComparisonReporting,
+  ReportingScope,
 } from "./types";
 import { CATEGORY_COLORS } from "./theme";
 
@@ -62,6 +64,7 @@ function apiOrigin() {
 // --- Analytics (all computed server-side; the client only fetches + maps) ---
 
 type OverviewResponse = {
+  reporting: ReportingResponse;
   as_of_date: string;
   net_worth: number;
   assets: number;
@@ -80,10 +83,62 @@ type OverviewResponse = {
   };
 };
 
+type ReportingScopeResponse = {
+  currency: string | null;
+  currency_status: "empty" | "unknown" | "mixed" | "single";
+  currencies: string[];
+  history_coverage: "unverified";
+  duplicate_account_coverage: "unverified";
+  qualification: string;
+  start_date: string | null;
+  end_date: string | null;
+  recorded_row_count: number;
+  first_recorded_date: string | null;
+  last_recorded_date: string | null;
+};
+
+type ReportingResponse = ReportingScopeResponse & {
+  reporting_date: string;
+  current_period: ReportingScopeResponse;
+  previous_period: ReportingScopeResponse;
+  comparison_available: boolean;
+  comparison_qualification: string;
+  projection_qualification?: string;
+};
+
+function mapReportingScope(r: ReportingScopeResponse): ReportingScope {
+  return {
+    currency: r.currency,
+    currencyStatus: r.currency_status,
+    currencies: r.currencies,
+    historyCoverage: r.history_coverage,
+    duplicateAccountCoverage: r.duplicate_account_coverage,
+    qualification: r.qualification,
+    startDate: r.start_date,
+    endDate: r.end_date,
+    recordedRowCount: r.recorded_row_count,
+    firstRecordedDate: r.first_recorded_date,
+    lastRecordedDate: r.last_recorded_date,
+  };
+}
+
+function mapReporting(r: ReportingResponse): ComparisonReporting {
+  return {
+    ...mapReportingScope(r),
+    reportingDate: r.reporting_date,
+    currentPeriod: mapReportingScope(r.current_period),
+    previousPeriod: mapReportingScope(r.previous_period),
+    comparisonAvailable: r.comparison_available,
+    comparisonQualification: r.comparison_qualification,
+    projectionQualification: r.projection_qualification,
+  };
+}
+
 export async function getOverviewSummary(): Promise<OverviewSummary> {
   const r = await jsonFetch<OverviewResponse>("/analytics/overview");
   return {
     asOfDate: r.as_of_date,
+    reporting: mapReporting(r.reporting),
     netWorth: r.net_worth,
     assets: r.assets,
     liabilities: r.liabilities,
@@ -129,6 +184,7 @@ export async function getCategorySpend(params?: {
 }
 
 type SpendingSummaryResponse = {
+  reporting: ReportingResponse;
   period_label: string;
   total: number;
   previous_total: number;
@@ -148,6 +204,7 @@ export async function getSpendingSummary(params?: {
 }): Promise<SpendingSummary> {
   const r = await fetchSpendingSummary(params?.granularity ?? "monthly");
   return {
+    reporting: mapReporting(r.reporting),
     periodLabel: r.period_label,
     total: r.total,
     previousTotal: r.previous_total,
@@ -158,8 +215,10 @@ export async function getSpendingSummary(params?: {
   };
 }
 
-export async function getCategoryComparison(): Promise<CategoryComparisonPoint[]> {
-  const r = await fetchSpendingSummary("monthly");
+export async function getCategoryComparison(
+  granularity: "monthly" | "yearly" = "monthly",
+): Promise<CategoryComparisonPoint[]> {
+  const r = await fetchSpendingSummary(granularity);
   return r.category_comparison.slice().sort((a, b) => b.current - a.current);
 }
 
@@ -179,6 +238,9 @@ export async function getCumulativeSpending(params?: {
 }
 
 type SankeyResponse = {
+  sankey_supported: boolean;
+  visualization_qualification: string | null;
+  negative_categories: { category: string; amount: number }[];
   income: number;
   total_spend: number;
   savings: number;
@@ -196,6 +258,9 @@ export async function getCashflowSankey(params?: {
     end_date: params?.endDate,
   });
   return {
+    sankeySupported: r.sankey_supported,
+    visualizationQualification: r.visualization_qualification,
+    negativeCategories: r.negative_categories,
     income: r.income,
     totalSpend: r.total_spend,
     savings: r.savings,

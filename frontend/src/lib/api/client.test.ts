@@ -5,6 +5,7 @@ import {
   getAccountsSummary,
   getOverviewSummary,
   getCumulativeSpending,
+  getCategoryComparison,
   getSpendingSummary,
   getTransactions,
 } from "./client";
@@ -24,11 +25,36 @@ function mockFetch(payload: unknown) {
   return fetchMock as unknown as ReturnType<typeof vi.fn>;
 }
 
+function reportingPayload() {
+  const scope = {
+    currency: "USD",
+    currency_status: "single",
+    currencies: ["USD"],
+    history_coverage: "unverified",
+    duplicate_account_coverage: "unverified",
+    qualification: "Recorded activity only.",
+    start_date: "2026-03-01",
+    end_date: "2026-03-10",
+    recorded_row_count: 4,
+    first_recorded_date: "2026-03-01",
+    last_recorded_date: "2026-03-10",
+  };
+  return {
+    ...scope,
+    reporting_date: "2026-03-10",
+    current_period: scope,
+    previous_period: { ...scope, start_date: "2026-02-01", end_date: "2026-02-10" },
+    comparison_available: true,
+    comparison_qualification: "Comparison of recorded activity only.",
+  };
+}
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe("getOverviewSummary", () => {
   it("maps snake_case overview fields to camelCase", async () => {
     mockFetch({
+      reporting: reportingPayload(),
       as_of_date: "2026-03-10",
       net_worth: 1000,
       assets: 1200,
@@ -60,6 +86,7 @@ describe("getOverviewSummary", () => {
 describe("getAccountsSummary", () => {
   it("preserves explicit account/history coverage metadata", async () => {
     mockFetch({
+      reporting: reportingPayload(),
       assets: 1000,
       liabilities: 200,
       net_worth: 800,
@@ -81,6 +108,7 @@ describe("getAccountsSummary", () => {
 describe("getSpendingSummary", () => {
   it("maps period + driver fields", async () => {
     mockFetch({
+      reporting: reportingPayload(),
       period_label: "March 2026",
       total: 500,
       previous_total: 400,
@@ -96,6 +124,15 @@ describe("getSpendingSummary", () => {
     expect(s.previousTotal).toBe(400);
     expect(s.changePct).toBe(25);
     expect(s.topDriver).toEqual({ category: "FOOD/OTHER", amount: 100 });
+  });
+});
+
+describe("spending report scope", () => {
+  it("requests the selected yearly comparison instead of reusing monthly data", async () => {
+    const fetchMock = mockFetch({ reporting: reportingPayload(), category_comparison: [] });
+    await getCategoryComparison("yearly");
+    const calledUrl = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]));
+    expect(calledUrl.searchParams.get("granularity")).toBe("yearly");
   });
 });
 

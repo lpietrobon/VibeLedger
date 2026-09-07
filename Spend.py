@@ -93,10 +93,10 @@ st.markdown(
     }}
     </style>
     <div class="overview-metric-grid">
-      <div class="overview-metric"><div class="overview-metric-label">Net worth</div><div class="overview-metric-value">${net_worth:,.0f}</div></div>
-      <div class="overview-metric"><div class="overview-metric-label">Month spending</div><div class="overview-metric-value">${summary['spend']:,.0f}</div><div class="overview-metric-note">{spend_delta_text}</div></div>
-      <div class="overview-metric"><div class="overview-metric-label">Month income</div><div class="overview-metric-value">${summary['income']:,.0f}</div></div>
-      <div class="overview-metric"><div class="overview-metric-label">Net cashflow</div><div class="overview-metric-value">${summary['net']:,.0f}</div></div>
+    <div class="overview-metric"><div class="overview-metric-label">Month spending</div><div class="overview-metric-value">${summary['spend']:,.0f}</div><div class="overview-metric-note">{spend_delta_text}</div></div>
+    <div class="overview-metric"><div class="overview-metric-label">Month income</div><div class="overview-metric-value">${summary['income']:,.0f}</div></div>
+    <div class="overview-metric"><div class="overview-metric-label">Net cashflow</div><div class="overview-metric-value">${summary['net']:,.0f}</div></div>
+    <div class="overview-metric"><div class="overview-metric-label">Net worth</div><div class="overview-metric-value">${net_worth:,.0f}</div></div>
     </div>
     """,
     unsafe_allow_html=True,

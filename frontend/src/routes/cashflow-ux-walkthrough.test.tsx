@@ -24,12 +24,43 @@ vi.mock("@/lib/api/client", () => ({
   getSpendingSummary: vi.fn(),
   getCumulativeSpending: vi.fn(),
   getCategoryCatalog: vi.fn(),
+  syncAllAccounts: vi.fn(),
   patchTransactionAnnotation: vi.fn(),
 }));
 
 import * as api from "@/lib/api/client";
 import OverviewPage from "./index";
 import SpendingPage from "./spending";
+
+const reporting = {
+  currency: "USD" as const,
+  currencyStatus: "single" as const,
+  currencies: ["USD"],
+  historyCoverage: "unverified" as const,
+  duplicateAccountCoverage: "unverified" as const,
+  qualification: "Recorded activity only.",
+  startDate: "2024-03-01",
+  endDate: "2024-03-15",
+  recordedRowCount: 4,
+  firstRecordedDate: "2024-03-01",
+  lastRecordedDate: "2024-03-08",
+  reportingDate: "2024-03-15",
+  currentPeriod: {
+    currency: "USD" as const, currencyStatus: "single" as const, currencies: ["USD"],
+    historyCoverage: "unverified" as const, duplicateAccountCoverage: "unverified" as const,
+    qualification: "Recorded activity only.", startDate: "2024-03-01", endDate: "2024-03-15",
+    recordedRowCount: 4, firstRecordedDate: "2024-03-01", lastRecordedDate: "2024-03-08",
+  },
+  previousPeriod: {
+    currency: "USD" as const, currencyStatus: "single" as const, currencies: ["USD"],
+    historyCoverage: "unverified" as const, duplicateAccountCoverage: "unverified" as const,
+    qualification: "Recorded activity only.", startDate: "2024-02-01", endDate: "2024-02-15",
+    recordedRowCount: 2, firstRecordedDate: "2024-02-02", lastRecordedDate: "2024-02-05",
+  },
+  comparisonAvailable: true,
+  comparisonQualification: "Comparison of recorded activity only.",
+  projectionQualification: "Straight-line estimate.",
+};
 
 const transaction = {
   id: 42,
@@ -77,6 +108,7 @@ beforeEach(() => {
 
   vi.mocked(api.getOverviewSummary).mockResolvedValue({
     asOfDate: "2024-03-15",
+    reporting,
     netWorth: 2500,
     assets: 3000,
     liabilities: 500,
@@ -101,6 +133,7 @@ beforeEach(() => {
   vi.mocked(api.getSpendingSummary).mockImplementation(async (args) => {
     const granularity = args?.granularity ?? "monthly";
     return {
+      reporting,
     periodLabel: granularity === "yearly" ? "2024 YTD" : "March 2024",
     total: granularity === "yearly" ? 2477 : 2397,
     previousTotal: granularity === "yearly" ? 0 : 1580,
@@ -113,6 +146,7 @@ beforeEach(() => {
   vi.mocked(api.getCumulativeSpending).mockResolvedValue([]);
   vi.mocked(api.getCategoryCatalog).mockResolvedValue([]);
   vi.mocked(api.patchTransactionAnnotation).mockResolvedValue({ status: "ok", transaction_id: 42 });
+  vi.mocked(api.syncAllAccounts).mockResolvedValue({ results: [], summary: "1/1 item synced" });
 });
 
 afterEach(() => {

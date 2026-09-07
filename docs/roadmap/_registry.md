@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-06T20:47:10+00:00_
+_Last scan: 2026-09-07T03:52:33+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -22,7 +22,7 @@ dependencies are done; a blank assignment means unassigned.
 | [CF-05](epics/010-trustworthy-cashflow/tasks/CF-05.md) | 010-trustworthy-cashflow | done | CF-02, CF-04 |  | Harden transaction identity and synchronization |
 | [CF-06](epics/010-trustworthy-cashflow/tasks/CF-06.md) | 010-trustworthy-cashflow | done | CF-02, CF-04 |  | Make transfer reconciliation conservative and durable |
 | [CF-07](epics/010-trustworthy-cashflow/tasks/CF-07.md) | 010-trustworthy-cashflow | done | CF-02, CF-04 |  | Unify posted cashflow totals and transaction evidence |
-| [CF-08](epics/010-trustworthy-cashflow/tasks/CF-08.md) | 010-trustworthy-cashflow | blocked | CF-03, CF-07 |  | Make spending charts and drill-downs tell the same story |
+| [CF-08](epics/010-trustworthy-cashflow/tasks/CF-08.md) | 010-trustworthy-cashflow | done | CF-03, CF-07 |  | Make spending charts and drill-downs tell the same story |
 | [CF-09](epics/010-trustworthy-cashflow/tasks/CF-09.md) | 010-trustworthy-cashflow | blocked | CF-03, CF-05, CF-06, CF-07 |  | Finish existing transaction review and recurring workflows |
 | [CF-10](epics/010-trustworthy-cashflow/tasks/CF-10.md) | 010-trustworthy-cashflow | blocked | CF-05, CF-06, CF-07 |  | Independently verify accounting and reconciliation |
 | [CF-11](epics/010-trustworthy-cashflow/tasks/CF-11.md) | 010-trustworthy-cashflow | todo | CF-08, CF-09, CF-10 |  | Independently verify the user-facing cashflow story |

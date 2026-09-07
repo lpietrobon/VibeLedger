@@ -98,6 +98,7 @@ export default function SankeyChart({
   onToggle: (key: string) => void;
 }) {
   const { height, laidOutNodes, laidOutLinks } = useMemo(() => {
+    if (!data.sankeySupported) return { height: 0, laidOutNodes: [], laidOutLinks: [] };
     const graph = buildGraph(data, expanded);
     const generator = sankey<NodeDatum, LinkDatum>()
       .nodeWidth(14)
@@ -112,6 +113,14 @@ export default function SankeyChart({
     });
     return { height: graph.height, laidOutNodes, laidOutLinks };
   }, [data, expanded]);
+
+  if (!data.sankeySupported) {
+    return (
+      <p className="grid h-40 place-items-center text-center text-sm text-muted-foreground">
+        {data.visualizationQualification ?? "Use the signed spending breakdown for this period; this flow chart cannot faithfully show refund credits."}
+      </p>
+    );
+  }
 
   if (!laidOutNodes.length || !laidOutLinks.length) {
     return (

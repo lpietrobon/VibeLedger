@@ -6,6 +6,8 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from app.services.accounting import comparison_bounds
+
 from dashboard_lib import (
     DEFAULT_DB,
     apply_date_filter,
@@ -96,12 +98,14 @@ else:
 
 summary = spending_period_summary(
     period_spends[0],
-    period_spends[1],
+    period_spends[1][period_spends[1]["date"] <= comparison_bounds(anchor, granularity)[3]],
     elapsed_days=current_period["len"],
     total_days=period_total_days,
 )
+previous_comparable = period_spends[1][period_spends[1]["date"] <= comparison_bounds(anchor, granularity)[3]]
+previous_end = comparison_bounds(anchor, granularity)[3]
 change_text = (
-    f"{summary['change_pct']:+.1f}% vs {periods[1]['label']}"
+    f"{summary['change_pct']:+.1f}% vs {periods[1]['label']} through {previous_end:%b %-d}"
     if summary["change_pct"] is not None
     else f"No {periods[1]['label']} comparison"
 )
@@ -175,7 +179,7 @@ with drivers_tab:
     comparison = pd.concat(
         [
             period_spends[0].assign(period=current_label),
-            period_spends[1].assign(period=previous_label),
+            previous_comparable.assign(period=previous_label),
         ],
         ignore_index=True,
     )
@@ -313,7 +317,7 @@ with st.expander("Transaction samples and annotation", expanded=False):
             st.rerun()
 
     samples_source = apply_transaction_filter_tokens(
-        selected_window,
+        period_spends[0],
         st.session_state.spend_filters,
     )
     if samples_source.empty:
