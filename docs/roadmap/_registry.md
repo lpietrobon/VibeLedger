@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-07T22:35:54+00:00_
+_Last scan: 2026-09-07T22:37:25+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -9,7 +9,7 @@ dependencies are done; a blank assignment means unassigned.
 
 | id | title | status | rev | owner |
 |---|---|---|---|---|
-| [010-trustworthy-cashflow](epics/010-trustworthy-cashflow/_epic.md) | Trustworthy cashflow across linked accounts | done | 2 |  |
+| [010-trustworthy-cashflow](epics/010-trustworthy-cashflow/_epic.md) | Trustworthy cashflow across linked accounts | done | 3 |  |
 
 ## Tasks
 

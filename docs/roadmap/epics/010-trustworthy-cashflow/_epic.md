@@ -4,7 +4,7 @@ title: Trustworthy cashflow across linked accounts
 status: done
 owner: null
 created: 2026-09-02
-revision: 2
+revision: 3
 ---
 
 ## Goal
