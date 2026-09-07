@@ -1791,8 +1791,8 @@ def analytics_cashflow_sankey(
 
     income = 0.0
     income_by_category: dict[str, float] = {}
-    bucket_totals: dict[str, float] = {}
-    bucket_categories: dict[str, dict[str, float]] = {}
+    positive_category_totals: dict[str, float] = {}
+    refund_credit_categories: dict[str, float] = {}
     for category, income_total, expense_total in rows:
         income_total = float(income_total or 0)
         expense_total = float(expense_total or 0)
@@ -1800,21 +1800,25 @@ def analytics_cashflow_sankey(
             income_by_category[category] = income_by_category.get(category, 0.0) + income_total
             income += income_total
         if expense_total != 0:
-            # Bucket net includes refund-only categories (negative), matching
-            # spend everywhere else; only positive categories become their own
-            # link — a negative-width flow isn't drawable.
-            bucket = category.split("/", 1)[0] or "UNCATEGORIZED"
-            bucket_totals[bucket] = bucket_totals.get(bucket, 0.0) + expense_total
             if expense_total > 0:
-                bucket_categories.setdefault(bucket, {})[category] = expense_total
+                positive_category_totals[category] = expense_total
+            elif expense_total < 0:
+                # Keep only the residual credit after same-category netting.
+                # It is a credit, not income and not the gross refund volume.
+                refund_credit_categories[category] = -expense_total
 
-    total_spend = sum(bucket_totals.values())
-    negative_categories = [
-        {"category": category, "amount": round(float(expense_total), 2)}
-        for category, _, expense_total in rows if expense_total is not None and expense_total < 0
-    ]
-    savings = max(income - total_spend, 0.0)
-    deficit = max(total_spend - income, 0.0)
+    bucket_categories: dict[str, dict[str, float]] = {}
+    bucket_totals: dict[str, float] = {}
+    for category, amount in positive_category_totals.items():
+        bucket = category.split("/", 1)[0] or "UNCATEGORIZED"
+        bucket_totals[bucket] = bucket_totals.get(bucket, 0.0) + amount
+        bucket_categories.setdefault(bucket, {})[category] = amount
+
+    positive_net_spend = sum(bucket_totals.values())
+    net_refund_credits = sum(refund_credit_categories.values())
+    total_spend = positive_net_spend - net_refund_credits
+    savings = max(income + net_refund_credits - positive_net_spend, 0.0)
+    deficit = max(positive_net_spend - income - net_refund_credits, 0.0)
 
     income_sources = sorted(
         ({"category": c, "amount": round(a, 2)} for c, a in income_by_category.items()),
@@ -1839,9 +1843,23 @@ def analytics_cashflow_sankey(
 
     return {
         "reporting": reporting,
-        "negative_categories": negative_categories,
-        "sankey_supported": not negative_categories,
-        "visualization_qualification": "Use signed category detail when refunds produce negative categories; a positive-width Sankey cannot represent them faithfully." if negative_categories else None,
+        "negative_categories": [
+            # Legacy signed field retained for API compatibility. New clients
+            # should use net_refund_credit_categories (positive credit values).
+            {"category": category, "amount": round(-amount, 2)}
+            for category, amount in sorted(refund_credit_categories.items())
+        ],
+        "net_refund_credits": round(net_refund_credits, 2),
+        "net_refund_credit_categories": [
+            {"category": category, "amount": round(amount, 2)}
+            for category, amount in sorted(refund_credit_categories.items())
+        ],
+        "positive_net_spend": round(positive_net_spend, 2),
+        "sankey_supported": True,
+        "visualization_qualification": (
+            "Net refund credits are residual category credits after netting; they are not income."
+            if net_refund_credits > 0 else None
+        ),
         "income": round(income, 2),
         "total_spend": round(total_spend, 2),
         "savings": round(savings, 2),

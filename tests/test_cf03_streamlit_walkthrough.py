@@ -49,6 +49,7 @@ def _seed_walkthrough_ledger() -> None:
             ("Card payment", checking, 500, date(2024, 3, 6), "TRANSFER_OUT"),
             ("Card receipt", card, -500, date(2024, 3, 7), "TRANSFER_IN"),
             ("Odd charge", card, 777, date(2024, 3, 8), "UNCATEGORIZED"),
+            ("Refund credit", card, -50, date(2024, 3, 9), "SHOPPING"),
         ]
         ids: list[int] = []
         for index, (name, account, amount, posted, category) in enumerate(rows):
@@ -67,6 +68,7 @@ def _seed_walkthrough_ledger() -> None:
             ids.append(transaction.id)
         db.add(TransferPair(txn_out_id=ids[5], txn_in_id=ids[6], confirmed=True))
         db.add(TransactionAnnotation(transaction_id=ids[7], reviewed=False))
+        db.add(TransactionAnnotation(transaction_id=ids[8], refund_status="likely"))
         db.commit()
 
 
@@ -96,3 +98,8 @@ def test_streamlit_cashflow_walkthrough() -> None:
     spending = " ".join(markdown.value for markdown in app.markdown)
     assert "2024 spend" in spending
     assert "Top driver" in spending
+
+    app.switch_page("pages/3_Cashflow_Sankey.py").run()
+    assert not app.exception
+    assert any(metric.label == "Net refund credits" for metric in app.metric)
+    assert "Net refund credits are refunds remaining" in " ".join(info.value for info in app.info)

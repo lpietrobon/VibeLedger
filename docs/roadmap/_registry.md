@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-07T19:13:02+00:00_
+_Last scan: 2026-09-07T20:30:03+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -28,4 +28,4 @@ dependencies are done; a blank assignment means unassigned.
 | [CF-11](epics/010-trustworthy-cashflow/tasks/CF-11.md) | 010-trustworthy-cashflow | blocked | CF-08, CF-09, CF-10, CF-14 |  | Independently verify the user-facing cashflow story |
 | [CF-12](epics/010-trustworthy-cashflow/tasks/CF-12.md) | 010-trustworthy-cashflow | blocked | CF-10, CF-11 |  | Review maintainability and verify final test coverage |
 | [CF-13](epics/010-trustworthy-cashflow/tasks/CF-13.md) | 010-trustworthy-cashflow | blocked | CF-12 |  | Prepare the verified handoff for user redeployment |
-| [CF-14](epics/010-trustworthy-cashflow/tasks/CF-14.md) | 010-trustworthy-cashflow | todo | CF-07, CF-08, CF-10 |  | Show net refund credits in cashflow allocation |
+| [CF-14](epics/010-trustworthy-cashflow/tasks/CF-14.md) | 010-trustworthy-cashflow | done | CF-07, CF-08, CF-10 |  | Show net refund credits in cashflow allocation |

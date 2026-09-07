@@ -65,8 +65,9 @@ def test_cf02_oracle_api_sql_categories_and_all_evidence_pages():
         assert any(row["spend"] == -120 for row in categories)
         sankey = client.get("/analytics/cashflow-sankey", params=bounds, headers=AUTH_HEADERS).json()
         assert (sankey["total_spend"], sankey["savings"], sankey["deficit"]) == (-30, 3030, 0)
-        assert sankey["sankey_supported"] is False
+        assert sankey["sankey_supported"] is True
         assert sum(row["amount"] for row in sankey["negative_categories"]) == -120
+        assert sankey["net_refund_credits"] == 120
         evidence = []
         for offset in range(0, 30, 2):
             page = client.get("/transactions", params={**bounds, "q": "is:spend", "limit": 2, "offset": offset}, headers=AUTH_HEADERS).json()

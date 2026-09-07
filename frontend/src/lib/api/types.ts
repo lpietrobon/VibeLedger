@@ -270,6 +270,10 @@ export type CashflowSankey = {
   sankeySupported: boolean;
   visualizationQualification: string | null;
   negativeCategories: SankeyFlow[];
+  /** Residual credits from categories whose refunds exceed their charges. */
+  netRefundCredits: Money;
+  netRefundCreditCategories: SankeyFlow[];
+  positiveNetSpend: Money;
   income: Money;
   totalSpend: Money;
   savings: Money;

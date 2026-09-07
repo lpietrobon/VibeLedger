@@ -109,7 +109,10 @@ def test_cashflow_sankey_refund_nets_against_expense_not_income():
     body = r.json()
     assert body["income"] == 1000.0  # refund does not count as income
     buckets = {b["bucket"]: b for b in body["buckets"]}
-    assert buckets["FOOD"]["amount"] == 300.0  # 400 - 100 refund
+    # The refund is a residual credit in its own category because it does not
+    # share a category with either FOOD/GROCERIES or FOOD/DINING.
+    assert buckets["FOOD"]["amount"] == 400.0
+    assert body["net_refund_credits"] == 100.0
 
 
 def test_cashflow_sankey_date_filter():

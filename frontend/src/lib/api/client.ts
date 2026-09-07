@@ -250,6 +250,9 @@ type SankeyResponse = {
   sankey_supported: boolean;
   visualization_qualification: string | null;
   negative_categories: { category: string; amount: number }[];
+  net_refund_credits?: number;
+  net_refund_credit_categories?: { category: string; amount: number }[];
+  positive_net_spend?: number;
   income: number;
   total_spend: number;
   savings: number;
@@ -270,6 +273,9 @@ export async function getCashflowSankey(params?: {
     sankeySupported: r.sankey_supported,
     visualizationQualification: r.visualization_qualification,
     negativeCategories: r.negative_categories,
+    netRefundCredits: r.net_refund_credits ?? 0,
+    netRefundCreditCategories: r.net_refund_credit_categories ?? r.negative_categories,
+    positiveNetSpend: r.positive_net_spend ?? r.buckets.reduce((sum, bucket) => sum + bucket.amount, 0),
     income: r.income,
     totalSpend: r.total_spend,
     savings: r.savings,

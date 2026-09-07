@@ -26,11 +26,19 @@ function buildGraph(data: CashflowSankey, expanded: string | null) {
   const push = (n: NodeDatum) => nodes.push(n) - 1;
 
   const incomeIdx = push({ name: "Income", color: "#10b981", key: "__income_node__", expandable: false });
+  const availableIdx = push({ name: "Available cash", color: "#34d399", key: "__available__", expandable: false });
 
   let deficitIdx: number | null = null;
   if (data.deficit > 0) {
     deficitIdx = push({ name: "Deficit funding", color: "#dc2626", key: "__deficit__", expandable: false });
+    links.push({ source: deficitIdx, target: availableIdx, value: data.deficit, color: "rgba(220,38,38,0.35)" });
   }
+
+  if (data.netRefundCredits > 0) {
+    const refundIdx = push({ name: "Net refund credits", color: "#0ea5e9", key: "__refund_credits__", expandable: false });
+    links.push({ source: refundIdx, target: availableIdx, value: data.netRefundCredits, color: "rgba(14,165,233,0.35)" });
+  }
+  links.push({ source: incomeIdx, target: availableIdx, value: data.income, color: "rgba(16,185,129,0.35)" });
 
   if (expanded === INCOME_KEY) {
     for (const src of data.incomeSources) {
@@ -46,17 +54,12 @@ function buildGraph(data: CashflowSankey, expanded: string | null) {
     bucketIdx.set(bucket.bucket, i);
   }
 
-  const availableForSpend = Math.min(data.income, data.totalSpend);
+  const positiveNetSpend = data.positiveNetSpend || data.buckets.reduce((sum, bucket) => sum + bucket.amount, 0);
   for (const bucket of data.buckets) {
     const target = bucketIdx.get(bucket.bucket);
     if (target === undefined) continue;
-    const incomeShare = data.totalSpend > 0 ? (bucket.amount * availableForSpend) / data.totalSpend : 0;
-    const deficitShare = bucket.amount - incomeShare;
-    if (incomeShare > 0) {
-      links.push({ source: incomeIdx, target, value: incomeShare, color: "rgba(16,185,129,0.35)" });
-    }
-    if (deficitShare > 0 && deficitIdx !== null) {
-      links.push({ source: deficitIdx, target, value: deficitShare, color: "rgba(220,38,38,0.35)" });
+    if (positiveNetSpend > 0 && bucket.amount > 0) {
+      links.push({ source: availableIdx, target, value: bucket.amount, color: "rgba(16,185,129,0.35)" });
     }
   }
 
@@ -74,12 +77,12 @@ function buildGraph(data: CashflowSankey, expanded: string | null) {
 
   if (data.savings > 0) {
     const i = push({ name: "Savings", color: "#0ea5e9", key: "__savings__", expandable: false });
-    links.push({ source: incomeIdx, target: i, value: data.savings, color: "rgba(14,165,233,0.35)" });
+    links.push({ source: availableIdx, target: i, value: data.savings, color: "rgba(14,165,233,0.35)" });
   }
 
   const columns = [
-    (expanded === INCOME_KEY ? data.incomeSources.length : 0) + (data.deficit > 0 ? 1 : 0),
-    1,
+    (expanded === INCOME_KEY ? data.incomeSources.length : 1) + (data.deficit > 0 ? 1 : 0) + (data.netRefundCredits > 0 ? 1 : 0),
+    2,
     data.buckets.length + (data.savings > 0 ? 1 : 0),
     expanded && expanded !== INCOME_KEY ? (data.buckets.find((b) => b.bucket === expanded)?.categories.length ?? 0) : 0,
   ];
@@ -133,7 +136,13 @@ export default function SankeyChart({
   const linkPath = sankeyLinkHorizontal<NodeDatum, LinkDatum>();
 
   return (
-    <svg viewBox={`0 0 ${CHART_WIDTH} ${height}`} width="100%" height={height} role="img" aria-label="Cashflow Sankey diagram">
+    <div>
+      {data.netRefundCredits > 0 ? (
+        <p className="mb-3 text-xs text-muted-foreground">
+          <span className="font-medium text-sky-700">Net refund credits</span>: refunds remaining after offsetting spending in the same category. Not income.
+        </p>
+      ) : null}
+      <svg viewBox={`0 0 ${CHART_WIDTH} ${height}`} width="100%" height={height} role="img" aria-label="Cashflow Sankey diagram">
       <g>
         {laidOutLinks.map((link: Link, i: number) => (
           <path
@@ -188,6 +197,7 @@ export default function SankeyChart({
           );
         })}
       </g>
-    </svg>
+      </svg>
+    </div>
   );
 }
