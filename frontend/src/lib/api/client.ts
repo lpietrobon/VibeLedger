@@ -425,10 +425,11 @@ export async function getRecurring(params?: {
   status?: "active" | "inactive";
   minMonthly?: number;
 }): Promise<RecurringResponse> {
-  return jsonFetch<RecurringResponse>("/analytics/recurring", {
+  const r = await jsonFetch<RecurringResponse & { reporting?: ReportingScopeResponse }>("/analytics/recurring", {
     status: params?.status,
     min_monthly: params?.minMonthly,
   });
+  return { ...r, reporting: r.reporting ? mapReportingScope(r.reporting) : undefined };
 }
 
 export async function setRecurringStatus(

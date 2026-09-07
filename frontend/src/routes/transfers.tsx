@@ -5,6 +5,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { Section } from "@/components/finance/Section";
 import { confirmTransfer, deleteTransfer, detectTransfers, getTransfers } from "@/lib/api/client";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { invalidateLedger } from "@/lib/api/cache";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
 
@@ -21,21 +22,29 @@ function txHref(date?: string | null, name?: string | null) {
 export default function TransfersPage() {
   const queryClient = useQueryClient();
   const transfers = useQuery({ queryKey: ["transfers"], queryFn: getTransfers });
-  const [detectMsg, setDetectMsg] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
   const items = transfers.data?.items ?? [];
   const pending = items.filter((item) => !item.confirmed).length;
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["transfers"] });
+  const invalidate = () => invalidateLedger(queryClient);
 
   const detect = useMutation({
     mutationFn: detectTransfers,
     onSuccess: (data) => {
-      setDetectMsg(`Detection complete — ${data.created} new candidate${data.created === 1 ? "" : "s"}.`);
+      setActionMsg(`Detection complete — ${data.created} new candidate${data.created === 1 ? "" : "s"}.`);
       invalidate();
     },
-    onError: (e) => setDetectMsg((e as Error).message),
+    onError: (e) => setActionMsg(`Detection failed: ${(e as Error).message}`),
   });
-  const confirm = useMutation({ mutationFn: confirmTransfer, onSuccess: invalidate });
-  const unpair = useMutation({ mutationFn: deleteTransfer, onSuccess: invalidate });
+  const confirm = useMutation({
+    mutationFn: confirmTransfer,
+    onSuccess: async () => { setActionMsg("Transfer confirmed and excluded from totals."); await invalidate(); },
+    onError: (e) => setActionMsg(`Could not confirm transfer: ${(e as Error).message}`),
+  });
+  const unpair = useMutation({
+    mutationFn: deleteTransfer,
+    onSuccess: async () => { setActionMsg("Transfer pair removed; both transactions remain recorded."); await invalidate(); },
+    onError: (e) => setActionMsg(`Could not unpair transfer: ${(e as Error).message}`),
+  });
 
   return (
     <AppShell>
@@ -56,13 +65,18 @@ export default function TransfersPage() {
         </button>
       </div>
 
-      {detectMsg ? (
-        <div className="mb-3 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm text-muted-foreground">
-          {detectMsg}
+      {actionMsg ? (
+        <div role="status" className="mb-3 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm text-muted-foreground">
+          {actionMsg}
         </div>
       ) : null}
 
-      <Section title="Suspect transfers">
+      {transfers.isError ? <p role="alert" className="mb-3 text-sm text-red-600">Could not load transfers: {transfers.error.message}</p> : null}
+      <p className="mb-3 text-sm text-muted-foreground">
+        Possible transfers remain in income and spending until confirmed. Unpairing only removes the relationship; it does not delete either transaction.
+      </p>
+
+      <Section title="Transfer pairs">
         <div className="hidden md:block">
           <table className="w-full text-sm">
             <thead>
@@ -109,7 +123,7 @@ export default function TransfersPage() {
                         (item.confirmed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")
                       }
                     >
-                      {item.confirmed ? "Confirmed" : "Pending"}
+                      {item.confirmed ? "Confirmed · excluded" : "Needs review · counted"}
                     </span>
                   </td>
                   <td className="py-2">
@@ -151,7 +165,7 @@ export default function TransfersPage() {
                     (item.confirmed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")
                   }
                 >
-                  {item.confirmed ? "Confirmed" : "Pending"}
+                  {item.confirmed ? "Confirmed · excluded" : "Needs review · counted"}
                 </span>
               </div>
               <div className="truncate font-medium">

@@ -100,11 +100,13 @@ export type Transaction = {
   plaid_category_detailed?: string | null;
   plaid_category_friendly?: string | null;
   effective_category: string;
-  category_source: "manual" | "rule" | "plaid" | "default";
+  category_source: "manual" | "rule" | "plaid" | "default" | "refund";
   rule_id?: number | null;
   /** True when this transaction is one leg of a transfer pair (so it is
    *  excluded from spend/income analytics). */
   is_transfer?: boolean;
+  /** Candidate pair; it remains included until the user confirms it. */
+  is_transfer_candidate?: boolean;
   transfer_pair_id?: number | null;
   refund_status?: "confirmed" | "likely" | "not_refund" | null;
   refund_match_transaction_id?: number | null;
@@ -209,6 +211,7 @@ export type RecurringSeries = {
 
 export type RecurringResponse = {
   items: RecurringSeries[];
+  reporting?: ReportingScope;
   summary: {
     count: number;
     active_count: number;

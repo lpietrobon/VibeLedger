@@ -42,13 +42,15 @@ export function AnnotationSheet({
 }: {
   tx: Transaction | null;
   onClose: () => void;
-  onSave: (id: number, payload: AnnotationPayload) => void;
+  onSave: (id: number, payload: AnnotationPayload) => Promise<void>;
 }) {
   const [category, setCategory] = useState("");
   const [merchant, setMerchant] = useState("");
   const [notes, setNotes] = useState("");
   const [reviewed, setReviewed] = useState(false);
   const [refund, setRefund] = useState<"auto" | "confirmed" | "not_refund">("auto");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!tx) return;
@@ -76,15 +78,23 @@ export function AnnotationSheet({
   const selectedCategory = normalizeCategory(category) || tx.effective_category;
   const willInherit = resolveUserCategory(tx, selectedCategory) === null;
 
-  const handleSave = () => {
-    onSave(tx.id, {
-      user_category: resolveUserCategory(tx, selectedCategory),
-      merchant_name_override: merchant || null,
-      notes: notes || null,
-      reviewed,
-      refund_status: refund,
-    });
-    onClose();
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave(tx.id, {
+        user_category: resolveUserCategory(tx, selectedCategory),
+        merchant_name_override: merchant || null,
+        notes: notes || null,
+        reviewed,
+        refund_status: refund,
+      });
+      onClose();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not save this transaction.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -156,6 +166,22 @@ export function AnnotationSheet({
             )}
           </div>
 
+          {tx.is_transfer ? (
+            <p className="mb-3 rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800">
+              Confirmed internal transfer — excluded from income and spending totals.
+            </p>
+          ) : tx.is_transfer_candidate ? (
+            <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Possible internal transfer — still counted until confirmed in Transfer Detection.
+            </p>
+          ) : null}
+          {tx.refund_status ? (
+            <p className="mb-3 rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800">
+              Refund status: {tx.refund_status.replace("_", " ")}
+              {tx.refund_reason ? ` · ${tx.refund_reason}` : ""}
+            </p>
+          ) : null}
+
           <Field label="Category">
             <CategoryPicker value={category} onChange={setCategory} placeholder="Choose a category" />
             <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -216,17 +242,20 @@ export function AnnotationSheet({
           <div className="mt-4 flex gap-2">
             <button
               onClick={onClose}
+              disabled={saving}
               className="flex-1 rounded-md border border-input px-3 py-2 text-sm font-medium hover:bg-secondary"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
-              className="flex-1 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90"
+              disabled={saving}
+              className="flex-1 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90 disabled:opacity-60"
             >
-              Save
+              {saving ? "Saving…" : "Save"}
             </button>
           </div>
+          {saveError ? <p role="alert" className="mt-2 text-sm text-red-600">Save failed: {saveError}</p> : null}
         </div>
     </Sheet>
   );
@@ -239,7 +268,7 @@ export function BatchAnnotationSheet({
 }: {
   count: number;
   onClose: () => void;
-  onSave: (payload: AnnotationPayload) => void;
+  onSave: (payload: AnnotationPayload) => Promise<void>;
 }) {
   const [category, setCategory] = useState("");
   const [merchant, setMerchant] = useState("");
@@ -247,6 +276,8 @@ export function BatchAnnotationSheet({
   const [reviewed, setReviewed] = useState(false);
   const [refund, setRefund] = useState<"auto" | "confirmed" | "not_refund">("auto");
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   if (!count) return null;
 
@@ -254,15 +285,23 @@ export function BatchAnnotationSheet({
   const selectedCategory = normalizeCategory(category);
   const hasChanges = Object.values(dirty).some(Boolean);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const payload: AnnotationPayload = {};
     if (dirty.category) payload.user_category = selectedCategory || null;
     if (dirty.merchant) payload.merchant_name_override = merchant || null;
     if (dirty.notes) payload.notes = notes || null;
     if (dirty.reviewed) payload.reviewed = reviewed;
     if (dirty.refund) payload.refund_status = refund;
-    onSave(payload);
-    onClose();
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave(payload);
+      onClose();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not apply the changes.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -353,18 +392,20 @@ export function BatchAnnotationSheet({
           <div className="mt-4 flex gap-2">
             <button
               onClick={onClose}
+              disabled={saving}
               className="flex-1 rounded-md border border-input px-3 py-2 text-sm font-medium hover:bg-secondary"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
-              disabled={!hasChanges}
+              disabled={!hasChanges || saving}
               className="flex-1 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Apply
+              {saving ? "Applying…" : "Apply"}
             </button>
           </div>
+          {saveError ? <p role="alert" className="mt-2 text-sm text-red-600">Save failed: {saveError}</p> : null}
         </div>
     </Sheet>
   );
@@ -391,5 +432,7 @@ function categorySourceLabel(source: Transaction["category_source"]) {
       return "Bank";
     case "default":
       return "Default";
+    case "refund":
+      return "Matched refund";
   }
 }

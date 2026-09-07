@@ -1498,12 +1498,12 @@ def analytics_overview(db: Session = Depends(get_db), reporting_date: date | Non
         )
     ).scalar() or 0
 
-    uncategorized = (
-        db.query(func.count(Transaction.id))
-        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
-        .filter(func.lower(_effective_category_expr()) == "uncategorized")
-        .scalar()
-    ) or 0
+    uncategorized_q = db.query(func.count(Transaction.id)).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+    )
+    uncategorized = _apply_transfer_exclusion(uncategorized_q, include_transfers=False).filter(
+        func.lower(_effective_category_expr()) == "uncategorized"
+    ).scalar() or 0
 
     return {
         "reporting": reporting,
