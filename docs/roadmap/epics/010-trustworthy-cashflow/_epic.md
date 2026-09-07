@@ -1,7 +1,7 @@
 ---
 id: 010-trustworthy-cashflow
 title: Trustworthy cashflow across linked accounts
-status: in-progress
+status: done
 owner: null
 created: 2026-09-02
 revision: 2
@@ -17,8 +17,11 @@ of intent; implementation choices may change while serving that intent.
 
 ## Scope Notes
 
-Progress checkpoint: [recovered agent drafts, test evidence, and remaining gaps](artifacts/CF-01-recovered-progress.md).
-CF-01 and CF-02 are accepted. Application implementation remains unaccepted; CF-04 is accepted with passing GitHub CI. CF-05 has a published, CI-verified atomic-sync slice and remains in progress. CF-03 is blocked by a preview navigation timeout. No agent is currently assigned; task logs identify the next slices.
+Completion checkpoint: implementation, automated verification, maintainability review,
+and redeployment handoff are recorded in the task logs and artifacts. The user
+validated the deployed Spending, Sankey, and refresh flows. Independent cloud-browser
+verification was unavailable, so that limitation is retained explicitly rather than
+represented as completed browser evidence.
 
 - Prioritize correctness and clarity of existing functionality over new features.
   Focus on checking accounts, credit cards, and supported payment systems such as
@@ -63,3 +66,8 @@ CF-01 and CF-02 are accepted. Application implementation remains unaccepted; CF-
 
 - rev 1 (2026-09-02): Pause the broader finance-intelligence feature backlog and
   establish a hardening epic around trustworthy existing cashflow reporting.
+
+- rev 3 (2026-09-08): Close the hardening epic after user validation of the
+  deployed experience, with automated checks, coverage, and handoff documentation
+  complete. Record the unavailable independent browser environment as a known
+  limitation rather than a product defect.
