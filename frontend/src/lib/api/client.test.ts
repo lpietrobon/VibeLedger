@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applySuggestion,
   getCategoryCatalog,
+  getAccountsSummary,
   getOverviewSummary,
   getCumulativeSpending,
+  getCategoryComparison,
   getSpendingSummary,
   getTransactions,
 } from "./client";
@@ -23,11 +25,36 @@ function mockFetch(payload: unknown) {
   return fetchMock as unknown as ReturnType<typeof vi.fn>;
 }
 
+function reportingPayload() {
+  const scope = {
+    currency: "USD",
+    currency_status: "single",
+    currencies: ["USD"],
+    history_coverage: "unverified",
+    duplicate_account_coverage: "unverified",
+    qualification: "Recorded activity only.",
+    start_date: "2026-03-01",
+    end_date: "2026-03-10",
+    recorded_row_count: 4,
+    first_recorded_date: "2026-03-01",
+    last_recorded_date: "2026-03-10",
+  };
+  return {
+    ...scope,
+    reporting_date: "2026-03-10",
+    current_period: scope,
+    previous_period: { ...scope, start_date: "2026-02-01", end_date: "2026-02-10" },
+    comparison_available: true,
+    comparison_qualification: "Comparison of recorded activity only.",
+  };
+}
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe("getOverviewSummary", () => {
   it("maps snake_case overview fields to camelCase", async () => {
     mockFetch({
+      reporting: reportingPayload(),
       as_of_date: "2026-03-10",
       net_worth: 1000,
       assets: 1200,
@@ -56,9 +83,32 @@ describe("getOverviewSummary", () => {
   });
 });
 
+describe("getAccountsSummary", () => {
+  it("preserves explicit account/history coverage metadata", async () => {
+    mockFetch({
+      reporting: reportingPayload(),
+      assets: 1000,
+      liabilities: 200,
+      net_worth: 800,
+      groups: {},
+      coverage: {
+        duplicate_account_coverage: "unverified",
+        history_coverage: "unverified",
+      },
+    });
+
+    const summary = await getAccountsSummary();
+    expect(summary.coverage).toEqual({
+      duplicate_account_coverage: "unverified",
+      history_coverage: "unverified",
+    });
+  });
+});
+
 describe("getSpendingSummary", () => {
   it("maps period + driver fields", async () => {
     mockFetch({
+      reporting: reportingPayload(),
       period_label: "March 2026",
       total: 500,
       previous_total: 400,
@@ -74,6 +124,85 @@ describe("getSpendingSummary", () => {
     expect(s.previousTotal).toBe(400);
     expect(s.changePct).toBe(25);
     expect(s.topDriver).toEqual({ category: "FOOD/OTHER", amount: 100 });
+  });
+
+  it("keeps legacy responses usable when reporting metadata is absent", async () => {
+    mockFetch({
+      period_label: "March 2026",
+      total: 500,
+      previous_total: 400,
+      change: 100,
+      change_pct: 25,
+      projection: 500,
+      top_driver: null,
+      category_comparison: [],
+    });
+
+    const s = await getSpendingSummary({ granularity: "monthly" });
+    expect(s.total).toBe(500);
+    expect(s.reporting.currencyStatus).toBe("unknown");
+    expect(s.reporting.comparisonAvailable).toBe(false);
+    expect(s.reporting.currentPeriod.startDate).toBeNull();
+    expect(s.reporting.comparisonQualification).toContain("API is updated");
+  });
+});
+
+describe("reporting metadata compatibility", () => {
+  it("does not crash overview mapping during a rolling frontend/backend update", async () => {
+    mockFetch({
+      as_of_date: "2026-03-10",
+      net_worth: 1000,
+      assets: 1200,
+      liabilities: 200,
+      month_spend: 500,
+      previous_month_spend: 400,
+      month_income: 1200,
+      previous_month_income: 1000,
+      net_cashflow: 700,
+      previous_net_cashflow: 600,
+      needs_attention: {
+        unreviewed_transactions: 0,
+        uncategorized_transactions: 0,
+        likely_refunds: 0,
+        transfer_pairs_pending: 0,
+      },
+    });
+
+    const s = await getOverviewSummary();
+    expect(s.monthSpend).toBe(500);
+    expect(s.reporting.currency).toBeNull();
+    expect(s.reporting.comparisonAvailable).toBe(false);
+    expect(s.reporting.qualification).toContain("metadata is unavailable");
+  });
+
+  it("degrades incomplete nested metadata instead of dereferencing undefined", async () => {
+    const partial = reportingPayload();
+    delete (partial as Partial<typeof partial>).current_period;
+    mockFetch({
+      reporting: partial,
+      period_label: "March 2026",
+      total: 500,
+      previous_total: 400,
+      change: 100,
+      change_pct: 25,
+      projection: 500,
+      top_driver: null,
+      category_comparison: [],
+    });
+
+    const s = await getSpendingSummary({ granularity: "monthly" });
+    expect(s.reporting.currency).toBe("USD");
+    expect(s.reporting.comparisonAvailable).toBe(false);
+    expect(s.reporting.currentPeriod.startDate).toBe("2026-03-01");
+  });
+});
+
+describe("spending report scope", () => {
+  it("requests the selected yearly comparison instead of reusing monthly data", async () => {
+    const fetchMock = mockFetch({ reporting: reportingPayload(), category_comparison: [] });
+    await getCategoryComparison("yearly");
+    const calledUrl = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]));
+    expect(calledUrl.searchParams.get("granularity")).toBe("yearly");
   });
 });
 

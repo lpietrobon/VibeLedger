@@ -1,0 +1,272 @@
+# Roadmap-as-Files Pattern — Implementation Spec
+
+Hand this whole document to your coding agent with an instruction like:
+
+> Implement this pattern in our repo. Migrate our existing roadmap into it, preserving all current epics/tasks. Build the `scan` script as specified. Don't invent additional fields or structure beyond what's here unless something in our existing roadmap doesn't fit — flag those cases instead of guessing.
+
+---
+
+## 1. Root marker file
+
+Add (or update) `CLAUDE.md` (or `AGENTS.md`, whatever the coding agent convention is) at the project root with a short pointer — the goal is that any agent opening the repo cold finds the roadmap without being told:
+
+```markdown
+## Roadmap
+
+Project roadmap, epics, and tasks live in `/roadmap`, not in this file.
+
+- `/roadmap/epics/<NN-epic-slug>/_epic.md` — one epic's scope, status, revision log
+- `/roadmap/epics/<NN-epic-slug>/tasks/*.md` — individual tasks, YAML frontmatter + body
+- `/roadmap/_registry.md` — GENERATED. Do not hand-edit. Run `roadmap/scan.js` to refresh.
+- `/roadmap/_blocked.md` — GENERATED. Dependency/status issues found by the last scan.
+- `/roadmap/_archive/` — superseded epics/tasks land here, never deleted.
+
+Before starting work: run the scan, read `_registry.md` to see what's unblocked and
+unassigned, then open the specific task file for full context.
+```
+
+---
+
+## 2. Folder structure
+
+```
+roadmap/
+├── epics/
+│   ├── 01-auth-system/
+│   │   ├── _epic.md
+│   │   └── tasks/
+│   │       ├── AUTH-01.md
+│   │       ├── AUTH-02.md
+│   │       └── ...
+│   ├── 02-billing/
+│   │   ├── _epic.md
+│   │   └── tasks/
+│   └── ...
+├── _registry.md        # generated
+├── _blocked.md          # generated
+├── scan.js              # or scan.py — the indexer script
+└── _archive/
+    ├── epics/           # whole epics that were killed/superseded
+    └── tasks/           # individual superseded tasks, kept flat, filename = id
+```
+
+Epic folders are numbered (`01-`, `02-`...) for stable ordering. Leave gaps (`010-`,
+`020-`) if you want to insert epics later without renumbering — with only 5-6 epics
+this is optional, but cheap to do now.
+
+---
+
+## 3. Frontmatter schemas
+
+### Epic file — `epics/<NN-slug>/_epic.md`
+
+```yaml
+---
+id: 01-auth-system
+title: Auth System
+status: in-progress      # planned | scoping | in-progress | blocked | done | superseded
+owner: developer-agent   # optional — who's driving this epic right now
+created: 2026-08-31
+revision: 1               # bump on material scope/direction change
+---
+
+## Goal
+One paragraph: what this epic delivers and why.
+
+## Scope Notes
+What's explicitly in/out. Update this in place — it's the current truth.
+
+## Revision Log
+- rev 1 (2026-08-31): initial scope
+```
+
+### Task file — `epics/<NN-slug>/tasks/<ID>.md`
+
+```yaml
+---
+id: AUTH-01
+epic: 01-auth-system
+title: Implement JWT Login Route
+status: todo              # todo | in-progress | blocked | done | superseded
+dependencies: []           # list of task ids, e.g. [AUTH-00]
+superseded_by: null        # set only when status: superseded
+assigned_agent: developer-agent
+created: 2026-08-31
+---
+
+## Acceptance Criteria
+- [ ] `POST /api/v1/login` returns valid JWT on correct credentials.
+- [ ] Returns `401 Unauthorized` on invalid credentials.
+- [ ] Tokens expire in 24 hours.
+
+## Technical Context
+Use the `jose` library for signing tokens. Secret key from `process.env.JWT_SECRET`.
+
+## Execution Log
+*Agent appends progress notes, command outputs, blocker details here. Never delete
+prior entries — prepend a date stamp per entry.*
+```
+
+**ID convention:** `<EPIC-PREFIX>-<NN>`, prefix is a short stable abbreviation of the
+epic (not the folder number, so it survives epic renumbering). Zero-pad to 2 digits;
+move to 3 if an epic exceeds 99 tasks.
+
+---
+
+## 4. Handling direction changes (don't edit history — supersede)
+
+- **Task-level pivot:** don't rewrite the task. Set `status: superseded`, add
+  `superseded_by: AUTH-07`, leave the file in place (or move to `_archive/tasks/` —
+  pick one convention and stick to it; leaving in place is simpler and keeps
+  dependency references valid). Create the new task with its own id.
+- **Epic-level pivot:** bump `revision` in `_epic.md`, append to `## Revision Log`
+  explaining what changed and why, update `## Scope Notes` to reflect current truth.
+  Individual tasks still get superseded per the rule above.
+- Never silently delete a task or epic file. If something is fully abandoned, set
+  `status: superseded` with no replacement and say so in the epic's revision log.
+
+---
+
+## 5. The `scan` script
+
+Purpose: walk `epics/**/*.md`, parse frontmatter, produce two generated files.
+Never hand-edited, always safe to regenerate, so it's not a merge-conflict source.
+
+**Node.js sketch** (use `gray-matter` for frontmatter parsing, zero other deps):
+
+```js
+#!/usr/bin/env node
+// roadmap/scan.js
+const fs = require('fs');
+const path = require('path');
+const matter = require('gray-matter');
+
+const ROOT = __dirname;
+const EPICS_DIR = path.join(ROOT, 'epics');
+
+function walk(dir, ext, out = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, ext, out);
+    else if (entry.name.endsWith(ext) && !entry.name.startsWith('_registry')
+             && !entry.name.startsWith('_blocked')) out.push(full);
+  }
+  return out;
+}
+
+function loadAll() {
+  const epics = walk(EPICS_DIR, '_epic.md').map(f => ({ file: f, ...matter.read(f).data }));
+  const tasks = walk(EPICS_DIR, '.md')
+    .filter(f => !f.endsWith('_epic.md'))
+    .map(f => ({ file: f, ...matter.read(f).data }));
+  return { epics, tasks };
+}
+
+function buildRegistry(epics, tasks) {
+  const lines = [
+    '# Registry (generated — do not edit by hand)',
+    `_Last scan: ${new Date().toISOString()}_`,
+    '',
+    '## Epics',
+    '| id | title | status | rev | owner |',
+    '|---|---|---|---|---|',
+    ...epics.map(e => `| ${e.id} | ${e.title} | ${e.status} | ${e.revision} | ${e.owner || ''} |`),
+    '',
+    '## Tasks',
+    '| id | epic | status | deps | assigned | title |',
+    '|---|---|---|---|---|---|',
+    ...tasks.map(t =>
+      `| ${t.id} | ${t.epic} | ${t.status} | ${(t.dependencies||[]).join(',')} | ${t.assigned_agent||''} | ${t.title} |`
+    ),
+  ];
+  return lines.join('\n');
+}
+
+function buildBlockedReport(tasks) {
+  const byId = Object.fromEntries(tasks.map(t => [t.id, t]));
+  const issues = [];
+
+  for (const t of tasks) {
+    for (const dep of (t.dependencies || [])) {
+      const d = byId[dep];
+      if (!d) issues.push(`${t.id}: depends on unknown task ${dep}`);
+      else if (d.status === 'superseded')
+        issues.push(`${t.id}: depends on superseded task ${dep} (-> ${d.superseded_by || 'nothing'})`);
+      else if (d.status !== 'done' && t.status === 'in-progress')
+        issues.push(`${t.id}: marked in-progress but dependency ${dep} is not done`);
+    }
+  }
+  // basic cycle check
+  const visiting = new Set(), visited = new Set();
+  function hasCycle(id, chain = []) {
+    if (visiting.has(id)) { issues.push(`Cycle: ${[...chain, id].join(' -> ')}`); return; }
+    if (visited.has(id) || !byId[id]) return;
+    visiting.add(id);
+    for (const dep of (byId[id].dependencies || [])) hasCycle(dep, [...chain, id]);
+    visiting.delete(id); visited.add(id);
+  }
+  tasks.forEach(t => hasCycle(t.id));
+
+  return ['# Blocked / Issues (generated)', '', ...(issues.length ? issues.map(i => `- ${i}`) : ['None.'])].join('\n');
+}
+
+const { epics, tasks } = loadAll();
+fs.writeFileSync(path.join(ROOT, '_registry.md'), buildRegistry(epics, tasks));
+fs.writeFileSync(path.join(ROOT, '_blocked.md'), buildBlockedReport(tasks));
+console.log(`Scanned ${epics.length} epics, ${tasks.length} tasks.`);
+```
+
+Have the coding agent adapt this to Python (`python-frontmatter` package) if that's
+the stack — same structure applies.
+
+**Run it:**
+- As a git pre-commit hook (regenerate before every commit touching `roadmap/`).
+- Or as a step the coordinator agent runs at the start of every session before
+  deciding what to hand off.
+
+---
+
+## 6. Git workflow for parallel epics
+
+- One branch per epic: `epic/01-auth-system`. Agents assigned to that epic commit
+  there; merge conflicts across epics become structurally impossible since each
+  epic owns its own folder.
+- Within an epic, at "tens of tasks" scale, either:
+  - one agent drives the epic at a time (simplest, no intra-epic conflicts), or
+  - task-level branches (`epic/01-auth-system/AUTH-04`) merged frequently if you
+    want true parallelism within an epic.
+- `_registry.md` and `_blocked.md` are generated, so **never merge them** — on
+  conflict, just re-run `scan.js` after the merge and recommit. Consider adding
+  a `.gitattributes` entry (`roadmap/_registry.md merge=ours`) so git doesn't even
+  try to diff them.
+
+---
+
+## 7. Gotchas / best practices
+
+- **Don't hand-edit generated files.** If `_registry.md` drifts from reality,
+  something didn't re-run `scan.js` — fix the workflow, not the file.
+- **IDs are permanent.** Once a task id is used, never reuse it, even after
+  superseding — dependency references and history rely on stable ids.
+- **Keep `dependencies` acyclic and validated.** The scan script's cycle check
+  is cheap insurance; run it, don't skip it.
+- **Status transitions should be enforced, not just documented** — have the
+  coordinator (or a pre-commit check) reject a task moving to `in-progress` if
+  any dependency isn't `done`.
+- **One task = one file, one concern.** If a task file's Execution Log is getting
+  huge and covering unrelated work, it's actually two tasks — split it rather than
+  letting scope creep into one file.
+- **Execution Log is append-only.** Never edit prior entries; agents should
+  prepend or append with a timestamp so the file is a real audit trail.
+- **Epic revision bumps must come with a Revision Log entry.** A bare
+  `revision: 2` with no explanation is useless six weeks later when someone asks
+  "why did this change."
+- **Archive, don't delete.** Superseded work stays queryable. Disk is cheap;
+  losing the "why did we abandon this" record is not.
+- **Don't over-engineer the registry.** Resist the urge to add a database, an
+  API server, or a web UI until the plain-file version actually hurts. At
+  5-6 epics / tens of tasks each, flat files + one scan script is enough for a
+  long while.
+- **Watch for id-prefix collisions** if two epics pick similar prefixes (e.g.
+  `AUTH` vs `API`) — have the coding agent check existing prefixes before
+  assigning a new one when creating an epic.

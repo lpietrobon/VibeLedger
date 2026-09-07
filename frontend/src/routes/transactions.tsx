@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { ArrowDownUp, CalendarDays, Edit3, X } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/client";
 import type { Transaction } from "@/lib/api/types";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { invalidateLedger } from "@/lib/api/cache";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
 
@@ -35,6 +36,7 @@ const FILTER_QUERY: Record<AttentionFilter, string> = {
 
 const SOURCE_LABEL: Record<string, string> = {
   manual: "Manual",
+  refund: "Matched refund",
   rule: "Rule",
   plaid: "Plaid",
   default: "Auto",
@@ -72,6 +74,7 @@ function presetBounds(preset: DatePreset) {
 }
 
 export default function TransactionsPage() {
+  const queryClient = useQueryClient();
   const urlParams = new URLSearchParams(window.location.search);
   const rawFilter = urlParams.get("filter");
   const filter = isAttentionFilter(rawFilter) ? rawFilter : undefined;
@@ -129,7 +132,7 @@ export default function TransactionsPage() {
     payload: Parameters<typeof patchTransactionAnnotation>[1],
   ) => {
     await patchTransactionAnnotation(id, payload);
-    tx.refetch();
+    await invalidateLedger(queryClient);
   };
 
   const selectedCount = selectedIds.size;
@@ -163,7 +166,7 @@ export default function TransactionsPage() {
     if (!ids.length) return;
     await patchTransactionAnnotations(ids, payload);
     setSelectedIds(new Set());
-    tx.refetch();
+    await invalidateLedger(queryClient);
   };
 
   return (
@@ -178,6 +181,9 @@ export default function TransactionsPage() {
       </div>
 
       <Section title="All activity">
+        {tx.isError ? (
+          <p role="alert" className="mb-3 text-sm text-red-600">Could not load transactions: {tx.error.message}</p>
+        ) : null}
         {filter ? (
           <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
             <span>Filtered from Overview: {FILTER_LABEL[filter]}</span>
@@ -403,6 +409,13 @@ export default function TransactionsPage() {
                           title="Part of a transfer pair — excluded from spend and income totals"
                         >
                           Transfer
+                        </span>
+                      ) : t.is_transfer_candidate ? (
+                        <span
+                          className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
+                          title="Possible transfer — still included in income and spending until confirmed"
+                        >
+                          Possible transfer · counted
                         </span>
                       ) : t.pending ? (
                         <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">

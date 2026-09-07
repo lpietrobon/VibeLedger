@@ -41,6 +41,14 @@ export default function AccountsPage() {
         <p className="text-sm text-muted-foreground">Balances across every linked account.</p>
       </div>
 
+      {data?.coverage.duplicate_account_coverage === "unverified" ? (
+        <p className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          Account and history coverage are unverified. If you relink an account, remove the old linked
+          connection first: different provider IDs may describe the same account, and VibeLedger will not
+          guess or merge them.
+        </p>
+      ) : null}
+
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         {data ? (
           <>

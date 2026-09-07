@@ -2,8 +2,8 @@
 mobile (React) app: /analytics/overview, /analytics/spending-summary,
 /analytics/cumulative-spend, and q= search on /transactions.
 
-Data is seeded in 2020 so the "current month" projection branch never triggers
-regardless of when the suite runs, keeping assertions deterministic.
+Data is seeded in 2020 and requests explicitly select a reporting date, so the
+calendar-comparison assertions remain deterministic without latest-row inference.
 """
 from datetime import date
 
@@ -21,7 +21,7 @@ def _seed():
         item = Item(plaid_item_id="i-mob", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id="a-mob", item_id=item.id, name="Checking")
+        account = Account(currency="USD", plaid_account_id="a-mob", item_id=item.id, name="Checking")
         db.add(account)
         db.flush()
 
@@ -52,10 +52,10 @@ def _seed():
 def test_overview_kpis_and_needs_attention():
     _seed()
     with TestClient(app) as client:
-        r = client.get("/analytics/overview", headers=AUTH_HEADERS)
+        r = client.get("/analytics/overview", params={"reporting_date": "2020-03-31"}, headers=AUTH_HEADERS)
     assert r.status_code == 200
     body = r.json()
-    assert body["as_of_date"] == "2020-03-10"
+    assert body["as_of_date"] == "2020-03-31"
     assert body["month_spend"] == 500.0
     assert body["previous_month_spend"] == 400.0
     assert body["month_income"] == 1200.0
@@ -70,14 +70,14 @@ def test_overview_kpis_and_needs_attention():
 def test_spending_summary_monthly():
     _seed()
     with TestClient(app) as client:
-        r = client.get("/analytics/spending-summary", headers=AUTH_HEADERS)
+        r = client.get("/analytics/spending-summary", params={"reporting_date": "2020-03-31"}, headers=AUTH_HEADERS)
     assert r.status_code == 200
     body = r.json()
     assert body["total"] == 500.0
     assert body["previous_total"] == 400.0
     assert body["change"] == 100.0
     assert body["change_pct"] == 25.0
-    assert body["projection"] == 500.0  # 2020-03 is not the live month
+    assert body["projection"] == 500.0  # Complete calendar month.
     assert body["top_driver"]["category"] == "FOOD/OTHER"
     assert body["top_driver"]["amount"] == 100.0
     comp = {row["category"]: row for row in body["category_comparison"]}
@@ -88,9 +88,9 @@ def test_spending_summary_monthly():
 def test_spending_summary_yearly():
     _seed()
     with TestClient(app) as client:
-        r = client.get("/analytics/spending-summary", params={"granularity": "yearly"}, headers=AUTH_HEADERS)
+        r = client.get("/analytics/spending-summary", params={"granularity": "yearly", "reporting_date": "2020-03-31"}, headers=AUTH_HEADERS)
     body = r.json()
-    assert body["period_label"] == "2020 YTD"
+    assert body["period_label"] == "2020 YTD through 2020-03-31"
     assert body["total"] == 900.0
     assert body["previous_total"] == 0.0
     assert body["change_pct"] is None  # no prior-year baseline
@@ -99,7 +99,7 @@ def test_spending_summary_yearly():
 def test_cumulative_spend_monthly():
     _seed()
     with TestClient(app) as client:
-        r = client.get("/analytics/cumulative-spend", headers=AUTH_HEADERS)
+        r = client.get("/analytics/cumulative-spend", params={"reporting_date": "2020-03-31"}, headers=AUTH_HEADERS)
     rows = r.json()
     assert len(rows) == 31  # March
     by_x = {row["x"]: row for row in rows}

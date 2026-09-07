@@ -1,4 +1,5 @@
 from datetime import date
+import hashlib
 from typing import Any
 
 from app.core.config import settings
@@ -93,9 +94,10 @@ class PlaidClient:
 
     def get_accounts(self, access_token: str) -> list[dict[str, Any]]:
         if self._mock:
+            mock_id = self._mock_identity(access_token)
             return [
                 {
-                    "account_id": "acct-001",
+                    "account_id": f"acct-mock-{mock_id}",
                     "name": "Mock Checking",
                     "official_name": "Mock Checking Account",
                     "mask": "0000",
@@ -133,11 +135,12 @@ class PlaidClient:
 
     def sync_transactions(self, access_token: str, cursor: str | None = None) -> dict:
         if self._mock:
+            mock_id = self._mock_identity(access_token)
             return {
                 "added": [
                     {
-                        "transaction_id": "txn-001",
-                        "account_id": "acct-001",
+                        "transaction_id": f"txn-mock-{mock_id}",
+                        "account_id": f"acct-mock-{mock_id}",
                         "date": str(date.today()),
                         "amount": 12.34,
                         "name": "Coffee Shop",
@@ -185,11 +188,12 @@ class PlaidClient:
 
     def get_historical_transactions(self, access_token: str, start_date: date, end_date: date) -> list[dict[str, Any]]:
         if self._mock:
+            mock_id = self._mock_identity(access_token)
             # Mock implementation for historical transactions
             return [
                 {
-                    "transaction_id": "txn-mock-hist-001",
-                    "account_id": "acct-001",
+                    "transaction_id": f"txn-mock-hist-{mock_id}",
+                    "account_id": f"acct-mock-{mock_id}",
                     "date": "2026-01-01",
                     "amount": 50.00,
                     "name": "Old Coffee Shop",
@@ -233,6 +237,11 @@ class PlaidClient:
 
         request = ItemRemoveRequest(access_token=access_token)
         self._client.item_remove(request)
+
+    @staticmethod
+    def _mock_identity(access_token: str) -> str:
+        """Keep mock records isolated per linked token, as Plaid records are."""
+        return hashlib.sha256(access_token.encode("utf-8")).hexdigest()[:12]
 
     @staticmethod
     def _normalize_txn(t: dict[str, Any]) -> dict[str, Any]:

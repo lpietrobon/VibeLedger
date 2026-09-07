@@ -1,7 +1,31 @@
 export type Money = number;
 
+export type ReportingScope = {
+  currency: string | null;
+  currencyStatus: "empty" | "unknown" | "mixed" | "single";
+  currencies: string[];
+  historyCoverage: "unverified";
+  duplicateAccountCoverage: "unverified";
+  qualification: string;
+  startDate: string | null;
+  endDate: string | null;
+  recordedRowCount: number;
+  firstRecordedDate: string | null;
+  lastRecordedDate: string | null;
+};
+
+export type ComparisonReporting = ReportingScope & {
+  reportingDate: string;
+  currentPeriod: ReportingScope;
+  previousPeriod: ReportingScope;
+  comparisonAvailable: boolean;
+  comparisonQualification: string;
+  projectionQualification?: string;
+};
+
 export type OverviewSummary = {
   asOfDate: string;
+  reporting: ComparisonReporting;
   netWorth: Money;
   assets: Money;
   liabilities: Money;
@@ -56,6 +80,10 @@ export type AccountSummary = {
   liabilities: Money;
   net_worth: Money;
   groups: Record<string, Account[]>;
+  coverage: {
+    duplicate_account_coverage: "unverified";
+    history_coverage: "unverified";
+  };
 };
 
 export type Transaction = {
@@ -72,11 +100,13 @@ export type Transaction = {
   plaid_category_detailed?: string | null;
   plaid_category_friendly?: string | null;
   effective_category: string;
-  category_source: "manual" | "rule" | "plaid" | "default";
+  category_source: "manual" | "rule" | "plaid" | "default" | "refund";
   rule_id?: number | null;
   /** True when this transaction is one leg of a transfer pair (so it is
    *  excluded from spend/income analytics). */
   is_transfer?: boolean;
+  /** Candidate pair; it remains included until the user confirms it. */
+  is_transfer_candidate?: boolean;
   transfer_pair_id?: number | null;
   refund_status?: "confirmed" | "likely" | "not_refund" | null;
   refund_match_transaction_id?: number | null;
@@ -95,10 +125,11 @@ export type TransactionsResponse = {
 };
 
 export type SpendingSummary = {
+  reporting: ComparisonReporting;
   periodLabel: string;
   total: Money;
   previousTotal: Money;
-  change: Money;
+  change: Money | null;
   changePct: number | null;
   projection: Money;
   topDriver: {
@@ -182,6 +213,7 @@ export type RecurringSeries = {
 
 export type RecurringResponse = {
   items: RecurringSeries[];
+  reporting?: ReportingScope;
   summary: {
     count: number;
     active_count: number;
@@ -223,6 +255,57 @@ export type SearchSuggestionsResponse = {
   field: string | null;
   replace_token: string;
   suggestions: SearchSuggestion[];
+};
+
+export type SankeyFlow = {
+  category: string;
+  amount: Money;
+};
+
+export type SankeyBucket = {
+  bucket: string;
+  amount: Money;
+  categories: SankeyFlow[];
+};
+
+export type CashflowSankey = {
+  sankeySupported: boolean;
+  visualizationQualification: string | null;
+  negativeCategories: SankeyFlow[];
+  /** Residual credits from categories whose refunds exceed their charges. */
+  netRefundCredits: Money;
+  netRefundCreditCategories: SankeyFlow[];
+  positiveNetSpend: Money;
+  income: Money;
+  totalSpend: Money;
+  savings: Money;
+  deficit: Money;
+  incomeSources: SankeyFlow[];
+  buckets: SankeyBucket[];
+};
+
+export type CategoryMover = {
+  category: string;
+  current: Money;
+  previous: Money;
+  change: Money;
+};
+
+export type CategoryMovers = {
+  month: string;
+  previousMonth: string;
+  items: CategoryMover[];
+};
+
+export type DailySpendPoint = {
+  date: string;
+  amount: Money;
+};
+
+export type DailySpend = {
+  year: number;
+  availableYears: number[];
+  days: DailySpendPoint[];
 };
 
 export type CategoryRuleDraft = {

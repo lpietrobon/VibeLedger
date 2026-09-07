@@ -17,7 +17,7 @@ compact_page()
 render_app_navigation()
 st.title("Transfer reconciliation")
 st.caption(
-    "Auto-matched pairs excluded from cashflow/category totals. Confirm the good ones; unpair the bad ones."
+    "Possible transfers remain counted until confirmed. Confirm genuine internal transfers; unpair incorrect matches."
 )
 
 with st.sidebar.expander("Connection settings", expanded=False):
@@ -31,6 +31,7 @@ with colA:
         if resp.ok:
             st.success(f"Detection done: {resp.json()}")
             st.cache_data.clear()
+            st.rerun()
         else:
             st.error(f"Detect failed: {resp.status_code} {resp.text}")
 
@@ -53,6 +54,7 @@ else:
             if resp.ok:
                 st.success("Confirmed.")
                 st.cache_data.clear()
+                st.rerun()
             else:
                 st.error(f"{resp.status_code} {resp.text}")
     with c2:
@@ -61,6 +63,7 @@ else:
             if resp.ok:
                 st.success("Unpaired.")
                 st.cache_data.clear()
+                st.rerun()
             else:
                 st.error(f"{resp.status_code} {resp.text}")
 
@@ -68,20 +71,23 @@ st.divider()
 st.subheader("Manual pair")
 txns = load_transactions(db_path)
 if not txns.empty:
-    unpaired = txns[~txns.get("is_transfer", False)]
+    unpaired = txns[~txns["is_transfer"] & ~txns["is_transfer_candidate"] & ~txns["pending"]]
     unpaired = unpaired.sort_values("date", ascending=False).head(500)
     unpaired["label"] = unpaired.apply(
         lambda r: f"#{int(r['id'])} {r['date']} {r['account_name']} ${float(r['amount']):,.2f} — {r['name']}",
         axis=1,
     )
-    a = st.selectbox("Transaction A (outflow, amount > 0)", unpaired["label"].tolist(), key="manual_a")
-    b = st.selectbox("Transaction B (inflow, amount < 0)", unpaired["label"].tolist(), key="manual_b")
-    if st.button("Pair A + B"):
+    outflows = unpaired.loc[unpaired["amount"] > 0, "label"].tolist()
+    inflows = unpaired.loc[unpaired["amount"] < 0, "label"].tolist()
+    a = st.selectbox("Transaction A (outflow, amount > 0)", outflows, key="manual_a")
+    b = st.selectbox("Transaction B (inflow, amount < 0)", inflows, key="manual_b")
+    if st.button("Pair A + B", disabled=not a or not b):
         aid = int(a.split()[0].lstrip("#"))
         bid = int(b.split()[0].lstrip("#"))
         resp = api_post("/transfers", json={"txn_a_id": aid, "txn_b_id": bid}, base=api_base)
         if resp.ok:
             st.success("Paired.")
             st.cache_data.clear()
+            st.rerun()
         else:
             st.error(f"{resp.status_code} {resp.text}")

@@ -22,6 +22,7 @@ def _seed_item_and_accounts(db) -> tuple[Item, Account, Account]:
         type="depository",
         subtype="checking",
         current_balance=Decimal("1000.00"),
+        currency="USD",
     )
     credit = Account(
         plaid_account_id="ac-credit",
@@ -30,6 +31,7 @@ def _seed_item_and_accounts(db) -> tuple[Item, Account, Account]:
         type="credit",
         subtype="credit card",
         current_balance=Decimal("250.00"),
+        currency="USD",
     )
     db.add_all([checking, credit])
     db.flush()
@@ -63,6 +65,36 @@ def test_detects_exact_same_day_pair():
         created = transfer_detector.detect_candidates(db)
         assert len(created) == 1
         assert db.query(TransferPair).count() == 1
+    finally:
+        db.close()
+
+
+def test_detects_linked_accounts_without_an_account_type_whitelist():
+    db = SessionLocal()
+    try:
+        item, checking, card = _seed_item_and_accounts(db)
+        savings = Account(
+            plaid_account_id="ac-savings", item_id=item.id, name="Savings",
+            type="depository", subtype="savings", currency="USD",
+        )
+        payment = Account(
+            plaid_account_id="ac-payment", item_id=item.id, name="Payment account",
+            type="payment", subtype="wallet", currency="USD",
+        )
+        db.add_all([savings, payment])
+        db.flush()
+
+        # Checking-to-checking, card repayment, and payment-account funding all
+        # use the same account-identity rule; no account type is privileged.
+        _mk_txn(db, item, checking, 40, date(2024, 1, 10), "savings out")
+        _mk_txn(db, item, savings, -40, date(2024, 1, 10), "savings in")
+        _mk_txn(db, item, checking, 60, date(2024, 1, 11), "card repayment")
+        _mk_txn(db, item, card, -60, date(2024, 1, 11), "card receipt")
+        _mk_txn(db, item, checking, 80, date(2024, 1, 12), "wallet funding")
+        _mk_txn(db, item, payment, -80, date(2024, 1, 12), "wallet receipt")
+        db.commit()
+
+        assert len(transfer_detector.detect_candidates(db)) == 3
     finally:
         db.close()
 
@@ -101,7 +133,7 @@ def test_refuses_to_guess_between_tied_candidates():
     db = SessionLocal()
     try:
         item, checking, credit = _seed_item_and_accounts(db)
-        third = Account(plaid_account_id="ac-3", item_id=item.id, name="Savings", type="depository")
+        third = Account(plaid_account_id="ac-3", item_id=item.id, name="Savings", type="depository", currency="USD")
         db.add(third)
         db.flush()
 
@@ -115,11 +147,53 @@ def test_refuses_to_guess_between_tied_candidates():
         db.close()
 
 
+def test_refuses_symmetric_competing_outflows():
+    """An inflow with two equally-close outflows is also ambiguous.
+
+    Looking only at candidates from each outflow's perspective used to select
+    whichever row happened to have the lower database id.
+    """
+    db = SessionLocal()
+    try:
+        item, checking, credit = _seed_item_and_accounts(db)
+        savings = Account(
+            plaid_account_id="ac-savings", item_id=item.id, name="Savings",
+            type="depository", currency="USD",
+        )
+        db.add(savings)
+        db.flush()
+        _mk_txn(db, item, checking, 50, date(2024, 1, 10), "out one")
+        _mk_txn(db, item, savings, 50, date(2024, 1, 10), "out two")
+        _mk_txn(db, item, credit, -50, date(2024, 1, 11), "single in")
+        db.commit()
+
+        assert transfer_detector.detect_candidates(db) == []
+    finally:
+        db.close()
+
+
+def test_currency_must_be_known_and_equal_for_detection():
+    db = SessionLocal()
+    try:
+        item, checking, credit = _seed_item_and_accounts(db)
+        _mk_txn(db, item, checking, 100, date(2024, 1, 10), "usd out")
+        _mk_txn(db, item, credit, -100, date(2024, 1, 10), "eur in")
+        credit.currency = "EUR"
+        db.commit()
+        assert transfer_detector.detect_candidates(db) == []
+
+        credit.currency = None
+        db.commit()
+        assert transfer_detector.detect_candidates(db) == []
+    finally:
+        db.close()
+
+
 def test_prefers_the_closer_candidate_when_not_tied():
     db = SessionLocal()
     try:
         item, checking, credit = _seed_item_and_accounts(db)
-        third = Account(plaid_account_id="ac-3", item_id=item.id, name="Savings", type="depository")
+        third = Account(plaid_account_id="ac-3", item_id=item.id, name="Savings", type="depository", currency="USD")
         db.add(third)
         db.flush()
 
@@ -185,7 +259,7 @@ def test_unrelated_equal_amounts_still_pair_accepted_limitation():
     db = SessionLocal()
     try:
         item, checking, amex = _seed_item_and_accounts(db)
-        visa = Account(plaid_account_id="ac-visa", item_id=item.id, name="Visa", type="credit")
+        visa = Account(plaid_account_id="ac-visa", item_id=item.id, name="Visa", type="credit", currency="USD")
         db.add(visa)
         db.flush()
 

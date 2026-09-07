@@ -1,5 +1,7 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
+from app.api.routes import cashflow_trend
 from app.core.time import utcnow
 from app.db.session import SessionLocal
 from app.models.models import (
@@ -8,6 +10,7 @@ from app.models.models import (
     AnnotationFingerprint,
     CategoryDecisionEvent,
     Item,
+    RejectedTransferPair,
     SyncRun,
     SyncState,
     Transaction,
@@ -15,6 +18,7 @@ from app.models.models import (
     TransferPair,
 )
 from app.services.security import encrypt_token
+from app.services import transfer_detector
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.txn_fingerprint import compute_txn_hash
 
@@ -496,6 +500,71 @@ def test_historical_sync_adds_without_advancing_sync_state():
         assert run.added_count == 1
 
 
+def test_historical_counterpart_is_reconciliable_and_visible_without_rebuild():
+    """New historical evidence is queried directly; it is not a report-cache rebuild."""
+    class CounterpartHistoryClient(FakeHistoricalClient):
+        def get_accounts(self, _access_token):
+            return [
+                *super().get_accounts(_access_token),
+                {
+                    "account_id": "acct-card",
+                    "name": "Card",
+                    "official_name": None,
+                    "mask": "9876",
+                    "type": "credit",
+                    "subtype": "credit card",
+                    "current_balance": 50.0,
+                    "available_balance": None,
+                    "iso_currency_code": "USD",
+                    "limit": 1000.0,
+                },
+            ]
+
+        def get_historical_transactions(self, _access_token, start_date, end_date):
+            return [
+                {
+                    "transaction_id": "txn-historical-counterpart",
+                    "account_id": "acct-card",
+                    "date": "2026-04-11",
+                    "amount": -50.0,
+                    "name": "Card payment",
+                    "merchant_name": None,
+                    "plaid_category_primary": "TRANSFER",
+                    "pending": False,
+                }
+            ]
+
+    service = SyncService(client=CounterpartHistoryClient())
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="item-history-counterpart", access_token_encrypted=encrypt_token("tok"), status="active")
+        db.add(item)
+        db.flush()
+        checking = Account(plaid_account_id="acct-100", item_id=item.id, name="Checking", currency="USD")
+        db.add(checking)
+        db.flush()
+        db.add(Transaction(
+            plaid_transaction_id="txn-existing-outflow", account_id=checking.id, item_id=item.id,
+            date=date(2026, 4, 10), amount=50.0, name="Card payment", pending=False,
+        ))
+        db.commit()
+
+        before = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False)
+        assert before == [{"month": "2026-04", "expenses": 50.0, "income": 0.0, "net": -50.0}]
+
+        result = service.sync_item_historical(db, item.id, date(2026, 4, 1), date(2026, 4, 30))
+
+        assert result == {"status": "success", "added": 1, "modified": 0, "removed": 0}
+        pair = db.query(TransferPair).one()
+        assert (pair.txn_out_id, pair.confirmed) == (
+            db.query(Transaction).filter_by(plaid_transaction_id="txn-existing-outflow").one().id,
+            False,
+        )
+        # Candidates remain realized until confirmation, but the historical
+        # counterparty is immediately available to reports and reconciliation.
+        after = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False)
+        assert after == [{"month": "2026-04", "expenses": 50.0, "income": 50.0, "net": 0.0}]
+
+
 def test_historical_sync_rejects_concurrent_run():
     service = SyncService(client=FakeHistoricalClient())
     with SessionLocal() as db:
@@ -613,6 +682,7 @@ def test_removed_transaction_takes_its_dependent_rows_with_it():
             refund_reason="Exact account, amount, and transaction-name match",
         ))
         db.add(TransferPair(txn_out_id=txn.id, txn_in_id=other.id))
+        db.add(RejectedTransferPair(txn_out_id=txn.id, txn_in_id=other.id))
         db.add(CategoryDecisionEvent(
             transaction_id=txn.id,
             new_effective_category="FOOD/DINING",
@@ -629,6 +699,7 @@ def test_removed_transaction_takes_its_dependent_rows_with_it():
             TransactionAnnotation.transaction_id == removed_id
         ).count() == 0
         assert db.query(TransferPair).count() == 0
+        assert db.query(RejectedTransferPair).count() == 0
         assert db.query(CategoryDecisionEvent).filter(
             CategoryDecisionEvent.transaction_id == removed_id
         ).count() == 0
@@ -643,3 +714,201 @@ def test_removed_transaction_takes_its_dependent_rows_with_it():
 
         # And the manual edit is not lost — the fingerprint still carries it.
         assert db.query(AnnotationFingerprint).count() >= 0
+
+
+class LifecycleClient(FakePlaidClient):
+    """A mutable provider page for sync lifecycle regression tests."""
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def sync_transactions(self, _access_token, _cursor):
+        return self.payload
+
+
+def _lifecycle_record(transaction_id="posted", **changes):
+    return {
+        "transaction_id": transaction_id,
+        "account_id": "acct-100",
+        "date": "2026-04-10",
+        "amount": 25.31,
+        "name": "Cafe",
+        "merchant_name": "Cafe",
+        "plaid_category_primary": "FOOD_AND_DRINK",
+        "pending": False,
+        **changes,
+    }
+
+
+def _lifecycle_item(db, suffix="one"):
+    item = Item(
+        plaid_item_id=f"lifecycle-{suffix}",
+        access_token_encrypted=encrypt_token(f"token-{suffix}"),
+        status="active",
+    )
+    db.add(item)
+    db.commit()
+    return item
+
+
+def test_pending_posted_replacement_keeps_one_row_and_manual_annotation():
+    client = LifecycleClient({"added": [_lifecycle_record("pending", pending=True)], "next_cursor": "one"})
+    service = SyncService(client)
+    with SessionLocal() as db:
+        item = _lifecycle_item(db)
+        service.sync_item(db, item.id)
+        pending = db.query(Transaction).one()
+        local_id = pending.id
+        db.add(TransactionAnnotation(transaction_id=pending.id, user_category="FOOD/DINING", reviewed=True))
+        db.add(AnnotationFingerprint(
+            txn_hash=pending.txn_hash,
+            txn_occurrence=pending.txn_occurrence,
+            account_mask="1234",
+            txn_date=pending.date,
+            amount=pending.amount,
+            name=pending.name,
+            user_category="FOOD/DINING",
+            reviewed=True,
+            source_transaction_id=pending.id,
+            applied_transaction_id=pending.id,
+        ))
+        db.commit()
+
+        client.payload = {
+            "added": [_lifecycle_record(
+                "posted", amount=30.0, date="2026-04-12", _source={"pending_transaction_id": "pending"}
+            )],
+            "removed": [{"transaction_id": "pending"}],
+            "next_cursor": "two",
+        }
+        result = service.sync_item(db, item.id)
+
+        assert result == {"status": "success", "added": 0, "modified": 1, "removed": 0, "cursor": "two"}
+        posted = db.query(Transaction).one()
+        assert (posted.id, posted.plaid_transaction_id, posted.pending) == (local_id, "posted", False)
+        assert (posted.amount, posted.date) == (Decimal("30.00"), date(2026, 4, 12))
+        assert db.query(TransactionAnnotation).filter_by(transaction_id=posted.id).one().user_category == "FOOD/DINING"
+        fingerprint = db.query(AnnotationFingerprint).one()
+        assert (fingerprint.applied_transaction_id, fingerprint.txn_hash) == (posted.id, posted.txn_hash)
+
+
+def test_source_update_invalidates_derived_matches_but_keeps_notes():
+    client = LifecycleClient({"added": [_lifecycle_record()], "next_cursor": "one"})
+    service = SyncService(client)
+    with SessionLocal() as db:
+        item = _lifecycle_item(db)
+        service.sync_item(db, item.id)
+        tx = db.query(Transaction).one()
+        account = Account(plaid_account_id="lifecycle-counterparty", item_id=item.id, name="Card")
+        db.add(account)
+        db.flush()
+        counterparty = Transaction(
+            plaid_transaction_id="lifecycle-payment", account_id=account.id, item_id=item.id,
+            date=tx.date, amount=-tx.amount, name="Payment", pending=False,
+        )
+        db.add(counterparty)
+        db.add(TransactionAnnotation(transaction_id=tx.id, notes="keep this note", reviewed=True))
+        db.flush()
+        db.add(TransferPair(txn_out_id=tx.id, txn_in_id=counterparty.id, confirmed=True, detected_by="manual"))
+        db.add(TransactionAnnotation(
+            transaction_id=counterparty.id, refund_status="likely", refund_match_transaction_id=tx.id,
+        ))
+        db.commit()
+
+        client.payload = {"modified": [_lifecycle_record(date="2026-04-13")], "next_cursor": "two"}
+        assert service.sync_item(db, item.id)["modified"] == 1
+
+        assert db.query(TransferPair).count() == 0
+        assert db.query(TransactionAnnotation).filter_by(transaction_id=tx.id).one().notes == "keep this note"
+        refund = db.query(TransactionAnnotation).filter_by(transaction_id=counterparty.id).one()
+        assert refund.refund_match_transaction_id is None
+
+
+def test_source_correction_unrejects_stale_evidence_and_redetects():
+    client = LifecycleClient({"added": [_lifecycle_record("out")], "next_cursor": "one"})
+    service = SyncService(client)
+    with SessionLocal() as db:
+        item = _lifecycle_item(db, "correction")
+        service.sync_item(db, item.id)
+        out = db.query(Transaction).filter_by(plaid_transaction_id="out").one()
+        counterparty_account = Account(
+            plaid_account_id="correction-counterparty", item_id=item.id,
+            name="Savings", type="depository", currency="USD",
+        )
+        db.add(counterparty_account)
+        db.flush()
+        inn = Transaction(
+            plaid_transaction_id="old-in", account_id=counterparty_account.id, item_id=item.id,
+            date=date(2026, 4, 13), amount=-out.amount, name="Old counterpart", pending=False,
+        )
+        db.add(inn)
+        db.flush()
+        candidate = transfer_detector.detect_candidates(db)[0]
+        transfer_detector.reject_pair(db, candidate.txn_out_id, candidate.txn_in_id)
+        db.delete(candidate)
+        db.commit()
+        assert db.query(RejectedTransferPair).count() == 1
+
+        # This is a material provider correction to the same transaction ID.
+        # Its old rejection is no longer evidence about the corrected record.
+        client.payload = {
+            "modified": [_lifecycle_record("out", date="2026-04-12")],
+            "next_cursor": "two",
+        }
+        result = service.sync_item(db, item.id)
+
+        assert result["modified"] == 1
+        assert db.query(RejectedTransferPair).count() == 0
+        pair = db.query(TransferPair).one()
+        assert (pair.txn_out_id, pair.txn_in_id, pair.confirmed) == (out.id, inn.id, False)
+
+
+def test_new_history_replaces_an_unconfirmed_auto_candidate():
+    class TwoAccountLifecycleClient(LifecycleClient):
+        def get_accounts(self, access_token):
+            return super().get_accounts(access_token) + [{
+                "account_id": "acct-200",
+                "name": "Savings",
+                "official_name": None,
+                "mask": "2222",
+                "type": "depository",
+                "subtype": "savings",
+                "current_balance": 500.0,
+                "available_balance": 500.0,
+                "iso_currency_code": "USD",
+                "limit": None,
+            }]
+
+    client = TwoAccountLifecycleClient({"added": [_lifecycle_record("out")], "next_cursor": "one"})
+    service = SyncService(client)
+    with SessionLocal() as db:
+        item = _lifecycle_item(db, "history")
+        service.sync_item(db, item.id)
+        out = db.query(Transaction).filter_by(plaid_transaction_id="out").one()
+        savings = db.query(Account).filter_by(plaid_account_id="acct-200").one()
+        old_in = Transaction(
+            plaid_transaction_id="old-in", account_id=savings.id, item_id=item.id,
+            date=date(2026, 4, 13), amount=-out.amount, name="Older counterpart", pending=False,
+        )
+        db.add(old_in)
+        db.commit()
+        assert transfer_detector.detect_candidates(db)[0].txn_in_id == old_in.id
+
+        # A newly imported counterpart is closer. Sync clears only automatic
+        # candidates and recomputes; it must not retain the older guess.
+        client.payload = {
+            "added": [_lifecycle_record(
+                "new-in", account_id="acct-200", amount=-25.31, date="2026-04-11",
+                name="New counterpart",
+            )],
+            "next_cursor": "two",
+        }
+        result = service.sync_item(db, item.id)
+
+        assert result["added"] == 1
+        pairs = db.query(TransferPair).all()
+        assert len(pairs) == 1
+        new_in = db.query(Transaction).filter_by(plaid_transaction_id="new-in").one()
+        assert (pairs[0].txn_out_id, pairs[0].txn_in_id, pairs[0].confirmed) == (
+            out.id, new_in.id, False,
+        )

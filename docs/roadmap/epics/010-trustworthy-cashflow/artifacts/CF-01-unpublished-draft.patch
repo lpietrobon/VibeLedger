@@ -1,0 +1,4003 @@
+diff --git a/.gitignore b/.gitignore
+index 2842de2508a57f68b13f849cd44b41265cc7c72e..d0a039b7e3c3f1e970a8874b6c8580a0bb0da0fa 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -12,6 +12,8 @@ __pycache__/
+ .pytest_cache/
+ .coverage
+ htmlcov/
++coverage.xml
++coverage.json
+ *.egg-info/
+ analytics/out/
+ node_modules/
+diff --git a/CLAUDE.md b/CLAUDE.md
+index d8652b5545a9e8e8f4d5bf100c48c01376ba6044..64c89cf8e354ede3453429ad43f6589b248c4e9a 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -55,15 +55,15 @@ This setting is **not retroactive** for existing items. To extend history on an
+ 1. `POST /items/{item_id}/remove` — removes the Plaid item and deletes local accounts/transactions/annotations/transfer pairs for it. Manual annotations are preserved via `annotation_fingerprints` (see below) and reapplied automatically on re-sync if the same transactions come back.
+ 2. Re-link via the connect flow above.
+ 3. `POST /sync/item/{new_item_id}` (retry after a few minutes for backfill).
+-4. `POST /category-rules/recompute-all` — categorization rules aren't applied automatically during sync.
++4. Enabled category rules are applied to added/modified transactions during sync; manual categories keep precedence. Use `POST /category-rules/recompute-all` to apply changed rules to older records too.
+ 
+ ## Test
+ 
+ ```bash
+-pytest
++python -m pytest --cov --cov-report=term-missing
+ ```
+ 
+-Uses `PLAID_USE_MOCK=true` and a temp SQLite DB (`tests/conftest.py`). No external services needed. ~70 tests.
++Uses `PLAID_USE_MOCK=true` and a temp SQLite DB (`tests/conftest.py`). No external services needed. Install `.[dev,dashboard]` for the complete suite. Coverage includes all of `app/`, with branch measurement and an 80% combined minimum. GitHub Actions also runs frontend tests, typecheck, and build; backend coverage does not describe UI coverage. Use synthetic accounting scenarios rather than adding tests merely to increase the percentage.
+ 
+ ## Project layout
+ 
+@@ -88,7 +88,8 @@ app/
+     sync_service.py          # Transaction sync pipeline + annotation fingerprint reapply
+     txn_fingerprint.py       # Content hash for transactions (account mask + date + amount + name)
+     scheduler.py             # Background scheduled sync loop
+-    transfer_detector.py     # Heuristic pair-match for double-entry transfers
++    accounting.py            # Posted accounting expressions and comparable reporting periods
++    transfer_detector.py     # Review candidates and validated confirmed internal transfers
+     refund_detector.py       # High-confidence refund matching + manual override support
+     recurring_detector.py    # Deterministic subscription / recurring-payment detection (pure functions)
+     category_resolver.py     # Rule compilation + Plaid->friendly category map (shared by API and SQL view)
+@@ -134,7 +135,7 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
+ 
+ **Transactions & annotations:**
+ - `GET /transactions` — supports `start_date`, `end_date`, `category`, `limit`, `offset`, and `q` (parsed search, see below).
+-- **Search grammar** (`app/services/search_query.py`, canonical + server-side): `q` accepts `merchant:`, `category:`/`cat:`, `account:`, `>50`/`<100` (absolute amount), `from:`/`to:` (YYYY-MM snaps to month bounds), `is:unreviewed|reviewed|uncategorized|refund|likely-refund|not-transfer|pending`, quoted values (`merchant:"blue bottle"`), and bare words as free text over name/merchant/category. A parent category matches its children (`FOOD` matches `FOOD/DINING`). Unknown `field:value` tokens fall through to free text rather than matching nothing. See `docs/transaction-search-spec.md`.
++- **Search grammar** (`app/services/search_query.py`, canonical + server-side): `q` accepts `merchant:`, `category:`/`cat:`, `account:`, `>50`/`<100` (absolute amount), `from:`/`to:` (YYYY-MM snaps to month bounds), `is:unreviewed|reviewed|uncategorized|refund|likely-refund|not-transfer|pending|posted|spend`, quoted values (`merchant:"blue bottle"`), and bare words as free text over name/merchant/category. `is:spend` selects the posted expense/refund rows underlying spending totals and excludes confirmed transfers. A parent category matches its children (`FOOD` matches `FOOD/DINING`). Unknown `field:value` tokens fall through to free text rather than matching nothing. See `docs/transaction-search-spec.md`.
+ - `GET /transactions/search-suggestions?q=` — context-aware dropdown data: the field menu when between tokens, real DB values (ordered by frequency) inside a `field:` token. This is what makes the syntax discoverable instead of memorized.
+ - `GET /categories` — the vocabulary offered by category pickers: every category in use (with transaction counts), plus category-rule targets and a curated starter set (`DEFAULT_CATEGORIES` in `app/services/category_catalog.py`). Each item is `{value, count, source}` where source is `ledger|rule|default`. Case variants are merged — notably the SQL fallback literal `uncategorized` and a manual `UNCATEGORIZED` annotation collapse into one row. `PARENT/CHILD` is a convention, not an invariant: 1-level values (unmapped Plaid primaries) and 3+-level values are returned as-is.
+ - `PATCH /transactions/{id}/annotation` — set `user_category`, `merchant_name_override`, `notes`, `reviewed`. Also upserts an `annotation_fingerprints` row keyed by the transaction's content hash, so the annotation survives item removal/re-link.
+@@ -142,11 +143,11 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
+ - `POST /refunds/detect` — recompute automatic refund matches. Exact same-account, amount, and transaction-name matches become `likely`; Plaid refund codes become `confirmed`. Manual `confirmed`/`not_refund` choices override detection.
+ 
+ **Analytics:**
+-- `GET /analytics/monthly-spend`, `/category-spend`, `/cashflow-trend` — support `start_date`/`end_date`; exclude transfer-paired/`is_transfer_override` transactions by default (`?include_transfers=true` for raw numbers).
++- `GET /analytics/monthly-spend`, `/category-spend`, `/cashflow-trend` — support `start_date`/`end_date`; posted activity only, excluding confirmed transfer pairs by default (`?include_transfers=true` includes confirmed transfers but still excludes pending authorizations). Candidates stay counted; legacy `is_transfer_override` is inert.
+ - `GET /analytics/accounts-summary` — balances by type + net worth.
+ - `GET /analytics/recurring` — detected subscriptions/recurring payments grouped by merchant, with cadence (weekly/biweekly/monthly/quarterly/yearly), average amount, next expected date, monthly/annual estimates, and effective `status` (`active`/`inactive`) plus `auto_status` (what the detector inferred) and `manual_status` (`kept`/`canceled`/null). Supports `start_date`/`end_date`, `status`, `min_monthly`. Excludes transfers and refunds; detection logic is deterministic (`app/services/recurring_detector.py`).
+ - `POST /analytics/recurring/{merchant_key}/status` — manual status override, persisted per merchant in `recurring_overrides` (keyed by the detector's `merchant_key`): `kept` forces active, `canceled` forces inactive, `auto` clears it. The GET response's effective `status` and the active totals reflect the override, while `auto_status` preserves the detector's own call for auditing.
+-- `GET /analytics/overview` — one-shot Overview summary (net worth, current/previous month spend/income/net, needs-attention counts). Backs the React Overview screen.
++- `GET /analytics/overview` — one-shot Overview summary (net worth, current-month spend/income/net against the comparable prior period, needs-attention counts). Uses today's calendar month even if no recent transactions exist; transaction freshness is separate from reporting dates.
+ - `GET /analytics/spending-summary?granularity=monthly|yearly` — period total, comparison, projection, top driver, and per-category diff.
+ - `GET /analytics/cumulative-spend?granularity=monthly|yearly` — cumulative spend pace for the current period vs the prior three.
+ - These three consolidate what the React client used to compute in the browser, so money math stays server-side (single source of truth). `GET /transactions` also accepts `q=` for server-side name/merchant/category search.
+@@ -155,11 +156,11 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
+ **Transfers (double-entry reconciliation):**
+ - `POST /transfers/detect` — pairs unpaired opposite-sign transactions on different accounts within `window_days` (default 3). Idempotent.
+ - `GET /transfers`, `POST /transfers` (manual pair), `POST /transfers/{id}/confirm`, `DELETE /transfers/{id}`.
+-- A transfer is **only** a matched pair across two covered accounts — that is the sole thing that can double-count money as both income and expense. Analytics exclude paired transactions; nothing else.
++- A transfer excluded from analytics is a **confirmed** pair across two linked accounts. Automatic pairs are review candidates and remain in income/spending until confirmed. Confirmation validates posted status, different accounts, equal opposite nonzero amounts, and compatible currencies. Manual pairing confirms immediately.
+ - The legacy one-sided `is_transfer_override` column is **no longer honored**. It removed single transactions from every analytic with no counterparty, could not be set or cleared through any API (contrary to earlier docs), and survived re-sync via annotation fingerprints — so anything carrying it was silently and permanently missing from spend and income. The column remains for now but is inert.
+ - `POST /transfers/detect?reset_auto=true` discards unconfirmed auto pairs before re-detecting; confirmed and manual pairs are kept.
+ - **Unpairing is remembered.** `DELETE /transfers/{id}` records the combination in `rejected_transfer_pairs`, because detection re-runs after every sync — without it an unpaired false positive reappears immediately and the review page is a treadmill. Manually pairing the same two transactions clears the rejection.
+-- Matching is deliberately conservative but **not precise**: with only amount + date + different-account it cannot tell a real transfer from two unrelated transactions of the same size (a rent payment vs a card payment). Accepted for now — the mitigation is visibility (Transfer badge in the transactions list) plus durable manual correction.
++- Matching considers equal amounts, currency, nearby posting dates in either direction, and a mutually unique closest candidate. It cannot prove ownership from descriptions; candidate badges/review and durable rejection are essential. Provider corrections that change posting date, amount, account, currency, or pending state invalidate affected pairs for review.
+ 
+ **Dashboard:**
+ - Reads SQLite directly (cached, fast); writes go through the FastAPI endpoints (auth/validation/transfer logic stay centralized). Server-computed analytics (e.g. the Recurring page) read via the API so the logic isn't duplicated in the dashboard.
+diff --git a/README.md b/README.md
+index 0781ae3a94a87f6868673d381cc26863f6a4f9d0..6457d8946d26553fbf0b06f4e456bc392c4e0636 100644
+--- a/README.md
++++ b/README.md
+@@ -17,15 +17,23 @@ pip install -e '.[dev,dashboard]'   # drop `dashboard` if you only need the API
+ uvicorn app.main:app --reload
+ ```
+ 
+-The `dashboard` extra installs Streamlit/pandas/requests. Omit it if you only run the API or tests.
++The `dashboard` extra installs Streamlit/pandas/requests. Install it for the full
++test suite, which also checks the desktop dashboard's accounting helpers.
+ 
+ In a separate shell, run tests:
+ 
+ ```bash
+ source .venv/bin/activate
+-pytest
++python -m pytest --cov --cov-report=term-missing
+ ```
+ 
++Coverage includes all backend code under `app/`, with branches enabled and an
++80% minimum enforced by `pyproject.toml`. This is not a whole-UI coverage claim.
++Tests use synthetic records and mocked Plaid calls. GitHub Actions runs the full
++Python suite plus the frontend tests, typecheck, and production build on pushes
++and pull requests. Frontend checks can be run from `frontend/` with `npm ci`,
++`npm test`, `npm run typecheck`, and `npm run build`.
++
+ ### Fixing a broken venv
+ 
+ Venvs embed absolute paths in their script shebangs. If you move the project directory, rename your user, or clone onto a different machine, the venv will break with "bad interpreter" errors. Recreate it:
+@@ -98,13 +106,13 @@ Tables are auto-created via `Base.metadata.create_all()` on boot. There is no mi
+ 
+ A Streamlit multipage app provides a consolidated view:
+ 
+-- **Overview** — net worth, current-month spend/income vs last month, and a "needs attention" queue.
++- **Overview** — net worth, posted current-month spend/income vs the comparable portion of last month, and a "needs attention" queue.
+ - **Transactions** — browse, filter (power-user query syntax), and annotate (category/merchant/notes/reviewed/refund).
+ - **Spending** — category breakdown, period comparison, and drill-down.
+ - **Cashflow** — monthly income vs expense and net trend (transfers excluded by default).
+ - **Accounts** — balances grouped by type with assets/liabilities/net-worth; per-account nicknames.
+ - **Recurring** — detected subscriptions/recurring payments with cadence, next expected charge, and monthly/annual cost estimates.
+-- **Transfers** — auto-detected pairs (e.g. credit-card payments crossing checking + credit) awaiting confirmation, plus manual pairing and `is_transfer_override` toggles. Transfer-paired transactions are excluded from cashflow/spend analytics so they don't double-count.
++- **Transfers** — possible pairs (e.g. checking-to-card repayments) awaiting confirmation, plus manual pairing. Only confirmed pairs are excluded from posted cashflow/spending; possible pairs remain counted until reviewed. The old one-sided `is_transfer_override` is inert.
+ - **Rules** — manage regex/amount-based category rules with preview and apply.
+ - **Add account** (under "More") — launch Plaid Link in the browser to connect a new bank, then sync.
+ 
+@@ -223,6 +231,24 @@ APP_BASE_URL=https://<your-machine>.tail1234.ts.net
+ 
+ ## Notes
+ 
++- **Accounting boundary.** All linked accounts are in scope. Posted purchases
++  count as spending; confirmed movements between linked accounts do not count
++  again. Pending activity remains visible in Transactions but is excluded from
++  posted analytics. Refunds marked confirmed/likely reduce spending, on the
++  refund posting date. Person-to-person reimbursement matching is not automated.
++- **Review candidates after upgrading.** Existing unconfirmed transfer guesses
++  now remain in totals. Totals can increase until genuine transfers are confirmed;
++  this prevents an incorrect guess from silently hiding spending.
++- **Deduplication.** Reimporting the same provider transaction ID updates its
++  existing record. Distinct IDs are not deleted just because amounts and dates
++  match: these may be real repeated charges. Independently linking the same bank
++  account twice under different provider identities is not automatically merged.
++- **Supported scope.** This pass hardens existing ingestion and accounting; it
++  does not add a Venmo connector, currency conversion, suspicious-charge engine,
++  or investment analysis. Payment-service records follow the same accounting
++  rules when available through the existing data source. Use one reporting
++  currency; aggregate charts do not convert or separate currencies.
++
+ - **Single-threaded SQLite.** Concurrent API requests are serialized at the DB level. Fine for single-user.
+ - **No migration framework.** Column additions and backfills are applied idempotently on startup by `app/db/schema_patches.py`; only larger structural changes may warrant a manual rebuild. Back up `~/.vibeledger/vibeledger.db` before changes.
+ - **Link token expiry.** Plaid link tokens expire after 4 hours. The 20-minute session TTL mitigates this in practice.
+diff --git a/Spend.py b/Spend.py
+index 3c6126a8c059df6635722002ba6bf232cdfbfe29..a9bf70245ed60dab9a9ac210e4fd6afdb4d9249f 100644
+--- a/Spend.py
++++ b/Spend.py
+@@ -7,12 +7,15 @@ import pandas as pd
+ import plotly.express as px
+ import streamlit as st
+ 
++from app.services.accounting import comparable_periods
++
+ from dashboard_lib import (
+     DEFAULT_DB,
+     compact_page,
+     load_accounts,
+     load_transactions,
+     overview_period_summary,
++    posted_transactions,
+     render_app_navigation,
+     spend_transactions,
+     tech_sidebar,
+@@ -38,10 +41,8 @@ if transactions.empty:
+     tech_sidebar()
+     st.stop()
+ 
+-today = min(date.today(), transactions["date"].max())
+-current_start = today.replace(day=1)
+-previous_end = current_start - timedelta(days=1)
+-previous_start = previous_end.replace(day=1)
++today = date.today()
++current_start, _, previous_start, previous_end, _ = comparable_periods(today, "monthly")
+ 
+ summary = overview_period_summary(
+     transactions[~transactions["is_transfer"]],
+@@ -60,11 +61,18 @@ net_worth = assets - liabilities
+ 
+ spend_delta_pct = None
+ if summary["previous_spend"]:
+-    spend_delta_pct = summary["spend_change"] / summary["previous_spend"] * 100
+-
+-st.caption(f"Through {today:%B %-d, %Y}")
++    spend_delta_pct = summary["spend_change"] / abs(summary["previous_spend"]) * 100
++
++st.caption(f"Reporting through {today:%B %-d, %Y} · compared with {previous_start:%b %-d}–{previous_end:%-d}")
++posted = posted_transactions(transactions)
++latest_posted = posted["date"].max() if not posted.empty else "none"
++st.caption(f"Latest posted transaction: {latest_posted}. This does not confirm that every account is synced.")
++candidates = transactions[transactions["is_transfer_candidate"]]
++if not candidates.empty:
++    st.caption("Totals include possible transfers awaiting confirmation.")
++    st.page_link("pages/0_Transfers.py", label="Review possible transfers")
+ spend_delta_text = (
+-    f"{spend_delta_pct:+.1f}% vs last month"
++    f"{spend_delta_pct:+.1f}% vs comparable prior period"
+     if spend_delta_pct is not None
+     else "No prior comparison"
+ )
+@@ -104,7 +112,7 @@ st.markdown(
+ 
+ left, right = st.columns([3, 2])
+ with left:
+-    st.subheader("Spending change")
++    st.subheader("Spending change · comparable periods")
+     current_spend = spend_transactions(
+         transactions[
+             (transactions["date"] >= current_start)
+@@ -226,7 +234,7 @@ with right:
+ 
+ st.subheader("Recent transactions")
+ recent = transactions[~transactions["is_transfer"]].sort_values("date", ascending=False).head(8)
+-recent_cols = ["date", "effective_merchant", "effective_category", "amount"]
++recent_cols = ["date", "effective_merchant", "effective_category", "amount", "pending"]
+ st.dataframe(
+     recent[recent_cols],
+     use_container_width=True,
+diff --git a/app/api/routes.py b/app/api/routes.py
+index f8e70ce33031ea21c21aa08d05cfa195b1c86a5b..f3eb7f5f1d90f59e3d14896f668ef5f243ad999a 100644
+--- a/app/api/routes.py
++++ b/app/api/routes.py
+@@ -12,7 +12,7 @@ import time
+ from fastapi import APIRouter, Depends, HTTPException, Query
+ from fastapi.responses import HTMLResponse
+ from sqlalchemy import case, func, or_, select, text
+-from sqlalchemy.orm import Session
++from sqlalchemy.orm import Session, aliased
+ 
+ from app.core.config import settings
+ from app.core.time import utcnow
+@@ -27,6 +27,7 @@ from app.models.models import (
+     ConnectSession,
+     Item,
+     RecurringOverride,
++    RejectedTransferPair,
+     SyncRun,
+     SyncState,
+     Transaction,
+@@ -60,6 +61,14 @@ from app.services.search_query import (
+     parse_query,
+     suggestion_context,
+ )
++from app.services.accounting import (
++    comparable_periods,
++    exclude_confirmed_transfers,
++    expense_amount,
++    income_amount,
++    is_refund,
++    posted_activity,
++)
+ from app.services.category_resolver import (
+     PLAID_DETAILED_FRIENDLY_MAP,
+     PLAID_FRIENDLY_MAP,
+@@ -74,17 +83,17 @@ logger = logging.getLogger(__name__)
+ _CONNECT_TUNNEL_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "connect_funnel.sh"
+ 
+ 
+-def _friendly_plaid_case():
++def _friendly_plaid_case(tx=Transaction):
+     """SQL CASE mapping raw Plaid primary -> friendly category, built from the
+     shared PLAID_FRIENDLY_MAP so the API matches the effective_transactions view."""
+     whens = [
+-        (Transaction.plaid_category_primary == plaid, friendly)
++        (tx.plaid_category_primary == plaid, friendly)
+         for plaid, friendly in PLAID_FRIENDLY_MAP.items()
+     ]
+     detailed_whens = [
+         (
+             func.json_extract(
+-                Transaction.raw_json,
++                tx.raw_json,
+                 "$.personal_finance_category.detailed",
+             ) == plaid,
+             friendly,
+@@ -94,7 +103,7 @@ def _friendly_plaid_case():
+     detailed_case = case(*detailed_whens, else_=None)
+     return func.coalesce(
+         detailed_case,
+-        case(*whens, else_=Transaction.plaid_category_primary),
++        case(*whens, else_=tx.plaid_category_primary),
+     )
+ 
+ 
+@@ -105,9 +114,25 @@ def _plaid_detailed_category_expr():
+     )
+ 
+ 
++def _matched_refund_category_expr():
++    original = aliased(Transaction)
++    annotation = aliased(TransactionAnnotation)
++    return (
++        select(func.coalesce(annotation.user_category, annotation.rule_category,
++                             _friendly_plaid_case(original), "uncategorized"))
++        .select_from(original)
++        .outerjoin(annotation, annotation.transaction_id == original.id)
++        .where(original.id == TransactionAnnotation.refund_match_transaction_id,
++               original.amount > 0, _is_refund_expr())
++        .correlate(Transaction, TransactionAnnotation)
++        .scalar_subquery()
++    )
++
++
+ def _effective_category_expr():
+     return func.coalesce(
+         TransactionAnnotation.user_category,
++        _matched_refund_category_expr(),
+         TransactionAnnotation.rule_category,
+         _friendly_plaid_case(),
+         "uncategorized",
+@@ -117,6 +142,7 @@ def _effective_category_expr():
+ def _category_source_expr():
+     return case(
+         (TransactionAnnotation.user_category.is_not(None), "manual"),
++        (_matched_refund_category_expr().is_not(None), "refund"),
+         (TransactionAnnotation.rule_category.is_not(None), "rule"),
+         (Transaction.plaid_category_primary.is_not(None), "plaid"),
+         else_="default",
+@@ -372,6 +398,9 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
+         db.query(TransferPair).filter(
+             or_(TransferPair.txn_out_id.in_(txn_ids), TransferPair.txn_in_id.in_(txn_ids))
+         ).delete(synchronize_session=False)
++        db.query(RejectedTransferPair).filter(
++            or_(RejectedTransferPair.txn_out_id.in_(txn_ids), RejectedTransferPair.txn_in_id.in_(txn_ids))
++        ).delete(synchronize_session=False)
+         db.query(CategoryDecisionEvent).filter(CategoryDecisionEvent.transaction_id.in_(txn_ids)).delete(
+             synchronize_session=False
+         )
+@@ -509,6 +538,8 @@ def _apply_search_query(query, parsed):
+         query = _apply_transfer_exclusion(query, include_transfers=False)
+     if "pending" in parsed.flags:
+         query = query.filter(Transaction.pending == True)  # noqa: E712
++    if "spend" in parsed.flags:
++        query = posted_activity(query).filter(or_(Transaction.amount > 0, _is_refund_expr()))
+ 
+     for word in parsed.text:
+         query = query.filter(
+@@ -687,18 +718,21 @@ def list_transactions(
+     # silently goes missing from the totals with no visible cause.
+     page_ids = [row[0].id for row in rows]
+     pair_by_txn: dict[int, int] = {}
++    confirmed_ids: set[int] = set()
+     if page_ids:
+         pair_rows = db.query(
+-            TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id
++            TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id, TransferPair.confirmed
+         ).filter(
+             or_(
+                 TransferPair.txn_out_id.in_(page_ids),
+                 TransferPair.txn_in_id.in_(page_ids),
+             )
+         ).all()
+-        for pair_id, out_id, in_id in pair_rows:
++        for pair_id, out_id, in_id, confirmed in pair_rows:
+             pair_by_txn[out_id] = pair_id
+             pair_by_txn[in_id] = pair_id
++            if confirmed:
++                confirmed_ids.update((out_id, in_id))
+ 
+     return {
+         "total": total,
+@@ -720,7 +754,8 @@ def list_transactions(
+                 "category_source": resolved_source,
+                 "rule_id": a.rule_id if (a and resolved_source == "rule") else None,
+                 "transfer_pair_id": pair_by_txn.get(t.id),
+-                "is_transfer": t.id in pair_by_txn,
++                "is_transfer": t.id in confirmed_ids,
++                "is_transfer_candidate": t.id in pair_by_txn and t.id not in confirmed_ids,
+                 "refund_status": a.refund_status if a else None,
+                 "refund_match_transaction_id": a.refund_match_transaction_id if a else None,
+                 "refund_reason": a.refund_reason if a else None,
+@@ -1223,26 +1258,12 @@ def recompute_all_category_rules(payload: CategoryRuleRecomputeRequest, db: Sess
+ 
+ 
+ def _apply_transfer_exclusion(q, include_transfers: bool):
+-    """Filter out transactions participating in a TransferPair.
+-
+-    A transfer is a *matched pair* across two covered accounts — that is the only
+-    thing that can double-count money as both income and expense. The legacy
+-    one-sided `is_transfer_override` flag is deliberately no longer honored: it
+-    removed single transactions from every analytic with no counterparty, could
+-    not be set or cleared through any API, and survived re-sync via annotation
+-    fingerprints, so anything carrying it was silently and permanently missing
+-    from spend and income.
+-    """
+-    if include_transfers:
+-        return q
+-    return q.filter(
+-        ~Transaction.id.in_(select(TransferPair.txn_out_id)),
+-        ~Transaction.id.in_(select(TransferPair.txn_in_id)),
+-    )
++    """Only reviewed pairs leave the reporting boundary; candidates stay counted."""
++    return q if include_transfers else exclude_confirmed_transfers(q)
+ 
+ 
+ def _is_refund_expr():
+-    return TransactionAnnotation.refund_status.in_(["confirmed", "likely"])
++    return is_refund()
+ 
+ 
+ @router.post("/refunds/detect")
+@@ -1261,15 +1282,11 @@ def monthly_spend(
+     q = (
+         db.query(
+             month_col,
+-            func.sum(case(
+-                (_is_refund_expr(), Transaction.amount),
+-                (Transaction.amount > 0, Transaction.amount),
+-                else_=0,
+-            )),
++            func.sum(_expense_value_case()),
+         )
+         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+     )
+-    q = _apply_transfer_exclusion(q, include_transfers)
++    q = posted_activity(q, include_transfers)
+     if start_date:
+         q = q.filter(Transaction.date >= start_date)
+     if end_date:
+@@ -1289,15 +1306,11 @@ def category_spend(
+     q = (
+         db.query(
+             effective_category,
+-            func.sum(case(
+-                (_is_refund_expr(), Transaction.amount),
+-                (Transaction.amount > 0, Transaction.amount),
+-                else_=0,
+-            )),
++            func.sum(_expense_value_case()),
+         )
+         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+     )
+-    q = _apply_transfer_exclusion(q, include_transfers)
++    q = posted_activity(q, include_transfers)
+     if start_date:
+         q = q.filter(Transaction.date >= start_date)
+     if end_date:
+@@ -1317,26 +1330,12 @@ def cashflow_trend(
+     q = (
+         db.query(
+             month_col,
+-            func.sum(case(
+-                (_is_refund_expr(), Transaction.amount),
+-                (Transaction.amount > 0, Transaction.amount),
+-                else_=0,
+-            )).label("expenses"),
+-            func.sum(case(
+-                (
+-                    (Transaction.amount < 0)
+-                    & or_(
+-                        TransactionAnnotation.refund_status.is_(None),
+-                        ~TransactionAnnotation.refund_status.in_(["confirmed", "likely"]),
+-                    ),
+-                    -Transaction.amount,
+-                ),
+-                else_=0,
+-            )).label("income"),
++            func.sum(_expense_value_case()).label("expenses"),
++            func.sum(income_amount()).label("income"),
+         )
+         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+     )
+-    q = _apply_transfer_exclusion(q, include_transfers)
++    q = posted_activity(q, include_transfers)
+     if start_date:
+         q = q.filter(Transaction.date >= start_date)
+     if end_date:
+@@ -1406,11 +1405,7 @@ def _month_label(month: str) -> str:
+ 
+ def _expense_value_case():
+     """Signed per-transaction expense: positive charges add, refunds subtract."""
+-    return case(
+-        (_is_refund_expr(), Transaction.amount),
+-        (Transaction.amount > 0, Transaction.amount),
+-        else_=0,
+-    )
++    return expense_amount()
+ 
+ 
+ def _project_month(month: str, total: float) -> float:
+@@ -1432,7 +1427,7 @@ def _merge_comparison(current: dict[str, float], previous: dict[str, float]) ->
+         }
+         for cat in (set(current) | set(previous))
+     ]
+-    rows.sort(key=lambda r: r["current"], reverse=True)
++    rows.sort(key=lambda r: (-r["current"], r["category"]))
+     return rows
+ 
+ 
+@@ -1440,14 +1435,16 @@ def _merge_comparison(current: dict[str, float], previous: dict[str, float]) ->
+ def analytics_overview(db: Session = Depends(get_db)):
+     """One-shot summary for the mobile Overview screen (KPIs + needs-attention)."""
+     accounts = accounts_summary(db)
+-    cash = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False)
+-    by_month = {row["month"]: row for row in cash}
+-    latest = cash[-1]["month"] if cash else _month_key(date.today())
+-    previous = _prev_month_key(latest)
+-    cur = by_month.get(latest, {})
+-    pre = by_month.get(previous, {})
++    today = date.today()
++    start, end, prev_start, prev_end, prev_full_end = comparable_periods(today, "monthly")
+ 
+-    as_of = db.query(func.max(Transaction.date)).scalar() or date.today()
++    def totals(start, end):
++        rows = cashflow_trend(db, start_date=start, end_date=end, include_transfers=False)
++        return {key: round(sum(row[key] for row in rows), 2) for key in ("expenses", "income", "net")}
++
++    cur, pre = totals(start, end), totals(prev_start, prev_end)
++    previous_full = totals(prev_start, prev_full_end)
++    last_transaction = db.query(func.max(Transaction.date)).filter(Transaction.pending.is_(False)).scalar()
+ 
+     # Counted over transactions, not annotations: an annotation whose transaction
+     # is gone is invisible everywhere else, so counting it here would advertise
+@@ -1483,7 +1480,14 @@ def analytics_overview(db: Session = Depends(get_db)):
+     ) or 0
+ 
+     return {
+-        "as_of_date": str(as_of),
++        "as_of_date": str(today),
++        "last_transaction_date": str(last_transaction) if last_transaction else None,
++        "period_start": str(start),
++        "period_end": str(end),
++        "previous_period_start": str(prev_start),
++        "previous_period_end": str(prev_end),
++        "previous_month_full_spend": previous_full["expenses"],
++        "previous_month_full_income": previous_full["income"],
+         "net_worth": accounts["net_worth"],
+         "assets": accounts["assets"],
+         "liabilities": accounts["liabilities"],
+@@ -1508,42 +1512,39 @@ def analytics_spending_summary(
+     granularity: str = Query(default="monthly"),
+ ):
+     """Period spend total, comparison, projection, top driver, and per-category diff."""
+-    monthly = monthly_spend(db, start_date=None, end_date=None, include_transfers=False)
+-    spend_by_month = {r["month"]: r["spend"] for r in monthly}
+-    latest = monthly[-1]["month"] if monthly else _month_key(date.today())
+-
++    today = date.today()
++    try:
++        cur_start, cur_end, prev_start, prev_end, prev_full_end = comparable_periods(today, granularity)
++    except ValueError as exc:
++        raise HTTPException(status_code=422, detail=str(exc))
++    cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
++    prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
++    total = round(sum(cur_cats.values()), 2)
++    previous_total = round(sum(prev_cats.values()), 2)
++    previous_full_total = round(sum(r["spend"] for r in monthly_spend(db, prev_start, prev_full_end, include_transfers=False)), 2)
+     if granularity == "yearly":
+-        year = int(latest.split("-")[0])
+-        prev_year = year - 1
+-        total = round(sum(v for m, v in spend_by_month.items() if m.startswith(f"{year}-")), 2)
+-        previous_total = round(
+-            sum(v for m, v in spend_by_month.items() if m.startswith(f"{prev_year}-")), 2
+-        )
+-        months_with_data = sum(1 for m in spend_by_month if m.startswith(f"{year}-"))
+-        projection = round(total / months_with_data * 12, 2) if months_with_data else 0.0
+-        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, date(year, 1, 1), date(year, 12, 31), include_transfers=False)}
+-        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, date(prev_year, 1, 1), date(prev_year, 12, 31), include_transfers=False)}
+-        period_label = f"{year} YTD"
++        days_elapsed = (today - cur_start).days + 1
++        days_in_year = (date(today.year + 1, 1, 1) - cur_start).days
++        projection = round(total / days_elapsed * days_in_year, 2)
++        period_label = f"{today.year} YTD"
+     else:
+-        previous = _prev_month_key(latest)
+-        total = round(spend_by_month.get(latest, 0.0), 2)
+-        previous_total = round(spend_by_month.get(previous, 0.0), 2)
+-        projection = _project_month(latest, total)
+-        cur_start, cur_end = _month_bounds(latest)
+-        prev_start, prev_end = _month_bounds(previous)
+-        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
+-        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
+-        period_label = _month_label(latest)
++        projection = _project_month(_month_key(today), total)
++        period_label = _month_label(_month_key(today))
+ 
+     comparison = _merge_comparison(cur_cats, prev_cats)
+     top_driver = None
+     if comparison:
+-        top = comparison[0]
++        top = max(comparison, key=lambda row: abs(row["current"] - row["previous"]))
+         top_driver = {"category": top["category"], "amount": round(top["current"] - top["previous"], 2)}
+-    change_pct = round((total - previous_total) / previous_total * 100, 2) if previous_total else None
++    change_pct = round((total - previous_total) / abs(previous_total) * 100, 2) if previous_total else None
+ 
+     return {
+         "period_label": period_label,
++        "period_start": str(cur_start),
++        "period_end": str(cur_end),
++        "previous_period_start": str(prev_start),
++        "previous_period_end": str(prev_end),
++        "previous_full_total": previous_full_total,
+         "total": total,
+         "previous_total": previous_total,
+         "change": round(total - previous_total, 2),
+@@ -1560,22 +1561,19 @@ def _daily_expense(db: Session, start: date, end: date, bucket: str) -> dict[int
+     q = db.query(bucket_col, func.sum(_expense_value_case())).outerjoin(
+         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+     )
+-    q = _apply_transfer_exclusion(q, include_transfers=False)
++    q = posted_activity(q)
+     q = q.filter(Transaction.date >= start, Transaction.date <= end)
+     rows = q.group_by(bucket_col).all()
+     return {int(b): float(total or 0) for b, total in rows if b is not None}
+ 
+ 
+-def _cumulative(daily: dict[int, float], length: int) -> list[float | None]:
+-    """Running total over 1..length; None once past the last bucket that had data."""
+-    if not daily:
+-        return [None] * length
+-    last = max(daily)
++def _cumulative(daily: dict[int, float], length: int, through: int) -> list[float | None]:
++    """Carry totals through the reporting cutoff, including days with no charges."""
+     out: list[float | None] = []
+     running = 0.0
+     for i in range(1, length + 1):
+         running += daily.get(i, 0.0)
+-        out.append(round(running, 2) if i <= last else None)
++        out.append(round(running, 2) if i <= through else None)
+     return out
+ 
+ 
+@@ -1584,28 +1582,30 @@ def analytics_cumulative_spend(
+     db: Session = Depends(get_db),
+     granularity: str = Query(default="monthly"),
+ ):
+-    """Cumulative spend pace for the current period vs the prior three."""
+-    anchor = db.query(func.max(Transaction.date)).scalar() or date.today()
++    """Cumulative spend pace through today vs the prior three complete periods."""
++    anchor = date.today()
++    if granularity not in ("monthly", "yearly"):
++        raise HTTPException(status_code=422, detail="granularity must be monthly or yearly")
+     keys = ("current", "previous1", "previous2", "previous3")
+-
++    series = []
+     if granularity == "yearly":
+-        years = [anchor.year - i for i in range(4)]
+-        series = [
+-            _cumulative(_daily_expense(db, date(y, 1, 1), date(y, 12, 31), "%m"), 12)
+-            for y in years
+-        ]
+         length = 12
++        for i in range(4):
++            year = anchor.year - i
++            start, end = date(year, 1, 1), date(year, 12, 31)
++            through = anchor.month if i == 0 else 12
++            series.append(_cumulative(_daily_expense(db, start, min(end, anchor), "%m"), length, through))
++            if i:
++                cutoff = date(year, anchor.month, min(anchor.day, calendar.monthrange(year, anchor.month)[1]))
++                series[-1][anchor.month - 1] = round(sum(_daily_expense(db, start, cutoff, "%m").values()), 2)
+     else:
+-        months = [_month_key(anchor)]
+-        for _ in range(3):
+-            months.append(_prev_month_key(months[-1]))
+-        anchor_month = _month_key(anchor)
+-        length = calendar.monthrange(int(anchor_month[:4]), int(anchor_month[5:7]))[1]
+-        series = []
+-        for mkey in months:
+-            start, end = _month_bounds(mkey)
+-            series.append(_cumulative(_daily_expense(db, start, end, "%d"), length))
+-
++        month = _month_key(anchor)
++        length = calendar.monthrange(anchor.year, anchor.month)[1]
++        for i in range(4):
++            start, end = _month_bounds(month)
++            through = anchor.day if i == 0 else end.day
++            series.append(_cumulative(_daily_expense(db, start, min(end, anchor), "%d"), length, through))
++            month = _prev_month_key(month)
+     return [
+         {"x": i + 1, **{key: series[j][i] for j, key in enumerate(keys)}}
+         for i in range(length)
+@@ -1634,7 +1634,7 @@ def analytics_recurring(
+         .filter(Transaction.pending == False)  # noqa: E712
+         .filter(Transaction.amount > 0)
+     )
+-    q = _apply_transfer_exclusion(q, include_transfers=False)
++    q = posted_activity(q)
+     if start_date:
+         q = q.filter(Transaction.date >= start_date)
+     if end_date:
+@@ -1754,24 +1754,14 @@ def analytics_cashflow_sankey(
+     are always excluded; refunds net against their expense category rather than
+     counting as income (same rule as every other analytics endpoint)."""
+     effective_category = _effective_category_expr().label("category")
+-    income_expr = case(
+-        (
+-            (Transaction.amount < 0)
+-            & or_(
+-                TransactionAnnotation.refund_status.is_(None),
+-                ~TransactionAnnotation.refund_status.in_(["confirmed", "likely"]),
+-            ),
+-            -Transaction.amount,
+-        ),
+-        else_=0,
+-    )
++    income_expr = income_amount()
+     expense_expr = _expense_value_case()
+ 
+     q = (
+         db.query(effective_category, func.sum(income_expr), func.sum(expense_expr))
+         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+     )
+-    q = _apply_transfer_exclusion(q, include_transfers=False)
++    q = posted_activity(q)
+     if start_date:
+         q = q.filter(Transaction.date >= start_date)
+     if end_date:
+@@ -1797,8 +1787,8 @@ def analytics_cashflow_sankey(
+             if expense_total > 0:
+                 bucket_categories.setdefault(bucket, {})[category] = expense_total
+ 
+-    bucket_totals = {b: a for b, a in bucket_totals.items() if a > 0}
+     total_spend = sum(bucket_totals.values())
++    bucket_totals = {b: a for b, a in bucket_totals.items() if a > 0}
+     savings = max(income - total_spend, 0.0)
+     deficit = max(total_spend - income, 0.0)
+ 
+@@ -1836,14 +1826,18 @@ def analytics_cashflow_sankey(
+ @router.get("/analytics/category-movers")
+ def analytics_category_movers(
+     db: Session = Depends(get_db),
+-    month: str | None = Query(default=None, description="YYYY-MM anchor month; defaults to the latest transaction month"),
++    month: str | None = Query(default=None, description="YYYY-MM anchor month; defaults to the current month"),
+     limit: int = Query(default=12, ge=1, le=50),
+ ):
+     """Top categories by absolute change in spend vs the previous month."""
+-    anchor = month or _month_key(db.query(func.max(Transaction.date)).scalar() or date.today())
++    anchor = month or _month_key(date.today())
++    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", anchor) or anchor.startswith("0000"):
++        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+     previous = _prev_month_key(anchor)
+     cur_start, cur_end = _month_bounds(anchor)
+     prev_start, prev_end = _month_bounds(previous)
++    if anchor == _month_key(date.today()):
++        cur_start, cur_end, prev_start, prev_end, _ = comparable_periods(date.today(), "monthly")
+     current = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
+     previous_totals = {
+         r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)
+@@ -1869,10 +1863,10 @@ def analytics_category_movers(
+ @router.get("/analytics/daily-spend")
+ def analytics_daily_spend(
+     db: Session = Depends(get_db),
+-    year: int | None = Query(default=None),
++    year: int | None = Query(default=None, ge=1, le=9998),
+ ):
+     """Daily expense totals for one calendar year (refund-netted, transfers excluded)."""
+-    anchor_year = year or (db.query(func.max(Transaction.date)).scalar() or date.today()).year
++    anchor_year = year or date.today().year
+     start, end = date(anchor_year, 1, 1), date(anchor_year, 12, 31)
+     by_day_of_year = _daily_expense(db, start, end, "%j")
+ 
+@@ -1970,16 +1964,19 @@ def transfers_create(
+         pair = transfer_detector.manual_pair(db, payload.txn_a_id, payload.txn_b_id)
+     except ValueError as e:
+         raise HTTPException(status_code=400, detail=str(e))
++    classify_refunds(db)
+     return {"id": pair.id, "status": "paired"}
+ 
+ 
+ @router.post("/transfers/{pair_id}/confirm")
+ def transfers_confirm(pair_id: int, db: Session = Depends(get_db)):
+-    pair = db.get(TransferPair, pair_id)
+-    if not pair:
++    try:
++        pair = transfer_detector.confirm_pair(db, pair_id)
++    except LookupError:
+         raise HTTPException(status_code=404, detail="pair not found")
+-    pair.confirmed = True
+-    db.commit()
++    except ValueError as exc:
++        raise HTTPException(status_code=400, detail=str(exc))
++    classify_refunds(db)
+     return {"id": pair.id, "confirmed": True}
+ 
+ 
+@@ -1996,4 +1993,5 @@ def transfers_delete(pair_id: int, db: Session = Depends(get_db)):
+     transfer_detector.reject_pair(db, pair.txn_out_id, pair.txn_in_id)
+     db.delete(pair)
+     db.commit()
++    classify_refunds(db)
+     return {"status": "unpaired", "remembered": True}
+diff --git a/app/db/schema_patches.py b/app/db/schema_patches.py
+index 9ad195ffe659bc695c6c5abe09ca04ae9b55282f..1c0f6bde8db391c6223348cfea0842b3865f6788 100644
+--- a/app/db/schema_patches.py
++++ b/app/db/schema_patches.py
+@@ -81,6 +81,11 @@ def _purge_orphan_transaction_rows(engine: Engine) -> None:
+                 "DELETE FROM transfer_pairs WHERE txn_out_id NOT IN (SELECT id FROM transactions) "
+                 "   OR txn_in_id NOT IN (SELECT id FROM transactions)"
+             ))
++        if "rejected_transfer_pairs" in tables:
++            conn.execute(text(
++                "DELETE FROM rejected_transfer_pairs WHERE txn_out_id NOT IN (SELECT id FROM transactions) "
++                "   OR txn_in_id NOT IN (SELECT id FROM transactions)"
++            ))
+         if "category_decision_events" in tables:
+             conn.execute(text(
+                 "DELETE FROM category_decision_events WHERE transaction_id NOT IN "
+@@ -197,6 +202,7 @@ def apply_patches(engine: Engine) -> None:
+         conn.execute(text("DROP VIEW IF EXISTS effective_transactions"))
+         conn.execute(text(f"""
+             CREATE VIEW effective_transactions AS
++            WITH categorized AS (
+             SELECT
+                 t.id,
+                 t.plaid_transaction_id,
+@@ -220,7 +226,7 @@ def apply_patches(engine: Engine) -> None:
+                     ELSE t.plaid_category_primary
+                     END,
+                     'uncategorized'
+-                ) AS effective_category,
++                ) AS base_category,
+                 COALESCE(ta.merchant_name_override, t.merchant_name)
+                     AS effective_merchant,
+                 COALESCE(a.nickname, a.name || ' \xb7\xb7' || a.mask)
+@@ -229,8 +235,14 @@ def apply_patches(engine: Engine) -> None:
+                 ta.refund_status,
+                 ta.refund_match_transaction_id,
+                 ta.refund_reason,
+-                CASE WHEN ta.refund_status IN ('confirmed', 'likely') THEN 1 ELSE 0 END
++                CASE WHEN t.amount < 0 AND ta.refund_status IN ('confirmed', 'likely') THEN 1 ELSE 0 END
+                     AS is_refund,
++                EXISTS (SELECT 1 FROM transfer_pairs p WHERE p.confirmed = 1
++                    AND (p.txn_out_id = t.id OR p.txn_in_id = t.id)) AS is_transfer,
++                EXISTS (SELECT 1 FROM transfer_pairs p WHERE p.confirmed = 0
++                    AND (p.txn_out_id = t.id OR p.txn_in_id = t.id)) AS is_transfer_candidate,
++                (SELECT p.id FROM transfer_pairs p
++                    WHERE p.txn_out_id = t.id OR p.txn_in_id = t.id LIMIT 1) AS transfer_pair_id,
+                 ta.merchant_name_override,
+                 ta.user_category,
+                 ta.rule_category,
+@@ -245,6 +257,21 @@ def apply_patches(engine: Engine) -> None:
+             FROM transactions t
+             LEFT JOIN transaction_annotations ta ON ta.transaction_id = t.id
+             LEFT JOIN accounts a ON a.id = t.account_id
++            ), effective AS (
++                SELECT c.*,
++                    COALESCE(c.user_category,
++                        CASE WHEN c.is_refund = 1 AND original.amount > 0
++                            THEN original.base_category END,
++                        c.base_category) AS effective_category
++                FROM categorized c
++                LEFT JOIN categorized original ON original.id = c.refund_match_transaction_id
++            )
++            SELECT effective.*,
++                CASE WHEN pending = 0 AND is_transfer = 0 AND (amount > 0 OR is_refund = 1)
++                    THEN amount ELSE 0 END AS expense_amount,
++                CASE WHEN pending = 0 AND is_transfer = 0 AND amount < 0 AND is_refund = 0
++                    THEN -amount ELSE 0 END AS income_amount
++            FROM effective
+         """))
+ 
+     with engine.begin() as conn:
+diff --git a/app/services/category_resolver.py b/app/services/category_resolver.py
+index 0cdc185b765b53ce6b90a9e37f1a98542cf31ceb..f274d8b312075e0edb690d1a2d9da4e00fb1abed 100644
+--- a/app/services/category_resolver.py
++++ b/app/services/category_resolver.py
+@@ -60,10 +60,16 @@ PLAID_DETAILED_FRIENDLY_MAP: dict[str, str] = {
+ 
+ def detailed_category(raw_json: str | None) -> str | None:
+     try:
+-        personal_finance_category = json.loads(raw_json or "{}").get("personal_finance_category") or {}
++        raw = json.loads(raw_json or "{}")
+     except (TypeError, ValueError):
+         return None
+-    return personal_finance_category.get("detailed")
++    if not isinstance(raw, dict):
++        return None
++    personal_finance_category = raw.get("personal_finance_category")
++    if not isinstance(personal_finance_category, dict):
++        return None
++    detailed = personal_finance_category.get("detailed")
++    return detailed if isinstance(detailed, str) else None
+ 
+ 
+ def friendly_category(plaid_primary: str | None, plaid_detailed: str | None = None) -> str | None:
+diff --git a/app/services/refund_detector.py b/app/services/refund_detector.py
+index 84ff2f0dc1ea7283771f60faa720215231510f1c..ee81af3d18c8d6faea1661529f5ca2d7e50acdd1 100644
+--- a/app/services/refund_detector.py
++++ b/app/services/refund_detector.py
+@@ -8,12 +8,14 @@ from __future__ import annotations
+ 
+ import json
+ import re
++from collections import defaultdict
+ from datetime import timedelta
+ 
+ from sqlalchemy.orm import Session
+ 
+-from app.models.models import Transaction, TransactionAnnotation, TransferPair
++from app.models.models import Account, Transaction, TransactionAnnotation
+ from app.services.category_resolver import detailed_category, friendly_category
++from app.services.transfer_detector import transaction_currency, transfer_txn_ids
+ 
+ 
+ _NON_REFUND_ROOTS = {"INCOME", "TRANSFER", "FINANCE"}
+@@ -36,7 +38,8 @@ def _effective_category(tx: Transaction, annotation: TransactionAnnotation | Non
+ 
+ def _plaid_refund_code(tx: Transaction) -> bool:
+     try:
+-        return json.loads(tx.raw_json or "{}").get("transaction_code") == "refund"
++        raw = json.loads(tx.raw_json or "{}")
++        return isinstance(raw, dict) and raw.get("transaction_code") == "refund"
+     except (TypeError, ValueError):
+         return False
+ 
+@@ -47,14 +50,11 @@ def classify_refunds(db: Session, lookback_days: int = 540) -> dict:
+         a.transaction_id: a
+         for a in db.query(TransactionAnnotation).all()
+     }
+-    paired_ids = {
+-        tx_id
+-        for pair in db.query(TransferPair).all()
+-        for tx_id in (pair.txn_out_id, pair.txn_in_id)
+-    }
++    paired_ids = transfer_txn_ids(db)
++    accounts = {a.id: a for a in db.query(Account).all()}
+ 
+     for annotation in annotations.values():
+-        if annotation.refund_status == "likely":
++        if annotation.refund_status == "likely" or annotation.refund_reason == "Plaid transaction_code=refund":
+             annotation.refund_status = None
+             annotation.refund_match_transaction_id = None
+             annotation.refund_reason = None
+@@ -65,7 +65,15 @@ def classify_refunds(db: Session, lookback_days: int = 540) -> dict:
+         .order_by(Transaction.date.asc(), Transaction.id.asc())
+         .all()
+     )
+-    charges = [tx for tx in transactions if tx.amount is not None and tx.amount > 0]
++    charges = defaultdict(list)
++    used_charge_ids = {
++        a.refund_match_transaction_id for a in annotations.values()
++        if a.refund_status == "confirmed" and a.refund_match_transaction_id is not None
++    }
++    for tx in transactions:
++        name = _normalized(tx.name)
++        if tx.amount is not None and tx.amount > 0 and tx.id not in paired_ids and name:
++            charges[(tx.account_id, tx.amount, transaction_currency(tx, accounts.get(tx.account_id)), name)].append(tx)
+     likely_count = 0
+     confirmed_count = 0
+ 
+@@ -76,9 +84,6 @@ def classify_refunds(db: Session, lookback_days: int = 540) -> dict:
+         annotation = annotations.get(tx.id)
+         if annotation and annotation.refund_status in {"confirmed", "not_refund"}:
+             continue
+-        if annotation and annotation.is_transfer_override:
+-            continue
+-
+         if _plaid_refund_code(tx):
+             if annotation is None:
+                 annotation = TransactionAnnotation(transaction_id=tx.id)
+@@ -101,17 +106,16 @@ def classify_refunds(db: Session, lookback_days: int = 540) -> dict:
+         tx_name = _normalized(tx.name)
+         candidates = [
+             charge
+-            for charge in charges
+-            if charge.account_id == tx.account_id
++            for charge in charges.get((tx.account_id, -tx.amount, transaction_currency(tx, accounts.get(tx.account_id)), tx_name), [])
++            if charge.id not in used_charge_ids
+             and charge.date <= tx.date
+             and tx.date - charge.date <= timedelta(days=lookback_days)
+-            and charge.amount == -tx.amount
+-            and _normalized(charge.name) == tx_name
+         ]
+-        if not candidates:
++        if len(candidates) != 1:
+             continue
+ 
+-        match = max(candidates, key=lambda charge: (charge.date, charge.id))
++        match = candidates[0]
++        used_charge_ids.add(match.id)
+         annotation.refund_status = "likely"
+         annotation.refund_match_transaction_id = match.id
+         annotation.refund_reason = "Exact account, amount, and transaction-name match"
+diff --git a/app/services/search_query.py b/app/services/search_query.py
+index 3aa4efee2cb2f1dc31961eb87012963348e06385..a6d57ab3e352ddd8fbd9a3b80ae81aadf1df21d1 100644
+--- a/app/services/search_query.py
++++ b/app/services/search_query.py
+@@ -47,7 +47,8 @@ IS_VALUES: tuple[tuple[str, str], ...] = (
+     ("uncategorized", "No category assigned"),
+     ("refund", "Confirmed or likely refund"),
+     ("likely-refund", "Detected refund, not yet confirmed"),
+-    ("not-transfer", "Excludes paired transfers"),
++    ("not-transfer", "Excludes confirmed transfers"),
++    ("spend", "Posted spending and refunds, excluding confirmed transfers"),
+     ("pending", "Still pending"),
+ )
+ 
+diff --git a/app/services/sync_service.py b/app/services/sync_service.py
+index 01a2aed1261b5b5e8fc02fdf2831e2c1db9b318c..12c8b328f28484d726a60adc152a506326202263 100644
+--- a/app/services/sync_service.py
++++ b/app/services/sync_service.py
+@@ -1,8 +1,9 @@
+ import json
+ import logging
+ from datetime import date, timedelta
++from decimal import Decimal
+ 
+-from sqlalchemy import or_
++from sqlalchemy import func, or_
+ from sqlalchemy.orm import Session
+ 
+ from app.core.time import utcnow
+@@ -11,7 +12,9 @@ from app.models.models import (
+     AccountBalanceSnapshot,
+     AnnotationFingerprint,
+     CategoryDecisionEvent,
++    CategoryRule,
+     Item,
++    RejectedTransferPair,
+     SyncRun,
+     SyncState,
+     Transaction,
+@@ -19,9 +22,10 @@ from app.models.models import (
+     TransferPair,
+ )
+ from app.services.plaid_client import PlaidClient
++from app.services.category_resolver import compile_rules, find_first_matching_rule, resolve_effective_category
+ from app.services.refund_detector import classify_refunds
+ from app.services.security import decrypt_token
+-from app.services.transfer_detector import detect_candidates
++from app.services.transfer_detector import clear_auto_pairs, detect_candidates, transaction_currency
+ from app.services.txn_fingerprint import compute_txn_hash
+ 
+ logger = logging.getLogger(__name__)
+@@ -83,10 +87,13 @@ class SyncService:
+         db.flush()
+ 
+         try:
+-            access_token = decrypt_token(item.access_token_encrypted)
+-            self._refresh_accounts_and_snapshots(db, item_id, access_token)
+-            data = self.client.sync_transactions(access_token, state.cursor)
+-            added_count, modified_count, removed_count = self._apply_changes(db, item_id, data)
++            # Failed batches must not commit half-imported transactions or fresh
++            # balances alongside an unchanged cursor. Keep the error log outside.
++            with db.begin_nested():
++                access_token = decrypt_token(item.access_token_encrypted)
++                self._refresh_accounts_and_snapshots(db, item_id, access_token)
++                data = self.client.sync_transactions(access_token, state.cursor)
++                added_count, modified_count, removed_count = self._apply_changes(db, item_id, data)
+         except Exception as exc:
+             now = utcnow()
+             run.status = "error"
+@@ -117,7 +124,8 @@ class SyncService:
+ 
+         db.commit()
+ 
+-        if added_count > 0:
++        if added_count or modified_count or removed_count:
++            clear_auto_pairs(db)
+             new_pairs = detect_candidates(db)
+             if new_pairs:
+                 db.commit()
+@@ -140,10 +148,11 @@ class SyncService:
+         db.flush()
+ 
+         try:
+-            access_token = decrypt_token(item.access_token_encrypted)
+-            self._refresh_accounts_and_snapshots(db, item_id, access_token)
+-            data = self.client.get_historical_transactions(access_token, start_date, end_date)
+-            added_count, modified_count, removed_count = self._apply_changes(db, item_id, {"added": data})
++            with db.begin_nested():
++                access_token = decrypt_token(item.access_token_encrypted)
++                self._refresh_accounts_and_snapshots(db, item_id, access_token)
++                data = self.client.get_historical_transactions(access_token, start_date, end_date)
++                added_count, modified_count, removed_count = self._apply_changes(db, item_id, {"added": data})
+         except Exception as exc:
+             now = utcnow()
+             run.status = "error"
+@@ -168,7 +177,8 @@ class SyncService:
+ 
+         db.commit()
+ 
+-        if added_count > 0:
++        if added_count or modified_count or removed_count:
++            clear_auto_pairs(db)
+             new_pairs = detect_candidates(db)
+             if new_pairs:
+                 db.commit()
+@@ -196,6 +206,12 @@ class SyncService:
+                 )
+                 db.add(existing)
+                 db.flush()
++            elif existing.item_id != item_id:
++                raise ValueError("account belongs to a different linked item")
++
++            if existing.currency != a.get("iso_currency_code"):
++                for (txn_id,) in db.query(Transaction.id).filter(Transaction.account_id == existing.id):
++                    self._clear_reconciliation(db, txn_id)
+ 
+             existing.item_id = item_id
+             existing.name = a.get("name") or existing.name
+@@ -233,59 +249,107 @@ class SyncService:
+         added_count = 0
+         modified_count = 0
+         removed_count = 0
+-        occurrence_counts: dict[str, int] = {}
+-
+-        for t in payload.get("added", []):
+-            existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
+-            if existing:
+-                continue
++        rules = compile_rules(db.query(CategoryRule).filter(CategoryRule.enabled.is_(True)).order_by(CategoryRule.rank, CategoryRule.id).all())
+ 
++        # Provider ids establish identity. Never deduplicate by amount/name/date:
++        # two genuinely separate purchases may have exactly the same contents.
++        for t in [*payload.get("added", []), *payload.get("modified", [])]:
+             account = self._ensure_account(db, item_id, t["account_id"])
+-            added_count += 1
++            existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
++            source = t.get("_source") or t
++            pending_id = source.get("pending_transaction_id")
++            if existing is None and pending_id and not t.get("pending", False):
++                # Plaid explicitly links the replacement. Keep the local row and
++                # its manual decisions even when posting changes date or amount.
++                existing = db.query(Transaction).filter(
++                    Transaction.plaid_transaction_id == pending_id,
++                    Transaction.item_id == item_id,
++                    Transaction.account_id == account.id,
++                    Transaction.pending.is_(True),
++                ).first()
++            if existing is not None and existing.item_id != item_id:
++                raise ValueError("transaction belongs to a different linked item")
+             tx_date = t.get("date")
+             if isinstance(tx_date, str):
+                 tx_date = date.fromisoformat(tx_date)
+-
+             txn_hash = compute_txn_hash(account.mask, tx_date, t["amount"], t["name"])
+-            if txn_hash not in occurrence_counts:
+-                occurrence_counts[txn_hash] = (
+-                    db.query(Transaction).filter(Transaction.txn_hash == txn_hash).count()
+-                )
+-            txn_occurrence = occurrence_counts[txn_hash]
+-            occurrence_counts[txn_hash] += 1
+-
+-            new_txn = Transaction(
+-                plaid_transaction_id=t["transaction_id"],
+-                account_id=account.id,
+-                item_id=item_id,
+-                date=tx_date,
+-                amount=t["amount"],
+-                name=t["name"],
+-                merchant_name=t.get("merchant_name"),
+-                plaid_category_primary=t.get("plaid_category_primary"),
+-                pending=t.get("pending", False),
+-                raw_json=self._serialize_raw(t),
+-                txn_hash=txn_hash,
+-                txn_occurrence=txn_occurrence,
+-            )
+-            db.add(new_txn)
+-            db.flush()
+-
+-            self._reapply_fingerprint(db, new_txn, txn_hash, txn_occurrence)
+-
+-        for t in payload.get("modified", []):
+-            existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
+-            if existing:
++            values = dict(plaid_transaction_id=t["transaction_id"], account_id=account.id,
++                          item_id=item_id, date=tx_date, amount=Decimal(str(t["amount"])), name=t["name"],
++                          merchant_name=t.get("merchant_name"),
++                          plaid_category_primary=t.get("plaid_category_primary"),
++                          pending=t.get("pending", False), raw_json=self._serialize_raw(t))
++            is_new = existing is None
++            if is_new:
++                existing = Transaction(**values)
++                db.add(existing)
++                added_count += 1
++            elif all(getattr(existing, key) == value for key, value in values.items()):
++                continue
++            else:
+                 modified_count += 1
+-                existing.amount = t["amount"]
+-                existing.name = t["name"]
+-                existing.merchant_name = t.get("merchant_name")
+-                existing.plaid_category_primary = t.get("plaid_category_primary")
+-                existing.pending = t.get("pending", False)
+-                existing.raw_json = self._serialize_raw(t)
++                new_currency = transaction_currency(Transaction(**values), account)
++                if (existing.amount != values["amount"] or existing.date != tx_date
++                    or existing.account_id != account.id or existing.pending != values["pending"]
++                    or transaction_currency(existing, db.get(Account, existing.account_id)) != new_currency):
++                    self._clear_reconciliation(db, existing.id)
++
++            annotation = None if is_new else db.query(TransactionAnnotation).filter_by(transaction_id=existing.id).first()
++            old_category = None if is_new else resolve_effective_category(existing, annotation, None).category
++            old_hash = existing.txn_hash
++            for key, value in values.items():
++                setattr(existing, key, value)
++            if old_hash != txn_hash:
++                highest = db.query(func.max(Transaction.txn_occurrence)).filter(Transaction.txn_hash == txn_hash).scalar()
++                existing.txn_hash = txn_hash
++                existing.txn_occurrence = 0 if highest is None else highest + 1
++            db.flush()
++            if is_new:
++                self._reapply_fingerprint(db, existing, existing.txn_hash, existing.txn_occurrence)
++                annotation = db.query(TransactionAnnotation).filter_by(transaction_id=existing.id).first()
++            elif old_hash != txn_hash:
++                # Keep the saved manual correction attached to the corrected
++                # contents so a later unlink/relink can still restore it.
++                fingerprint = db.query(AnnotationFingerprint).filter(
++                    AnnotationFingerprint.applied_transaction_id == existing.id,
++                    AnnotationFingerprint.txn_hash == old_hash,
++                ).first()
++                if fingerprint:
++                    collision = db.query(AnnotationFingerprint).filter(
++                        AnnotationFingerprint.txn_hash == existing.txn_hash,
++                        AnnotationFingerprint.txn_occurrence == existing.txn_occurrence,
++                        AnnotationFingerprint.id != fingerprint.id,
++                    ).first()
++                    if collision:
++                        # A saved annotation for an older, identical purchase
++                        # must not be overwritten by this corrected record.
++                        highest_saved = db.query(func.max(AnnotationFingerprint.txn_occurrence)).filter(
++                            AnnotationFingerprint.txn_hash == existing.txn_hash
++                        ).scalar()
++                        existing.txn_occurrence = max(existing.txn_occurrence, highest_saved) + 1
++                    fingerprint.txn_hash = existing.txn_hash
++                    fingerprint.txn_occurrence = existing.txn_occurrence
++                    fingerprint.txn_date = existing.date
++                    fingerprint.amount = existing.amount
++                    fingerprint.name = existing.name
++                    fingerprint.account_mask = account.mask
++
++            match = find_first_matching_rule(rules, existing, account)
++            if match or (annotation and annotation.rule_category):
++                if annotation is None:
++                    annotation = TransactionAnnotation(transaction_id=existing.id)
++                    db.add(annotation)
++                annotation.rule_category = match.category if match else None
++                annotation.rule_id = match.rule_id if match else None
++                annotation.rule_evaluated_at = utcnow()
++            new_category = resolve_effective_category(existing, annotation, match).category
++            if old_category != new_category:
++                db.add(CategoryDecisionEvent(transaction_id=existing.id,
++                    old_effective_category=old_category, new_effective_category=new_category,
++                    source="rule" if match and not (annotation and annotation.user_category) else "sync",
++                    rule_id=match.rule_id if match else None))
+ 
+         for t in payload.get("removed", []):
+-            existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"]).first()
++            existing = db.query(Transaction).filter(Transaction.plaid_transaction_id == t["transaction_id"], Transaction.item_id == item_id).first()
+             if existing:
+                 removed_count += 1
+                 self._delete_dependent_rows(db, existing.id)
+@@ -293,6 +357,16 @@ class SyncService:
+ 
+         return added_count, modified_count, removed_count
+ 
++    def _clear_reconciliation(self, db: Session, txn_id: int) -> None:
++        """Changed source amounts/dates invalidate reconciliation, not notes."""
++        db.query(TransferPair).filter(
++            or_(TransferPair.txn_out_id == txn_id, TransferPair.txn_in_id == txn_id)
++        ).delete(synchronize_session=False)
++        db.query(TransactionAnnotation).filter(
++            TransactionAnnotation.refund_match_transaction_id == txn_id
++        ).update({TransactionAnnotation.refund_match_transaction_id: None,
++                  TransactionAnnotation.refund_reason: None}, synchronize_session=False)
++
+     def _delete_dependent_rows(self, db: Session, txn_id: int) -> None:
+         """Drop rows that point at a transaction about to be deleted.
+ 
+@@ -302,19 +376,27 @@ class SyncService:
+         of the annotation is not lost — it lives on in annotation_fingerprints
+         and is reapplied if the transaction comes back.
+         """
+-        db.query(TransactionAnnotation).filter(
++        linked_refunds = db.query(TransactionAnnotation).filter(
+             TransactionAnnotation.refund_match_transaction_id == txn_id
+-        ).update(
++        )
++        linked_refunds.filter(TransactionAnnotation.refund_status == "likely").update(
+             {
+                 TransactionAnnotation.refund_status: None,
+-                TransactionAnnotation.refund_match_transaction_id: None,
+-                TransactionAnnotation.refund_reason: None,
+             },
+             synchronize_session=False,
+         )
++        linked_refunds.update({TransactionAnnotation.refund_match_transaction_id: None,
++                              TransactionAnnotation.refund_reason: None}, synchronize_session=False)
+         db.query(TransferPair).filter(
+             or_(TransferPair.txn_out_id == txn_id, TransferPair.txn_in_id == txn_id)
+         ).delete(synchronize_session=False)
++        db.query(RejectedTransferPair).filter(
++            or_(RejectedTransferPair.txn_out_id == txn_id, RejectedTransferPair.txn_in_id == txn_id)
++        ).delete(synchronize_session=False)
++        db.query(AnnotationFingerprint).filter(
++            AnnotationFingerprint.applied_transaction_id == txn_id
++        ).update({AnnotationFingerprint.applied_transaction_id: None,
++                  AnnotationFingerprint.applied_at: None}, synchronize_session=False)
+         db.query(CategoryDecisionEvent).filter(
+             CategoryDecisionEvent.transaction_id == txn_id
+         ).delete(synchronize_session=False)
+@@ -374,6 +456,8 @@ class SyncService:
+             account = Account(plaid_account_id=plaid_account_id, item_id=item_id, name="Account")
+             db.add(account)
+             db.flush()
++        elif account.item_id != item_id:
++            raise ValueError("account belongs to a different linked item")
+         return account
+ 
+     @staticmethod
+diff --git a/app/services/transfer_detector.py b/app/services/transfer_detector.py
+index fc2d974a45441be05b4d30f4b14819b011b850d6..48ea233bdeae435b8eb9ec432de5b494d00485f0 100644
+--- a/app/services/transfer_detector.py
++++ b/app/services/transfer_detector.py
+@@ -6,16 +6,14 @@ a transfer here: paying a credit card from an unlinked checking account leaves a
+ single unpaired transaction, and that is the correct outcome, not a one-sided
+ "transfer".
+ 
+-The point of pairing is to stop the same money being counted as both income and
+-expense. Analytics exclude paired transactions for exactly that reason, so a
+-wrong pair silently distorts the numbers — the matching rules below are
+-deliberately conservative and refuse to guess.
++Only confirmed pairs are excluded from analytics. Automatic matches are review
++candidates, never a reason to silently remove money from the totals.
+ 
+ Matching rule (all required):
+   * equal absolute amount, opposite signs
+   * two different covered accounts
+-  * the outflow lands on or before the inflow, within `window_days`
+-  * exactly one best candidate — ties are left unpaired for manual review
++  * same currency, with posting dates within `window_days` in either direction
++  * a unique closest candidate on both sides — ties are left unpaired
+ 
+ Plaid sign convention: positive = money leaving the account.
+ """
+@@ -23,11 +21,51 @@ from __future__ import annotations
+ 
+ from collections import defaultdict
+ from decimal import Decimal
++import json
+ 
+ from sqlalchemy import and_, or_, select
+ from sqlalchemy.orm import Session
+ 
+-from app.models.models import RejectedTransferPair, Transaction, TransferPair
++from app.models.models import Account, RejectedTransferPair, Transaction, TransferPair
++
++
++def transaction_currency(txn: Transaction, account: Account | None) -> str | None:
++    """Prefer the transaction currency, falling back to its linked account."""
++    try:
++        raw = json.loads(txn.raw_json or "{}")
++        if isinstance(raw, dict):
++            currency = raw.get("iso_currency_code") or raw.get("unofficial_currency_code")
++            if currency:
++                return str(currency).upper()
++    except (TypeError, ValueError):
++        pass
++    return account.currency.upper() if account and account.currency else None
++
++
++def validate_pair(db: Session, a: Transaction, b: Transaction) -> None:
++    """Structural checks shared by manual pairing and confirmation."""
++    if a.pending or b.pending:
++        raise ValueError("transfer pair must contain posted transactions")
++    if a.account_id == b.account_id:
++        raise ValueError("transfer pair must span two accounts")
++    if not a.amount or not b.amount or a.amount + b.amount != 0:
++        raise ValueError("transfer pair amounts must be nonzero, opposite and equal")
++    if transaction_currency(a, db.get(Account, a.account_id)) != transaction_currency(b, db.get(Account, b.account_id)):
++        raise ValueError("transfer pair currencies must match")
++
++
++def confirm_pair(db: Session, pair_id: int) -> TransferPair:
++    pair = db.get(TransferPair, pair_id)
++    if pair is None:
++        raise LookupError("transfer pair not found")
++    a, b = db.get(Transaction, pair.txn_out_id), db.get(Transaction, pair.txn_in_id)
++    if a is None or b is None:
++        raise ValueError("transaction not found")
++    validate_pair(db, a, b)
++    pair.confirmed = True
++    db.commit()
++    db.refresh(pair)
++    return pair
+ 
+ 
+ def _paired_ids(db: Session) -> set[int]:
+@@ -86,8 +124,11 @@ def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
+ 
+     Idempotent: already-paired transactions are skipped.
+     """
++    if window_days < 0:
++        raise ValueError("window_days must be nonnegative")
+     paired = _paired_ids(db)
+     rejected = _rejected_pairs(db)
++    accounts = {a.id: a for a in db.query(Account).all()}
+ 
+     # Pending rows are transient and their amounts can still change.
+     txns = (
+@@ -99,31 +140,34 @@ def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
+ 
+     # Index inflows by absolute amount so matching is a lookup rather than a
+     # full scan per outflow (this used to be O(n^2) over the whole ledger).
+-    inflows_by_amount: dict[Decimal, list[Transaction]] = defaultdict(list)
++    inflows_by_amount: dict[tuple[Decimal, str | None], list[Transaction]] = defaultdict(list)
+     for t in txns:
+         if t.amount is not None and t.amount < 0:
+-            inflows_by_amount[-t.amount].append(t)
++            inflows_by_amount[(-t.amount, transaction_currency(t, accounts.get(t.account_id)))].append(t)
+ 
+     created: list[TransferPair] = []
+ 
++    edges: dict[int, list[tuple[int, Transaction]]] = defaultdict(list)
++    reverse_edges: dict[int, list[tuple[int, Transaction]]] = defaultdict(list)
+     for out_txn in txns:
+         if out_txn.id in paired or out_txn.amount is None or out_txn.amount <= 0:
+             continue
+ 
+-        candidates: list[tuple[int, Transaction]] = []
+-        for in_txn in inflows_by_amount.get(out_txn.amount, ()):
++        key = (out_txn.amount, transaction_currency(out_txn, accounts.get(out_txn.account_id)))
++        for in_txn in inflows_by_amount.get(key, ()):
+             if in_txn.id in paired or in_txn.account_id == out_txn.account_id:
+                 continue
+             if (out_txn.id, in_txn.id) in rejected:
+                 continue  # the user already said these two are not a transfer
+-            # Direction matters: money leaves before (or the same day as) it
+-            # arrives. Allowing the inflow to precede the outflow would double
+-            # the window in which unrelated amounts can collide.
+-            gap = (in_txn.date - out_txn.date).days
+-            if gap < 0 or gap > window_days:
++            # Institutions can post the receiving side first.
++            gap = abs((in_txn.date - out_txn.date).days)
++            if gap > window_days:
+                 continue
+-            candidates.append((gap, in_txn))
++            edges[out_txn.id].append((gap, in_txn))
++            reverse_edges[in_txn.id].append((gap, out_txn))
+ 
++    for out_txn in txns:
++        candidates = edges.get(out_txn.id, [])
+         if not candidates:
+             continue
+ 
+@@ -136,6 +180,11 @@ def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
+             continue
+ 
+         match = tied[0]
++        reverse = reverse_edges[match.id]
++        reverse_gap = min(gap for gap, _ in reverse)
++        reverse_best = [txn for gap, txn in reverse if gap == reverse_gap]
++        if len(reverse_best) != 1 or reverse_best[0].id != out_txn.id:
++            continue
+         pair = TransferPair(
+             txn_out_id=out_txn.id,
+             txn_in_id=match.id,
+@@ -174,10 +223,7 @@ def manual_pair(db: Session, txn_a_id: int, txn_b_id: int) -> TransferPair:
+     b = db.get(Transaction, txn_b_id)
+     if not a or not b:
+         raise ValueError("transaction not found")
+-    if a.account_id == b.account_id:
+-        raise ValueError("transfer pair must span two accounts")
+-    if a.amount + b.amount != 0:
+-        raise ValueError("transfer pair amounts must be opposite and equal")
++    validate_pair(db, a, b)
+ 
+     paired = _paired_ids(db)
+     if a.id in paired or b.id in paired:
+@@ -203,5 +249,9 @@ def manual_pair(db: Session, txn_a_id: int, txn_b_id: int) -> TransferPair:
+ 
+ 
+ def transfer_txn_ids(db: Session) -> set[int]:
+-    """All transaction ids that are part of a transfer pair (either side)."""
+-    return _paired_ids(db)
++    """Accepted transfer ids; uncertain candidates remain in financial totals."""
++    return {
++        tx_id
++        for pair in db.query(TransferPair).filter(TransferPair.confirmed.is_(True))
++        for tx_id in (pair.txn_out_id, pair.txn_in_id)
++    }
+diff --git a/dashboard_lib.py b/dashboard_lib.py
+index a095cd78035e299bd2e97b920ec03cc02b7e03f0..bf09fcb97a895b2810aac7d8158251403f9d0b04 100644
+--- a/dashboard_lib.py
++++ b/dashboard_lib.py
+@@ -140,21 +140,14 @@ def load_transactions(db_path: str) -> pd.DataFrame:
+     try:
+         # All COALESCE/effective-field logic lives in the effective_transactions
+         # view (defined in schema_patches.py). Add new correctable fields there.
+-        q = """
+-        SELECT et.*,
+-               tp_out.id AS pair_as_out, tp_in.id AS pair_as_in
+-        FROM effective_transactions et
+-        LEFT JOIN transfer_pairs tp_out ON tp_out.txn_out_id = et.id
+-        LEFT JOIN transfer_pairs tp_in  ON tp_in.txn_in_id  = et.id
+-        """
++        q = "SELECT * FROM effective_transactions"
+         df = pd.read_sql_query(q, conn)
+     finally:
+         conn.close()
+     if not df.empty:
+         df["date"] = pd.to_datetime(df["date"]).dt.date
+-        # A transfer is a matched pair across two covered accounts. The legacy
+-        # one-sided is_transfer_override flag is no longer honored.
+-        df["is_transfer"] = df["pair_as_out"].notna() | df["pair_as_in"].notna()
++        for column in ("is_transfer", "is_transfer_candidate", "pending"):
++            df[column] = df[column].fillna(False).astype(bool)
+     return df
+ 
+ 
+@@ -216,14 +209,14 @@ def sidebar_filters(df: pd.DataFrame):
+     if df.empty:
+         return db_path, None, None, [], True
+ 
+-    exclude_transfers = st.sidebar.checkbox("Exclude transfers", value=False, key="excl_xfer")
++    exclude_transfers = st.sidebar.checkbox("Exclude transfers", value=True, key="excl_xfer")
+ 
+     min_d, max_d = df["date"].min(), df["date"].max()
+     period = st.sidebar.selectbox(
+         "Period",
+         [
+-            "All time",
+             "This month",
++            "All time",
+             "Last month",
+             "Last 30 days",
+             "Last 90 days",
+@@ -364,9 +357,9 @@ def apply_transaction_filter_tokens(
+             category_values = filtered["effective_category"].fillna("").str.lower()
+             filtered = filtered[(category_values == category) | category_values.str.startswith(category + "/")]
+         elif filter_type == "amount_min":
+-            filtered = filtered[filtered["amount"] >= value]
++            filtered = filtered[filtered["amount"].abs() >= value]
+         elif filter_type == "amount_max":
+-            filtered = filtered[filtered["amount"] <= value]
++            filtered = filtered[filtered["amount"].abs() <= value]
+         elif filter_type == "date_from":
+             parts = [int(part) for part in str(value).split("-")]
+             boundary = date(*parts) if len(parts) == 3 else date(parts[0], parts[1], 1)
+@@ -391,8 +384,16 @@ def apply_transaction_filter_tokens(
+     return filtered
+ 
+ 
++def posted_transactions(df: pd.DataFrame) -> pd.DataFrame:
++    """Pending authorizations are visible in the browser, never in posted totals."""
++    if "pending" not in df.columns:
++        return df.copy()
++    return df[~df["pending"].fillna(False).astype(bool)].copy()
++
++
+ def spend_transactions(df: pd.DataFrame) -> pd.DataFrame:
+-    """Expense-side rows, including negative refunds that reduce spend."""
++    """Posted expense-side rows, including negative refunds that reduce spend."""
++    df = posted_transactions(df)
+     is_refund = (
+         df["is_refund"].fillna(0).astype(bool)
+         if "is_refund" in df.columns
+@@ -403,12 +404,13 @@ def spend_transactions(df: pd.DataFrame) -> pd.DataFrame:
+ 
+ def add_cashflow_columns(df: pd.DataFrame) -> pd.DataFrame:
+     """Add signed expense and positive income columns with refunds netted to spend."""
+-    out = df.copy()
++    out = posted_transactions(df)
+     is_refund = (
+         out["is_refund"].fillna(0).astype(bool)
+         if "is_refund" in out.columns
+         else pd.Series(False, index=out.index)
+     )
++    is_refund = is_refund & (out["amount"] < 0)
+     out["expense"] = out["amount"].where((out["amount"] > 0) | is_refund, 0)
+     out["income"] = (-out["amount"]).where((out["amount"] < 0) & ~is_refund, 0)
+     return out
+@@ -499,7 +501,7 @@ def spending_period_summary(
+         "previous_total": previous_total,
+         "change": current_total - previous_total,
+         "change_pct": (
+-            (current_total - previous_total) / previous_total * 100
++            (current_total - previous_total) / abs(previous_total) * 100
+             if previous_total
+             else None
+         ),
+diff --git a/docs/finance-intelligence-roadmap.md b/docs/finance-intelligence-roadmap.md
+index 447b87b27ea9dc90276cc4912f2e20e86566e825..75fd98cd568947f96beb4ccbdd37dde5372e93a1 100644
+--- a/docs/finance-intelligence-roadmap.md
++++ b/docs/finance-intelligence-roadmap.md
+@@ -2,6 +2,37 @@
+ 
+ This roadmap tracks the long-running Candor-inspired work. The repository is the durable source of truth; chat is for decisions and coordination.
+ 
++## Current focus: trustworthy existing accounting (2026-09-02)
++
++Feature expansion is paused. First make the existing income, spending, recurring,
++and transaction-review views trustworthy as more checking, credit-card, and
++payment-service accounts are linked. Investment analysis is out of scope.
++
++Agreed accounting contract:
++
++- All linked accounts are inside the reporting boundary. Confirmed movements
++  between them are internal transfers; an external movement remains income or
++  spending. Credit-card purchases count at posting, and confirmed repayments do
++  not count again.
++- Pending activity is visible for inspection but excluded from posted analytics.
++- An unconfirmed transfer candidate remains counted until confirmed. Do not
++  silently remove genuine spending based only on equal amounts and nearby dates.
++- Repeated ingestion of the same provider transaction is idempotent. Distinct
++  purchases with the same merchant, date, and amount must remain distinct.
++- Historical totals recompute as imported history and reconciliation change.
++- Use simple, durable categories and shared deterministic accounting functions;
++  optional agents should query bounded API results rather than ingest the ledger.
++- The main visual answers how spending compares with the comparable prior period.
++  Account freshness is supporting context, not a new landing screen.
++- Automatic person-to-person reimbursement matching, forecasting, and the broader
++  optimization suite remain deferred.
++
++The hardening pass covers API/SQL-view consistency, sync corrections and removals,
++transfer review state, chart/drill-down parity, and focused synthetic regression
++tests. CI enforces at least 80% combined statement/branch coverage over `app/`;
++frontend tests, typechecking and builds are separate checks. This percentage does
++not claim coverage of all React or Streamlit UI code.
++
+ ## Status vocabulary
+ 
+ - `idea`: captured, not yet committed
+@@ -40,6 +71,9 @@ Raw transaction data must remain local by default. Any future LLM integration re
+ 
+ ## Current execution queue
+ 
++The feature slices below are deferred until the accounting hardening pass is
++verified. Their presence is not authorization to expand feature scope.
++
+ - [ ] FI-01.1 Specify recurring-event types, confidence, evidence, and suppression rules.
+ - [ ] FI-01.2 Add synthetic fixtures for price increase, missed recurrence, trial conversion, and duplicate service.
+ - [ ] FI-01.3 Add API response and a review page with transaction drill-down.
+diff --git a/frontend/src/components/finance/AnnotationSheet.tsx b/frontend/src/components/finance/AnnotationSheet.tsx
+index e4ac06176509939563f3b9f5df5ff95244fa8117..c73d00c723b60e02216deb02a6b3b48974a21459 100644
+--- a/frontend/src/components/finance/AnnotationSheet.tsx
++++ b/frontend/src/components/finance/AnnotationSheet.tsx
+@@ -42,8 +42,10 @@ export function AnnotationSheet({
+ }: {
+   tx: Transaction | null;
+   onClose: () => void;
+-  onSave: (id: number, payload: AnnotationPayload) => void;
++  onSave: (id: number, payload: AnnotationPayload) => void | Promise<void>;
+ }) {
++  const [saving, setSaving] = useState(false);
++  const [saveError, setSaveError] = useState<string | null>(null);
+   const [category, setCategory] = useState("");
+   const [merchant, setMerchant] = useState("");
+   const [notes, setNotes] = useState("");
+@@ -52,6 +54,7 @@ export function AnnotationSheet({
+ 
+   useEffect(() => {
+     if (!tx) return;
++    setSaveError(null);
+     setCategory(tx.annotation.user_category ?? tx.effective_category);
+     setMerchant(tx.annotation.merchant_name_override ?? tx.effective_merchant ?? "");
+     setNotes(tx.annotation.notes ?? "");
+@@ -76,15 +79,24 @@ export function AnnotationSheet({
+   const selectedCategory = normalizeCategory(category) || tx.effective_category;
+   const willInherit = resolveUserCategory(tx, selectedCategory) === null;
+ 
+-  const handleSave = () => {
+-    onSave(tx.id, {
++  const handleSave = async () => {
++    if (saving) return;
++    setSaving(true);
++    setSaveError(null);
++    try {
++      await onSave(tx.id, {
+       user_category: resolveUserCategory(tx, selectedCategory),
+       merchant_name_override: merchant || null,
+       notes: notes || null,
+       reviewed,
+       refund_status: refund,
+-    });
+-    onClose();
++      });
++      onClose();
++    } catch (error) {
++      setSaveError(error instanceof Error ? error.message : "Could not save changes.");
++    } finally {
++      setSaving(false);
++    }
+   };
+ 
+   return (
+@@ -213,6 +225,7 @@ export function AnnotationSheet({
+             />
+           </label>
+ 
++          {saveError ? <p role="alert" className="mt-3 text-sm text-red-600">{saveError}</p> : null}
+           <div className="mt-4 flex gap-2">
+             <button
+               onClick={onClose}
+@@ -222,9 +235,10 @@ export function AnnotationSheet({
+             </button>
+             <button
+               onClick={handleSave}
++              disabled={saving}
+               className="flex-1 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90"
+             >
+-              Save
++              {saving ? "Saving…" : "Save"}
+             </button>
+           </div>
+         </div>
+@@ -239,8 +253,10 @@ export function BatchAnnotationSheet({
+ }: {
+   count: number;
+   onClose: () => void;
+-  onSave: (payload: AnnotationPayload) => void;
++  onSave: (payload: AnnotationPayload) => void | Promise<void>;
+ }) {
++  const [saving, setSaving] = useState(false);
++  const [saveError, setSaveError] = useState<string | null>(null);
+   const [category, setCategory] = useState("");
+   const [merchant, setMerchant] = useState("");
+   const [notes, setNotes] = useState("");
+@@ -254,15 +270,24 @@ export function BatchAnnotationSheet({
+   const selectedCategory = normalizeCategory(category);
+   const hasChanges = Object.values(dirty).some(Boolean);
+ 
+-  const handleSave = () => {
++  const handleSave = async () => {
++    if (saving) return;
++    setSaving(true);
++    setSaveError(null);
+     const payload: AnnotationPayload = {};
+     if (dirty.category) payload.user_category = selectedCategory || null;
+     if (dirty.merchant) payload.merchant_name_override = merchant || null;
+     if (dirty.notes) payload.notes = notes || null;
+     if (dirty.reviewed) payload.reviewed = reviewed;
+     if (dirty.refund) payload.refund_status = refund;
+-    onSave(payload);
+-    onClose();
++    try {
++      await onSave(payload);
++      onClose();
++    } catch (error) {
++      setSaveError(error instanceof Error ? error.message : "Could not save changes.");
++    } finally {
++      setSaving(false);
++    }
+   };
+ 
+   return (
+@@ -350,6 +375,7 @@ export function BatchAnnotationSheet({
+             />
+           </label>
+ 
++          {saveError ? <p role="alert" className="mt-3 text-sm text-red-600">{saveError}</p> : null}
+           <div className="mt-4 flex gap-2">
+             <button
+               onClick={onClose}
+@@ -359,10 +385,10 @@ export function BatchAnnotationSheet({
+             </button>
+             <button
+               onClick={handleSave}
+-              disabled={!hasChanges}
++              disabled={!hasChanges || saving}
+               className="flex-1 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
+             >
+-              Apply
++              {saving ? "Saving…" : "Apply"}
+             </button>
+           </div>
+         </div>
+@@ -385,6 +411,8 @@ function categorySourceLabel(source: Transaction["category_source"]) {
+   switch (source) {
+     case "manual":
+       return "Manual override";
++    case "refund":
++      return "Matched purchase";
+     case "rule":
+       return "Rule";
+     case "plaid":
+diff --git a/frontend/src/components/finance/CategoryComparison.tsx b/frontend/src/components/finance/CategoryComparison.tsx
+index 73f1ec912744d5486d8f14af31be23ea4e673b5e..6e72e14b5f159972a50921da96ea987ecf99e569 100644
+--- a/frontend/src/components/finance/CategoryComparison.tsx
++++ b/frontend/src/components/finance/CategoryComparison.tsx
+@@ -12,7 +12,7 @@ export function CategoryComparison({
+   previousLabel?: string;
+   getCategoryHref?: (category: string) => string;
+ }) {
+-  const max = Math.max(1, ...data.map((d) => Math.max(d.current, d.previous)));
++  const max = Math.max(1, ...data.map((d) => Math.max(Math.abs(d.current), Math.abs(d.previous))));
+   const sorted = [...data].sort((a, b) => Math.max(b.current, b.previous) - Math.max(a.current, a.previous));
+ 
+   return (
+@@ -60,13 +60,13 @@ export function CategoryComparison({
+                 <div className="h-2 overflow-hidden rounded-sm bg-secondary">
+                   <div
+                     className="h-full rounded-sm bg-foreground"
+-                    style={{ width: `${(row.current / max) * 100}%` }}
++                    style={{ width: `${(Math.abs(row.current) / max) * 100}%` }}
+                   />
+                 </div>
+                 <div className="h-2 overflow-hidden rounded-sm bg-secondary">
+                   <div
+                     className="h-full rounded-sm bg-muted-foreground/40"
+-                    style={{ width: `${(row.previous / max) * 100}%` }}
++                    style={{ width: `${(Math.abs(row.previous) / max) * 100}%` }}
+                   />
+                 </div>
+               </div>
+diff --git a/frontend/src/components/finance/TransactionRow.tsx b/frontend/src/components/finance/TransactionRow.tsx
+index 029ebe1c17a536d99a78edd19eab6fd5b98d8472..874c9fafa0620666f6a5a35be4cbc7e808758167 100644
+--- a/frontend/src/components/finance/TransactionRow.tsx
++++ b/frontend/src/components/finance/TransactionRow.tsx
+@@ -33,11 +33,15 @@ export function TransactionRow({
+         <div className="flex items-center gap-1.5">
+           <span className="truncate text-sm font-medium">{merchant}</span>
+           {tx.is_transfer ? (
+-        <span className="rounded bg-sky-50 px-1 py-0.5 text-[10px] font-medium text-sky-700">
+-          Transfer
+-        </span>
+-      ) : null}
+-      {tx.pending ? (
++            <span className="rounded bg-sky-50 px-1 py-0.5 text-[10px] font-medium text-sky-700">
++              Transfer · excluded
++            </span>
++          ) : tx.is_transfer_candidate ? (
++            <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700">
++              Possible transfer · counted
++            </span>
++          ) : null}
++          {tx.pending ? (
+             <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700">
+               <Clock className="h-2.5 w-2.5" />
+               Pending
+diff --git a/frontend/src/components/finance/charts/CalendarHeatmap.tsx b/frontend/src/components/finance/charts/CalendarHeatmap.tsx
+index d70a725f11126ab7ce92c88301dd28fa6a06e8a4..4f8fc2904017d8e09d5e99c5b0bb32d24c093dd2 100644
+--- a/frontend/src/components/finance/charts/CalendarHeatmap.tsx
++++ b/frontend/src/components/finance/charts/CalendarHeatmap.tsx
+@@ -34,7 +34,7 @@ export default function CalendarHeatmap({ year, days }: { year: number; days: Da
+     const firstWeekday = (firstDay.getUTCDay() + 6) % 7; // Monday = 0
+     const weekZero = new Date(firstDay);
+     weekZero.setUTCDate(weekZero.getUTCDate() - firstWeekday);
+-    const weekIndex = (d: Date) => Math.round((d.getTime() - weekZero.getTime()) / (7 * 86400000));
++    const weekIndex = (d: Date) => Math.floor((d.getTime() - weekZero.getTime()) / (7 * 86400000));
+ 
+     let max = 0;
+     for (const d of days) max = Math.max(max, d.amount);
+diff --git a/frontend/src/components/finance/charts/CategoryBarChart.tsx b/frontend/src/components/finance/charts/CategoryBarChart.tsx
+index be905127345e970a4c0e4fe3447b746c4e612732..7b7e7ad78610830cef2d22094f6e224f0903998f 100644
+--- a/frontend/src/components/finance/charts/CategoryBarChart.tsx
++++ b/frontend/src/components/finance/charts/CategoryBarChart.tsx
+@@ -4,7 +4,7 @@ import { CATEGORY_COLORS } from "@/lib/api/theme";
+ import { formatCurrency } from "@/lib/format";
+ 
+ export default function CategoryBarChart({ data }: { data: CategoryComparisonPoint[] }) {
+-  const rows = data.filter((c) => c.current > 0).sort((a, b) => b.current - a.current);
++  const rows = data.filter((c) => c.current !== 0).sort((a, b) => b.current - a.current);
+   return (
+     <ResponsiveContainer width="100%" height="100%">
+       <BarChart data={rows} layout="vertical" margin={{ left: 0, right: 12, top: 4, bottom: 0 }}>
+diff --git a/frontend/src/components/finance/charts/SankeyChart.tsx b/frontend/src/components/finance/charts/SankeyChart.tsx
+index cdc6b8f771e62404f30d0d89ee165f2362a314bf..0a8f32389fa3c5b0b1b8de59f314154063c8f251 100644
+--- a/frontend/src/components/finance/charts/SankeyChart.tsx
++++ b/frontend/src/components/finance/charts/SankeyChart.tsx
+@@ -20,6 +20,15 @@ function hexToRgba(hex: string, alpha: number) {
+   return `rgba(${r},${g},${b},${alpha})`;
+ }
+ 
++/** A positive-flow diagram cannot honestly represent net-negative refund categories. */
++export function canRenderSankey(data: CashflowSankey): boolean {
++  const cents = (value: number) => Math.round(value * 100);
++  return data.totalSpend >= 0
++    && data.buckets.reduce((sum, bucket) => sum + cents(bucket.amount), 0) === cents(data.totalSpend)
++    && data.buckets.every((bucket) =>
++      bucket.categories.reduce((sum, category) => sum + cents(category.amount), 0) === cents(bucket.amount));
++}
++
+ function buildGraph(data: CashflowSankey, expanded: string | null) {
+   const nodes: NodeDatum[] = [];
+   const links: Array<{ source: number; target: number; value: number; color: string }> = [];
+@@ -97,7 +106,9 @@ export default function SankeyChart({
+   expanded: string | null;
+   onToggle: (key: string) => void;
+ }) {
++  const renderable = canRenderSankey(data);
+   const { height, laidOutNodes, laidOutLinks } = useMemo(() => {
++    if (!renderable) return { height: 0, laidOutNodes: [], laidOutLinks: [] };
+     const graph = buildGraph(data, expanded);
+     const generator = sankey<NodeDatum, LinkDatum>()
+       .nodeWidth(14)
+@@ -111,7 +122,14 @@ export default function SankeyChart({
+       links: graph.links.map((d) => ({ ...d })),
+     });
+     return { height: graph.height, laidOutNodes, laidOutLinks };
+-  }, [data, expanded]);
++  }, [data, expanded, renderable]);
++
++  if (!renderable) {
++    return <p className="py-6 text-sm text-muted-foreground">
++      Net spending is {formatCurrency(data.totalSpend)}. Refund credits exceed charges in at least one category;
++      use the spending breakdown for this period because this flow diagram cannot display negative categories.
++    </p>;
++  }
+ 
+   if (!laidOutNodes.length || !laidOutLinks.length) {
+     return (
+diff --git a/frontend/src/lib/api/client.test.ts b/frontend/src/lib/api/client.test.ts
+index 1d494115fe091ce674dc483ebbd4e08481a37c93..ffe7aef340337859e86dd95ff22534ff37ce797d 100644
+--- a/frontend/src/lib/api/client.test.ts
++++ b/frontend/src/lib/api/client.test.ts
+@@ -134,3 +134,36 @@ describe("getTransactions", () => {
+     expect(calledUrl.searchParams.get("limit")).toBe("30");
+   });
+ });
++
++describe("spending chart contracts", () => {
++  it("requests yearly category comparisons when the yearly view is selected", async () => {
++    const { getCategoryComparison } = await import("./client");
++    const fetchMock = mockFetch({ category_comparison: [{ category: "FOOD", current: 100, previous: 80 }] });
++    const rows = await getCategoryComparison("yearly");
++    const url = new URL(String(fetchMock.mock.calls[0][0]));
++    expect(url.searchParams.get("granularity")).toBe("yearly");
++    expect(rows[0].current).toBe(100);
++  });
++
++  it("uses server period dates and preserves full prior total separately", async () => {
++    mockFetch({ period_label: "March 2026", period_start: "2026-03-01", period_end: "2026-03-10", previous_total: 80, previous_full_total: 200, total: 100 });
++    const result = await getSpendingSummary();
++    expect(result).toMatchObject({ periodStart: "2026-03-01", periodEnd: "2026-03-10", previousTotal: 80, previousFullTotal: 200 });
++  });
++
++  it("preserves a net refund as positive cashflow rather than forcing it negative", async () => {
++    const { getCashflowTrend } = await import("./client");
++    mockFetch([{ month: "2026-03", income: 0, expenses: -40, net: 40 }]);
++    expect(await getCashflowTrend()).toEqual([{ month: "2026-03", income: 0, expenses: 40, net: 40 }]);
++  });
++
++  it("passes posted-spend drilldown and period boundaries to the server", async () => {
++    const fetchMock = mockFetch({ total: 1, items: [] });
++    await getTransactions({ query: "is:spend", category: "FOOD", startDate: "2026-03-01", endDate: "2026-03-10" });
++    const url = new URL(String(fetchMock.mock.calls[0][0]));
++    expect(url.searchParams.get("q")).toBe("is:spend");
++    expect(url.searchParams.get("category")).toBe("FOOD");
++    expect(url.searchParams.get("start_date")).toBe("2026-03-01");
++    expect(url.searchParams.get("end_date")).toBe("2026-03-10");
++  });
++});
+diff --git a/frontend/src/lib/api/client.ts b/frontend/src/lib/api/client.ts
+index 069f42f00cf5c6d62fcdc189f6338f0c15baad13..7e9aa19a960e28ee67b6ed929e815cfa86f1e16b 100644
+--- a/frontend/src/lib/api/client.ts
++++ b/frontend/src/lib/api/client.ts
+@@ -63,6 +63,7 @@ function apiOrigin() {
+ 
+ type OverviewResponse = {
+   as_of_date: string;
++  last_transaction_date?: string | null;
+   net_worth: number;
+   assets: number;
+   liabilities: number;
+@@ -84,6 +85,7 @@ export async function getOverviewSummary(): Promise<OverviewSummary> {
+   const r = await jsonFetch<OverviewResponse>("/analytics/overview");
+   return {
+     asOfDate: r.as_of_date,
++    lastTransactionDate: r.last_transaction_date,
+     netWorth: r.net_worth,
+     assets: r.assets,
+     liabilities: r.liabilities,
+@@ -109,7 +111,7 @@ export async function getCashflowTrend(): Promise<CashflowPoint[]> {
+   return rows.slice(-12).map((row) => ({
+     month: row.month,
+     income: row.income,
+-    expenses: -Math.abs(row.expenses),
++    expenses: -row.expenses,
+     net: row.net,
+   }));
+ }
+@@ -129,6 +131,9 @@ export async function getCategorySpend(params?: {
+ }
+ 
+ type SpendingSummaryResponse = {
++  period_start?: string;
++  period_end?: string;
++  previous_full_total?: number;
+   period_label: string;
+   total: number;
+   previous_total: number;
+@@ -149,6 +154,9 @@ export async function getSpendingSummary(params?: {
+   const r = await fetchSpendingSummary(params?.granularity ?? "monthly");
+   return {
+     periodLabel: r.period_label,
++    periodStart: r.period_start,
++    periodEnd: r.period_end,
++    previousFullTotal: r.previous_full_total,
+     total: r.total,
+     previousTotal: r.previous_total,
+     change: r.change,
+@@ -158,8 +166,8 @@ export async function getSpendingSummary(params?: {
+   };
+ }
+ 
+-export async function getCategoryComparison(): Promise<CategoryComparisonPoint[]> {
+-  const r = await fetchSpendingSummary("monthly");
++export async function getCategoryComparison(granularity: "monthly" | "yearly" = "monthly"): Promise<CategoryComparisonPoint[]> {
++  const r = await fetchSpendingSummary(granularity);
+   return r.category_comparison.slice().sort((a, b) => b.current - a.current);
+ }
+ 
+diff --git a/frontend/src/lib/api/types.ts b/frontend/src/lib/api/types.ts
+index 4efa5338752d5508c8faf6242049b8d97699283e..dea716b21e079e0aa75a5ad397587dc1333b4fbc 100644
+--- a/frontend/src/lib/api/types.ts
++++ b/frontend/src/lib/api/types.ts
+@@ -2,6 +2,7 @@ export type Money = number;
+ 
+ export type OverviewSummary = {
+   asOfDate: string;
++  lastTransactionDate?: string | null;
+   netWorth: Money;
+   assets: Money;
+   liabilities: Money;
+@@ -72,11 +73,11 @@ export type Transaction = {
+   plaid_category_detailed?: string | null;
+   plaid_category_friendly?: string | null;
+   effective_category: string;
+-  category_source: "manual" | "rule" | "plaid" | "default";
++  category_source: "manual" | "rule" | "plaid" | "default" | "refund";
+   rule_id?: number | null;
+-  /** True when this transaction is one leg of a transfer pair (so it is
+-   *  excluded from spend/income analytics). */
++  /** Only confirmed pairs are excluded from spend/income analytics. */
+   is_transfer?: boolean;
++  is_transfer_candidate?: boolean;
+   transfer_pair_id?: number | null;
+   refund_status?: "confirmed" | "likely" | "not_refund" | null;
+   refund_match_transaction_id?: number | null;
+@@ -95,6 +96,9 @@ export type TransactionsResponse = {
+ };
+ 
+ export type SpendingSummary = {
++  periodStart?: string;
++  periodEnd?: string;
++  previousFullTotal?: Money;
+   periodLabel: string;
+   total: Money;
+   previousTotal: Money;
+diff --git a/frontend/src/routes/accounts.tsx b/frontend/src/routes/accounts.tsx
+index 8afb53dd38213a05a04af6c74443362937c9dcbd..cf4a2a8343a03f57b68341ce847d920d8896a095 100644
+--- a/frontend/src/routes/accounts.tsx
++++ b/frontend/src/routes/accounts.tsx
+@@ -1,4 +1,5 @@
+-import { useQuery } from "@tanstack/react-query";
++import { invalidateLedger } from "@/lib/api/cache";
++import { useQuery, useQueryClient } from "@tanstack/react-query";
+ import { useState } from "react";
+ import { Check, Pencil, X } from "lucide-react";
+ import { AppShell } from "@/components/layout/AppShell";
+@@ -9,6 +10,7 @@ import type { Account } from "@/lib/api/types";
+ import { formatCurrency } from "@/lib/format";
+ 
+ export default function AccountsPage() {
++  const queryClient = useQueryClient();
+   const q = useQuery({ queryKey: ["accounts"], queryFn: getAccountsSummary });
+   const [editingId, setEditingId] = useState<number | null>(null);
+   const [draftName, setDraftName] = useState("");
+@@ -28,7 +30,7 @@ export default function AccountsPage() {
+         nickname: trimmed && trimmed !== account.name ? trimmed : null,
+       });
+       setEditingId(null);
+-      await q.refetch();
++      await invalidateLedger(queryClient);
+     } finally {
+       setSavingId(null);
+     }
+diff --git a/frontend/src/routes/add-account.tsx b/frontend/src/routes/add-account.tsx
+index ca9a0c8c8fee17fed694ba1e04be90de319299cd..c7ae5496e2ff0ee32f4d5544b2c17ff5c69afb91 100644
+--- a/frontend/src/routes/add-account.tsx
++++ b/frontend/src/routes/add-account.tsx
+@@ -1,4 +1,4 @@
+-import { useMutation } from "@tanstack/react-query";
++import { useMutation, useQueryClient } from "@tanstack/react-query";
+ import { useState } from "react";
+ import { ExternalLink, RefreshCw, Link2, CheckCircle2 } from "lucide-react";
+ import { AppShell } from "@/components/layout/AppShell";
+@@ -7,6 +7,7 @@ import { createConnectSession, getConnectStatus, syncAllAccounts } from "@/lib/a
+ import type { ConnectSession } from "@/lib/api/types";
+ 
+ export default function AddAccountPage() {
++  const queryClient = useQueryClient();
+   const [session, setSession] = useState<ConnectSession | null>(null);
+   const [statusText, setStatusText] = useState<string | null>(null);
+   const [syncText, setSyncText] = useState<string | null>(null);
+@@ -31,7 +32,10 @@ export default function AddAccountPage() {
+ 
+   const sync = useMutation({
+     mutationFn: syncAllAccounts,
+-    onSuccess: (data) => setSyncText(data.summary),
++    onSuccess: async (data) => {
++      setSyncText(data.summary);
++      await queryClient.invalidateQueries();
++    },
+   });
+ 
+   return (
+diff --git a/frontend/src/routes/index.tsx b/frontend/src/routes/index.tsx
+index deff9d72d1c4ca333e6d325b83ac73fba9121b0d..0398b37ce67dce9dd77d6718c4a0a7df817d4c19 100644
+--- a/frontend/src/routes/index.tsx
++++ b/frontend/src/routes/index.tsx
+@@ -28,7 +28,7 @@ function appHref(path: string) {
+ export default function OverviewPage() {
+   const summary = useQuery({ queryKey: ["overview"], queryFn: getOverviewSummary });
+   const cashflow = useQuery({ queryKey: ["cashflow"], queryFn: getCashflowTrend });
+-  const comparison = useQuery({ queryKey: ["comparison"], queryFn: getCategoryComparison });
++  const comparison = useQuery({ queryKey: ["comparison"], queryFn: () => getCategoryComparison() });
+   const recent = useQuery({
+     queryKey: ["recent-tx"],
+     queryFn: () => getTransactions({ limit: 8 }),
+@@ -64,7 +64,7 @@ export default function OverviewPage() {
+         <div>
+           <h1 className="text-xl font-semibold tracking-tight">Overview</h1>
+           <p className="text-sm text-muted-foreground">
+-            As of {s?.asOfDate ?? "—"} · single household
++            Reporting through {s?.asOfDate ?? "—"} · single household
+           </p>
+         </div>
+       </div>
+@@ -84,21 +84,21 @@ export default function OverviewPage() {
+             <KpiCard
+               label="Month spend"
+               value={formatCurrency(s.monthSpend, { compact: true })}
+-              sublabel={`vs ${formatCurrency(s.previousMonthSpend, { compact: true })} last mo`}
++              sublabel={`vs ${formatCurrency(s.previousMonthSpend, { compact: true })} prior MTD`}
+               tone="spend"
+               delta={<Delta current={s.monthSpend} previous={s.previousMonthSpend} goodDirection="down" />}
+             />
+             <KpiCard
+               label="Month income"
+               value={formatCurrency(s.monthIncome, { compact: true })}
+-              sublabel={`vs ${formatCurrency(s.previousMonthIncome, { compact: true })} last mo`}
++              sublabel={`vs ${formatCurrency(s.previousMonthIncome, { compact: true })} prior MTD`}
+               tone="income"
+               delta={<Delta current={s.monthIncome} previous={s.previousMonthIncome} goodDirection="up" />}
+             />
+             <KpiCard
+               label="Net cashflow"
+               value={formatCurrency(s.netCashflow, { compact: true, sign: true })}
+-              sublabel={`vs ${formatCurrency(s.previousNetCashflow, { compact: true, sign: true })} last mo`}
++              sublabel={`vs ${formatCurrency(s.previousNetCashflow, { compact: true, sign: true })} prior MTD`}
+               tone="net"
+               delta={<Delta current={s.netCashflow} previous={s.previousNetCashflow} goodDirection="up" />}
+             />
+@@ -106,6 +106,11 @@ export default function OverviewPage() {
+         )}
+       </div>
+ 
++      {s ? <p className="mt-2 text-xs text-muted-foreground">
++        Latest posted transaction: {s.lastTransactionDate ?? "none"}. This date does not confirm that every account is synced.
++        {s.needsAttention.transferPairsPending > 0 ? " Totals include possible transfers awaiting review." : ""}
++      </p> : null}
++
+       {/* Charts */}
+       <div className="mt-4 grid gap-4 lg:grid-cols-3">
+         <Section title="Cashflow · last 12 months" className="lg:col-span-2">
+@@ -152,7 +157,7 @@ export default function OverviewPage() {
+ 
+       <div className="mt-4 grid gap-4 lg:grid-cols-2">
+         <Section
+-          title="This month vs last month by category"
++          title="Category spending · comparable prior period"
+           action={
+             <a
+               href={appHref("/spending")}
+@@ -163,7 +168,7 @@ export default function OverviewPage() {
+           }
+         >
+           {comparison.data ? (
+-            <CategoryComparison data={comparison.data} />
++            <CategoryComparison data={comparison.data} currentLabel="This month to date" previousLabel="Last month · comparable prior period" />
+           ) : (
+             <ChartSkeleton />
+           )}
+diff --git a/frontend/src/routes/rules.tsx b/frontend/src/routes/rules.tsx
+index 1a3f03aedbc27672308ef57996e4c1381d6aa5f9..004fb8f3c8abe5e5ddd4447e615c3c97b5bc9b1e 100644
+--- a/frontend/src/routes/rules.tsx
++++ b/frontend/src/routes/rules.tsx
+@@ -1,3 +1,4 @@
++import { invalidateLedger } from "@/lib/api/cache";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { useEffect, useState } from "react";
+ import { Plus, Play, Trash2, Pencil } from "lucide-react";
+@@ -23,7 +24,7 @@ export default function RulesPage() {
+ 
+   const items = rules.data?.items ?? [];
+   const active = items.filter((rule) => rule.enabled).length;
+-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["category-rules"] });
++  const invalidate = () => invalidateLedger(queryClient);
+ 
+   const toggle = useMutation({
+     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => patchCategoryRule(id, { enabled }),
+diff --git a/frontend/src/routes/spending.tsx b/frontend/src/routes/spending.tsx
+index 352216efbc25d57dc93b0ce6af33e1075f47d935..23ad5dae746b31a5ab1e8cc97435e8c2e7c4af11 100644
+--- a/frontend/src/routes/spending.tsx
++++ b/frontend/src/routes/spending.tsx
+@@ -1,5 +1,6 @@
++import { invalidateLedger } from "@/lib/api/cache";
+ import { lazy, Suspense, useState } from "react";
+-import { useQuery } from "@tanstack/react-query";
++import { useQuery, useQueryClient } from "@tanstack/react-query";
+ import { SearchBar } from "@/components/finance/SearchBar";
+ import { AppShell } from "@/components/layout/AppShell";
+ import { Section } from "@/components/finance/Section";
+@@ -36,14 +37,11 @@ function activePeriodBounds(granularity: "monthly" | "yearly") {
+   if (granularity === "yearly") {
+     return { startDate: `${year}-01-01`, endDate: `${year}-${month}-${day}` };
+   }
+-  const end = new Date(year, today.getMonth() + 1, 0);
+-  return {
+-    startDate: `${year}-${month}-01`,
+-    endDate: `${year}-${month}-${String(end.getDate()).padStart(2, "0")}`,
+-  };
++  return { startDate: `${year}-${month}-01`, endDate: `${year}-${month}-${day}` };
+ }
+ 
+ export default function SpendingPage() {
++  const queryClient = useQueryClient();
+   const [granularity, setGranularity] = useState<"monthly" | "yearly">("monthly");
+   const [query, setQuery] = useState("");
+   const [category, setCategory] = useState("All");
+@@ -57,21 +55,25 @@ export default function SpendingPage() {
+     queryKey: ["cumulative", granularity],
+     queryFn: () => getCumulativeSpending({ granularity }),
+   });
+-  const comparison = useQuery({ queryKey: ["comparison"], queryFn: getCategoryComparison });
+-  const tx = useQuery({
+-    queryKey: ["tx", query, category],
+-    queryFn: () => getTransactions({ query, category, limit: 30 }),
++  const comparison = useQuery({
++    queryKey: ["comparison", granularity],
++    queryFn: () => getCategoryComparison(granularity),
+   });
+-
+   const s = summary.data;
+-  const periodBounds = activePeriodBounds(granularity);
++  const periodBounds = s?.periodStart && s?.periodEnd
++    ? { startDate: s.periodStart, endDate: s.periodEnd }
++    : activePeriodBounds(granularity);
++  const tx = useQuery({
++    queryKey: ["tx", query, category, periodBounds.startDate, periodBounds.endDate],
++    queryFn: () => getTransactions({ ...periodBounds, query: `is:spend ${query}`.trim(), category, limit: 30 }),
++  });
+ 
+   const handleSave = async (
+     id: number,
+     payload: Parameters<typeof patchTransactionAnnotation>[1],
+   ) => {
+     await patchTransactionAnnotation(id, payload);
+-    tx.refetch();
++    await invalidateLedger(queryClient);
+   };
+ 
+   return (
+@@ -112,7 +114,7 @@ export default function SpendingPage() {
+               sublabel={s.periodLabel}
+             />
+             <KpiCard
+-              label="vs previous"
++              label="vs comparable prior period"
+               value={formatCurrency(s.change, { sign: true, compact: true })}
+               sublabel={formatCurrency(s.previousTotal, { compact: true }) + " prior"}
+               delta={<Delta current={s.total} previous={s.previousTotal} goodDirection="down" />}
+@@ -154,13 +156,16 @@ export default function SpendingPage() {
+           </div>
+         </Section>
+ 
+-        <Section title="Category change · current vs previous">
++        <Section title="Category change · comparable prior period">
+           {comparison.data ? (
+             <CategoryComparison
+               data={comparison.data}
++              currentLabel={granularity === "yearly" ? "This year to date" : "This month to date"}
++              previousLabel="Previous · comparable prior period"
+               getCategoryHref={(categoryName) =>
+                 appHref("/transactions", {
+                   category: categoryName,
++                  query: "is:spend",
+                   startDate: periodBounds.startDate,
+                   endDate: periodBounds.endDate,
+                   sort: "date",
+@@ -174,7 +179,8 @@ export default function SpendingPage() {
+         </Section>
+       </div>
+ 
+-      <Section title="Transactions" className="mt-4">
++      <Section title="Spending transactions" className="mt-4">
++        {tx.data ? <p className="mb-2 text-xs text-muted-foreground">Showing {tx.data.items.length} of {tx.data.total} posted spending transactions in this period.</p> : null}
+         <div className="mb-3 flex flex-wrap items-center gap-2">
+           <SearchBar value={query} onChange={setQuery} placeholder="Search merchant, category…" />
+           <select
+diff --git a/frontend/src/routes/transactions.tsx b/frontend/src/routes/transactions.tsx
+index 8f54e5dcce9c5c02108b5a7ffa87e82891f4f783..2e4e5a6c44a54ba2538c34cac675d4ffdc9aa057 100644
+--- a/frontend/src/routes/transactions.tsx
++++ b/frontend/src/routes/transactions.tsx
+@@ -1,4 +1,5 @@
+-import { useQuery } from "@tanstack/react-query";
++import { invalidateLedger } from "@/lib/api/cache";
++import { useQuery, useQueryClient } from "@tanstack/react-query";
+ import { useMemo, useState } from "react";
+ import { ArrowDownUp, CalendarDays, Edit3, X } from "lucide-react";
+ import { AppShell } from "@/components/layout/AppShell";
+@@ -18,6 +19,13 @@ import { formatCurrency, formatDate } from "@/lib/format";
+ 
+ const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
+ 
++export function transactionLimitNotice(shown: number, total: number): string | null {
++  return shown < total
++    ? `Showing the ${shown} most recent of ${total} matches. Sorting applies to loaded rows; narrow the date or search filters to inspect the rest.`
++    : null;
++}
++
++
+ type AttentionFilter = "unreviewed" | "uncategorized" | "refunds";
+ const FILTER_LABEL: Record<AttentionFilter, string> = {
+   unreviewed: "Unreviewed",
+@@ -35,6 +43,7 @@ const FILTER_QUERY: Record<AttentionFilter, string> = {
+ 
+ const SOURCE_LABEL: Record<string, string> = {
+   manual: "Manual",
++  refund: "Matched purchase",
+   rule: "Rule",
+   plaid: "Plaid",
+   default: "Auto",
+@@ -72,6 +81,7 @@ function presetBounds(preset: DatePreset) {
+ }
+ 
+ export default function TransactionsPage() {
++  const queryClient = useQueryClient();
+   const urlParams = new URLSearchParams(window.location.search);
+   const rawFilter = urlParams.get("filter");
+   const filter = isAttentionFilter(rawFilter) ? rawFilter : undefined;
+@@ -129,7 +139,7 @@ export default function TransactionsPage() {
+     payload: Parameters<typeof patchTransactionAnnotation>[1],
+   ) => {
+     await patchTransactionAnnotation(id, payload);
+-    tx.refetch();
++    await invalidateLedger(queryClient);
+   };
+ 
+   const selectedCount = selectedIds.size;
+@@ -163,7 +173,7 @@ export default function TransactionsPage() {
+     if (!ids.length) return;
+     await patchTransactionAnnotations(ids, payload);
+     setSelectedIds(new Set());
+-    tx.refetch();
++    await invalidateLedger(queryClient);
+   };
+ 
+   return (
+@@ -177,6 +187,9 @@ export default function TransactionsPage() {
+         </div>
+       </div>
+ 
++      {tx.data && transactionLimitNotice(tx.data.items.length, tx.data.total) ? (
++        <p className="mb-3 text-sm text-muted-foreground">{transactionLimitNotice(tx.data.items.length, tx.data.total)}</p>
++      ) : null}
+       <Section title="All activity">
+         {filter ? (
+           <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+@@ -258,8 +271,8 @@ export default function TransactionsPage() {
+             >
+               <option value="date:desc">Newest</option>
+               <option value="date:asc">Oldest</option>
+-              <option value="amount:desc">Highest price</option>
+-              <option value="amount:asc">Lowest price</option>
++              <option value="amount:desc">Highest amount (loaded)</option>
++              <option value="amount:asc">Lowest amount (loaded)</option>
+             </select>
+           </div>
+           <button
+@@ -404,6 +417,10 @@ export default function TransactionsPage() {
+                         >
+                           Transfer
+                         </span>
++                      ) : t.is_transfer_candidate ? (
++                        <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
++                          Possible transfer · counted
++                        </span>
+                       ) : t.pending ? (
+                         <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                           Pending
+diff --git a/frontend/src/routes/transfers.tsx b/frontend/src/routes/transfers.tsx
+index 94a2050bf407d9c2ce47044940337fc34f8e5cab..32e5bde47f30c55be61427bcd961a2b136d1d923 100644
+--- a/frontend/src/routes/transfers.tsx
++++ b/frontend/src/routes/transfers.tsx
+@@ -1,3 +1,4 @@
++import { invalidateLedger } from "@/lib/api/cache";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { useState } from "react";
+ import { Radar, Check, Unlink } from "lucide-react";
+@@ -24,7 +25,7 @@ export default function TransfersPage() {
+   const [detectMsg, setDetectMsg] = useState<string | null>(null);
+   const items = transfers.data?.items ?? [];
+   const pending = items.filter((item) => !item.confirmed).length;
+-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["transfers"] });
++  const invalidate = () => invalidateLedger(queryClient);
+ 
+   const detect = useMutation({
+     mutationFn: detectTransfers,
+@@ -43,7 +44,7 @@ export default function TransfersPage() {
+         <div>
+           <h1 className="text-xl font-semibold tracking-tight">Transfer Detection</h1>
+           <p className="text-sm text-muted-foreground">
+-            {transfers.data ? `${pending} pending · ${items.length} candidates` : "Loading..."}
++            {transfers.data ? `${pending} need review · ${items.length} pairs` : "Loading..."}
+           </p>
+         </div>
+         <button
+@@ -62,7 +63,15 @@ export default function TransfersPage() {
+         </div>
+       ) : null}
+ 
+-      <Section title="Suspect transfers">
++      {transfers.isError || confirm.isError || unpair.isError ? (
++        <p role="alert" className="mb-3 text-sm text-red-600">
++          {(transfers.error ?? confirm.error ?? unpair.error)?.message}
++        </p>
++      ) : null}
++      <p className="mb-3 text-sm text-muted-foreground">
++        Possible transfers remain in income and spending until confirmed. Unpair incorrect matches.
++      </p>
++      <Section title="Transfer pairs">
+         <div className="hidden md:block">
+           <table className="w-full text-sm">
+             <thead>
+@@ -109,7 +118,7 @@ export default function TransfersPage() {
+                         (item.confirmed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")
+                       }
+                     >
+-                      {item.confirmed ? "Confirmed" : "Pending"}
++                      {item.confirmed ? "Confirmed · excluded" : "Needs review · counted"}
+                     </span>
+                   </td>
+                   <td className="py-2">
+@@ -151,7 +160,7 @@ export default function TransfersPage() {
+                     (item.confirmed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")
+                   }
+                 >
+-                  {item.confirmed ? "Confirmed" : "Pending"}
++                  {item.confirmed ? "Confirmed · excluded" : "Needs review · counted"}
+                 </span>
+               </div>
+               <div className="truncate font-medium">
+diff --git a/pages/0_Transfers.py b/pages/0_Transfers.py
+index 2e6d79be9a86a488ad55881429ac2c13d1bab799..101b8c5e1cc65f61a958b2e0dc071d3d6109ba80 100644
+--- a/pages/0_Transfers.py
++++ b/pages/0_Transfers.py
+@@ -17,7 +17,7 @@ compact_page()
+ render_app_navigation()
+ st.title("Transfer reconciliation")
+ st.caption(
+-    "Auto-matched pairs excluded from cashflow/category totals. Confirm the good ones; unpair the bad ones."
++    "Possible transfers remain counted until confirmed. Confirm genuine internal transfers; unpair incorrect matches."
+ )
+ 
+ with st.sidebar.expander("Connection settings", expanded=False):
+@@ -53,6 +53,7 @@ else:
+             if resp.ok:
+                 st.success("Confirmed.")
+                 st.cache_data.clear()
++                st.rerun()
+             else:
+                 st.error(f"{resp.status_code} {resp.text}")
+     with c2:
+@@ -61,6 +62,7 @@ else:
+             if resp.ok:
+                 st.success("Unpaired.")
+                 st.cache_data.clear()
++                st.rerun()
+             else:
+                 st.error(f"{resp.status_code} {resp.text}")
+ 
+@@ -68,20 +70,23 @@ st.divider()
+ st.subheader("Manual pair")
+ txns = load_transactions(db_path)
+ if not txns.empty:
+-    unpaired = txns[~txns.get("is_transfer", False)]
++    unpaired = txns[
++        ~txns["is_transfer"] & ~txns["is_transfer_candidate"] & ~txns["pending"]
++    ]
+     unpaired = unpaired.sort_values("date", ascending=False).head(500)
+     unpaired["label"] = unpaired.apply(
+         lambda r: f"#{int(r['id'])} {r['date']} {r['account_name']} ${float(r['amount']):,.2f} — {r['name']}",
+         axis=1,
+     )
+-    a = st.selectbox("Transaction A (outflow, amount > 0)", unpaired["label"].tolist(), key="manual_a")
+-    b = st.selectbox("Transaction B (inflow, amount < 0)", unpaired["label"].tolist(), key="manual_b")
+-    if st.button("Pair A + B"):
++    a = st.selectbox("Transaction A (outflow, amount > 0)", unpaired.loc[unpaired["amount"] > 0, "label"].tolist(), key="manual_a")
++    b = st.selectbox("Transaction B (inflow, amount < 0)", unpaired.loc[unpaired["amount"] < 0, "label"].tolist(), key="manual_b")
++    if st.button("Pair A + B", disabled=not a or not b):
+         aid = int(a.split()[0].lstrip("#"))
+         bid = int(b.split()[0].lstrip("#"))
+         resp = api_post("/transfers", json={"txn_a_id": aid, "txn_b_id": bid}, base=api_base)
+         if resp.ok:
+             st.success("Paired.")
+             st.cache_data.clear()
++            st.rerun()
+         else:
+             st.error(f"{resp.status_code} {resp.text}")
+diff --git a/pages/2_Spending.py b/pages/2_Spending.py
+index 825c78610e2d8f36e36b0d24e27defd17fae9421..b5227bac8afd3719abc990759c3cc50fe45cb7f2 100644
+--- a/pages/2_Spending.py
++++ b/pages/2_Spending.py
+@@ -6,6 +6,8 @@ import pandas as pd
+ import plotly.express as px
+ import streamlit as st
+ 
++from app.services.accounting import comparable_periods
++
+ from dashboard_lib import (
+     DEFAULT_DB,
+     apply_date_filter,
+@@ -94,14 +96,16 @@ if granularity == "yearly":
+ else:
+     period_total_days = pd.Period(current_period["start"], freq="M").days_in_month
+ 
++_, _, _, previous_end, _ = comparable_periods(anchor, granularity)
++previous_comparable = period_spends[1][period_spends[1]["date"] <= previous_end]
+ summary = spending_period_summary(
+     period_spends[0],
+-    period_spends[1],
++    previous_comparable,
+     elapsed_days=current_period["len"],
+     total_days=period_total_days,
+ )
+ change_text = (
+-    f"{summary['change_pct']:+.1f}% vs {periods[1]['label']}"
++    f"{summary['change_pct']:+.1f}% vs {periods[1]['label']} through {previous_end:%b %-d}"
+     if summary["change_pct"] is not None
+     else f"No {periods[1]['label']} comparison"
+ )
+@@ -175,7 +179,7 @@ with drivers_tab:
+     comparison = pd.concat(
+         [
+             period_spends[0].assign(period=current_label),
+-            period_spends[1].assign(period=previous_label),
++            previous_comparable.assign(period=previous_label),
+         ],
+         ignore_index=True,
+     )
+@@ -313,7 +317,7 @@ with st.expander("Transaction samples and annotation", expanded=False):
+             st.rerun()
+ 
+     samples_source = apply_transaction_filter_tokens(
+-        selected_window,
++        period_spends[0],
+         st.session_state.spend_filters,
+     )
+     if samples_source.empty:
+diff --git a/pages/3_Cashflow_Sankey.py b/pages/3_Cashflow_Sankey.py
+index 6108c3c1991b9f489df878d10146f644e8bb911c..40748fd7a8a8dd36400f8c6ebb7c1068ebb72dbd 100644
+--- a/pages/3_Cashflow_Sankey.py
++++ b/pages/3_Cashflow_Sankey.py
+@@ -89,7 +89,14 @@ visible_category_totals = (
+     else category_totals.iloc[0:0]
+ )
+ visible_income_totals = income_totals if selected_bucket == "Income sources" else income_totals.iloc[0:0]
+-total_spend = float(bucket_totals.sum())
++total_spend = float(cashflow["expense"].sum())
++# Sankey links must be nonnegative; hiding refund offsets would inflate totals.
++if round(float(category_totals["amount"].sum()) * 100) != round(total_spend * 100):
++    st.info(
++        f"Net spending is ${total_spend:,.2f}. Refund credits exceed charges in at least one category; "
++        "use the Spending or Cashflow page because this diagram cannot display negative categories."
++    )
++    st.stop()
+ savings = max(income - total_spend, 0.0)
+ deficit = max(total_spend - income, 0.0)
+ 
+diff --git a/pages/6_Transactions.py b/pages/6_Transactions.py
+index c4e7fe32db13404858a126dc167114a40870e0fb..3faa7bee1b2c93c18c9af9f4a99a3cbb99295219 100644
+--- a/pages/6_Transactions.py
++++ b/pages/6_Transactions.py
+@@ -131,13 +131,17 @@ if minimum_amount > 0:
+     filtered = filtered[filtered["amount"].abs() >= minimum_amount]
+ 
+ filtered = filtered.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
++filtered["accounting_status"] = "Posted"
++filtered.loc[filtered["is_transfer_candidate"], "accounting_status"] = "Possible transfer · counted"
++filtered.loc[filtered["is_transfer"], "accounting_status"] = "Transfer · excluded"
++filtered.loc[filtered["pending"], "accounting_status"] = "Pending · excluded"
+ 
+ # Detail is the first DOM column so it stacks above the list on phones after a
+ # selection, while the wider transaction list remains the dominant desktop pane.
+ detail_col, list_col = st.columns([2, 3], gap="medium")
+ with list_col:
+     st.caption(f"{len(filtered):,} transactions · select one to edit or several for bulk actions")
+-    compact_display = ["date", "effective_merchant", "effective_category", "amount"]
++    compact_display = ["date", "effective_merchant", "effective_category", "amount", "accounting_status"]
+     detailed_display = [
+         "date",
+         "amount",
+@@ -146,6 +150,7 @@ with list_col:
+         "effective_account_name",
+         "effective_category",
+         "category_source",
++        "accounting_status",
+     ]
+     display_columns = compact_display if compact_columns else detailed_display
+     available = [column for column in display_columns if column in filtered.columns]
+diff --git a/pyproject.toml b/pyproject.toml
+index 669fa2708f57da55e09a7812838fe53bd40da301..a557758905ed6a17b000bf89f89c6078f1dec01f 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -33,3 +33,11 @@ include = ["app*"]
+ [tool.pytest.ini_options]
+ testpaths = ["tests"]
+ pythonpath = ["."]
++
++[tool.coverage.run]
++source = ["app"]
++branch = true
++
++[tool.coverage.report]
++fail_under = 80
++show_missing = true
+diff --git a/tests/test_category_resolver.py b/tests/test_category_resolver.py
+index c76fef683cc43bba931331934b44ff9905a7c87f..41ec1512b78de075f23dbb148656962b5c823c78 100644
+--- a/tests/test_category_resolver.py
++++ b/tests/test_category_resolver.py
+@@ -6,11 +6,17 @@ import pytest
+ 
+ from app.services.category_resolver import (
+     compile_rules,
++    detailed_category,
+     find_first_matching_rule,
+     resolve_effective_category,
+ )
+ 
+ 
++@pytest.mark.parametrize("raw", ["[]", "null", "3", '"text"', '{"personal_finance_category": []}', '{"personal_finance_category": {"detailed": []}}', "not json"])
++def test_malformed_provider_categories_fall_back_to_primary(raw):
++    assert detailed_category(raw) is None
++
++
+ @dataclass
+ class Tx:
+     amount: Decimal
+diff --git a/tests/test_insights_analytics.py b/tests/test_insights_analytics.py
+index c346261a0edb5ebbfb506944781e53bc1087def3..0d9a84d18f8d56f72073b5488f8f1172496d5c26 100644
+--- a/tests/test_insights_analytics.py
++++ b/tests/test_insights_analytics.py
+@@ -2,8 +2,11 @@
+ /analytics/category-movers, /analytics/daily-spend."""
+ from datetime import date
+ 
++import pytest
+ from fastapi.testclient import TestClient
+ 
++from app.api import routes
++
+ from app.db.session import SessionLocal
+ from app.main import app
+ from app.models.models import Account, Item, Transaction, TransactionAnnotation
+@@ -11,6 +14,15 @@ from app.services.security import encrypt_token
+ from tests.conftest import AUTH_HEADERS
+ 
+ 
++@pytest.fixture(autouse=True)
++def reporting_clock(monkeypatch):
++    class FixedDate(date):
++        @classmethod
++        def today(cls):
++            return cls(2026, 6, 15)
++    monkeypatch.setattr(routes, "date", FixedDate)
++
++
+ def _seed_item_and_account(item_id: str, account_id: str, name: str = "Checking"):
+     with SessionLocal() as db:
+         item = Item(plaid_item_id=item_id, access_token_encrypted=encrypt_token("t"), status="active")
+@@ -138,7 +150,7 @@ def _seed_movers_ledger():
+         _add_txn(account_id, item_id, d, amt, name, cat)
+ 
+ 
+-def test_category_movers_defaults_to_latest_month():
++def test_category_movers_defaults_to_current_month():
+     _seed_movers_ledger()
+     with TestClient(app) as client:
+         r = client.get("/analytics/category-movers", headers=AUTH_HEADERS)
+@@ -216,7 +228,7 @@ def test_daily_spend_available_years_and_default_year():
+     with TestClient(app) as client:
+         r = client.get("/analytics/daily-spend", headers=AUTH_HEADERS)
+     body = r.json()
+-    assert body["year"] == 2026  # latest transaction year
++    assert body["year"] == 2026  # current calendar year
+     assert set(body["available_years"]) == {2025, 2026}
+     assert body["available_years"] == sorted(body["available_years"], reverse=True)
+ 
+diff --git a/tests/test_mobile_analytics.py b/tests/test_mobile_analytics.py
+index 12021d1231c17a4d7d337234cee96e2f83111b54..fce00a0eb5f1e710bf98cd888b887d711f53b5f4 100644
+--- a/tests/test_mobile_analytics.py
++++ b/tests/test_mobile_analytics.py
+@@ -2,13 +2,16 @@
+ mobile (React) app: /analytics/overview, /analytics/spending-summary,
+ /analytics/cumulative-spend, and q= search on /transactions.
+ 
+-Data is seeded in 2020 so the "current month" projection branch never triggers
+-regardless of when the suite runs, keeping assertions deterministic.
++Data and the clock are fixed independently so elapsed-period assertions do not
++change when the suite is run in a later month.
+ """
+ from datetime import date
+ 
++import pytest
+ from fastapi.testclient import TestClient
+ 
++from app.api import routes
++
+ from app.db.session import SessionLocal
+ from app.main import app
+ from app.models.models import Account, Item, Transaction
+@@ -16,6 +19,15 @@ from app.services.security import encrypt_token
+ from tests.conftest import AUTH_HEADERS
+ 
+ 
++@pytest.fixture(autouse=True)
++def reporting_clock(monkeypatch):
++    class FixedDate(date):
++        @classmethod
++        def today(cls):
++            return cls(2020, 3, 15)
++    monkeypatch.setattr(routes, "date", FixedDate)
++
++
+ def _seed():
+     with SessionLocal() as db:
+         item = Item(plaid_item_id="i-mob", access_token_encrypted=encrypt_token("t"), status="active")
+@@ -55,7 +67,8 @@ def test_overview_kpis_and_needs_attention():
+         r = client.get("/analytics/overview", headers=AUTH_HEADERS)
+     assert r.status_code == 200
+     body = r.json()
+-    assert body["as_of_date"] == "2020-03-10"
++    assert body["as_of_date"] == "2020-03-15"
++    assert body["last_transaction_date"] == "2020-03-10"
+     assert body["month_spend"] == 500.0
+     assert body["previous_month_spend"] == 400.0
+     assert body["month_income"] == 1200.0
+@@ -77,7 +90,7 @@ def test_spending_summary_monthly():
+     assert body["previous_total"] == 400.0
+     assert body["change"] == 100.0
+     assert body["change_pct"] == 25.0
+-    assert body["projection"] == 500.0  # 2020-03 is not the live month
++    assert body["projection"] == 1033.33  # 500 / 15 elapsed days * 31
+     assert body["top_driver"]["category"] == "FOOD/OTHER"
+     assert body["top_driver"]["amount"] == 100.0
+     comp = {row["category"]: row for row in body["category_comparison"]}
+@@ -105,9 +118,10 @@ def test_cumulative_spend_monthly():
+     by_x = {row["x"]: row for row in rows}
+     assert by_x[5]["current"] == 300.0
+     assert by_x[10]["current"] == 500.0
+-    assert by_x[11]["current"] is None  # past the last charge day
++    assert by_x[11]["current"] == 500.0  # no charge still carries the total
++    assert by_x[16]["current"] is None  # beyond today
+     assert by_x[6]["previous1"] == 400.0  # February
+-    assert by_x[1]["previous2"] is None  # no data two months back
++    assert by_x[1]["previous2"] == 0.0  # zero recorded spending
+ 
+ 
+ def test_transactions_search_query():
+diff --git a/tests/test_needs_attention_drilldown.py b/tests/test_needs_attention_drilldown.py
+index 2bd252792c2c09f75ecae8a092039ea3a512675b..10b685a65e40b8e44a6c611e97e33dabf531f2b7 100644
+--- a/tests/test_needs_attention_drilldown.py
++++ b/tests/test_needs_attention_drilldown.py
+@@ -120,9 +120,9 @@ def _seed_ledger() -> None:
+             db.add(TransactionAnnotation(transaction_id=t.id, reviewed=True))
+         for t in refunds:
+             db.add(TransactionAnnotation(transaction_id=t.id, refund_status="likely", reviewed=False))
+-        # Paired transfers are excluded from the unreviewed count, so the
++        # Confirmed transfers are excluded from the unreviewed count, so the
+         # drill-down has to exclude them too.
+-        db.add(TransferPair(txn_out_id=transfer_out.id, txn_in_id=transfer_in.id, confirmed=False))
++        db.add(TransferPair(txn_out_id=transfer_out.id, txn_in_id=transfer_in.id, confirmed=True))
+         db.commit()
+ 
+ 
+diff --git a/tests/test_recurring_api.py b/tests/test_recurring_api.py
+index c89e993e8cecc5394dc23004ae980f34c98973d9..493bdeae8cd2d8b6dbd3382d4753f948de06e7aa 100644
+--- a/tests/test_recurring_api.py
++++ b/tests/test_recurring_api.py
+@@ -1,7 +1,10 @@
+ from datetime import date, timedelta
+ 
++import pytest
+ from fastapi.testclient import TestClient
+ 
++from app.services import recurring_detector
++
+ from app.db.session import SessionLocal
+ from app.main import app
+ from app.models.models import (
+@@ -15,6 +18,15 @@ from app.services.security import encrypt_token
+ from tests.conftest import AUTH_HEADERS
+ 
+ 
++@pytest.fixture(autouse=True)
++def recurring_clock(monkeypatch):
++    class FixedDate(date):
++        @classmethod
++        def today(cls):
++            return cls(2026, 6, 20)
++    monkeypatch.setattr(recurring_detector, "date", FixedDate)
++
++
+ def _seed():
+     """A monthly subscription, a one-off purchase, and a transfer pair."""
+     with SessionLocal() as db:
+diff --git a/tests/test_refund_detector.py b/tests/test_refund_detector.py
+index 2c7b394164242e474cffbc066c67ffce78165afd..d588ce29ba197da7fadc75cbdf9d7a3766fd32f8 100644
+--- a/tests/test_refund_detector.py
++++ b/tests/test_refund_detector.py
+@@ -2,7 +2,7 @@ import json
+ from datetime import date
+ 
+ from app.db.session import SessionLocal
+-from app.models.models import Account, Item, Transaction, TransactionAnnotation
++from app.models.models import Account, Item, Transaction, TransactionAnnotation, TransferPair
+ from app.services.refund_detector import classify_refunds
+ from app.services.security import encrypt_token
+ 
+@@ -120,3 +120,94 @@ def test_plaid_refund_code_is_confirmed_and_manual_override_is_preserved():
+     assert db.query(TransactionAnnotation).filter_by(transaction_id=coded.id).one().refund_status == "confirmed"
+     assert db.query(TransactionAnnotation).filter_by(transaction_id=manual.id).one().refund_status == "not_refund"
+     db.close()
++
++
++def _transaction(db, item, account, id_, amount, name="Store", day=1, **kwargs):
++    txn = Transaction(plaid_transaction_id=id_, account_id=account.id, item_id=item.id,
++                      date=date(2026, 6, day), amount=amount, name=name, pending=False, **kwargs)
++    db.add(txn)
++    db.flush()
++    return txn
++
++
++def test_uncertain_transfer_and_legacy_override_do_not_hide_refund():
++    db, item, account = _seed_account()
++    try:
++        charge = _transaction(db, item, account, "purchase", 100)
++        refund = _transaction(db, item, account, "return", -100, day=3)
++        other = Account(plaid_account_id="other", item_id=item.id, name="Checking")
++        db.add(other)
++        db.flush()
++        outflow = _transaction(db, item, other, "coincidence", 100, name="Utility", day=3)
++        db.add(TransferPair(txn_out_id=outflow.id, txn_in_id=refund.id, confirmed=False))
++        db.add(TransactionAnnotation(transaction_id=refund.id, is_transfer_override=True))
++        db.commit()
++        assert classify_refunds(db)["likely"] == 1
++        annotation = db.query(TransactionAnnotation).filter_by(transaction_id=refund.id).one()
++        assert annotation.refund_match_transaction_id == charge.id
++        db.query(TransferPair).one().confirmed = True
++        db.commit()
++        assert classify_refunds(db)["likely"] == 0
++        assert annotation.refund_status is None
++    finally:
++        db.close()
++
++
++def test_a_charge_cannot_support_multiple_full_refunds():
++    db, item, account = _seed_account()
++    try:
++        _transaction(db, item, account, "purchase", 100)
++        _transaction(db, item, account, "return-one", -100, day=2)
++        _transaction(db, item, account, "return-two", -100, day=3)
++        db.commit()
++        assert classify_refunds(db)["likely"] == 1
++        assert classify_refunds(db)["likely"] == 1
++        annotations = db.query(TransactionAnnotation).filter_by(refund_status="likely").all()
++        assert len(annotations) == 1
++    finally:
++        db.close()
++
++
++def test_ambiguous_same_amount_charges_remain_unmatched():
++    db, item, account = _seed_account()
++    try:
++        _transaction(db, item, account, "purchase-one", 100)
++        _transaction(db, item, account, "purchase-two", 100)
++        _transaction(db, item, account, "return", -100, day=3)
++        db.commit()
++        assert classify_refunds(db) == {"likely": 0, "confirmed": 0}
++    finally:
++        db.close()
++
++
++def test_currency_and_empty_description_do_not_provide_false_refund_evidence():
++    db, item, account = _seed_account()
++    try:
++        _transaction(db, item, account, "purchase", 100, raw_json='{"iso_currency_code":"USD"}')
++        _transaction(db, item, account, "return", -100, day=2, raw_json='{"iso_currency_code":"EUR"}')
++        _transaction(db, item, account, "blank-purchase", 20, name="")
++        _transaction(db, item, account, "blank-return", -20, name="", day=2)
++        db.commit()
++        assert classify_refunds(db)["likely"] == 0
++    finally:
++        db.close()
++
++
++def test_provider_refund_code_can_be_corrected_without_losing_manual_decisions():
++    db, item, account = _seed_account()
++    try:
++        refund = _transaction(db, item, account, "coded", -100, raw_json='{"transaction_code":"refund"}')
++        db.commit()
++        assert classify_refunds(db)["confirmed"] == 1
++        refund.raw_json = '[]'
++        db.commit()
++        assert classify_refunds(db)["confirmed"] == 0
++        annotation = db.query(TransactionAnnotation).filter_by(transaction_id=refund.id).one()
++        assert annotation.refund_status is None
++        annotation.refund_status = "confirmed"
++        annotation.refund_reason = "Manual classification"
++        db.commit()
++        classify_refunds(db)
++        assert annotation.refund_status == "confirmed"
++    finally:
++        db.close()
+diff --git a/tests/test_sync_and_annotations.py b/tests/test_sync_and_annotations.py
+index b0105611e9b90da33ed86f41dd9fd876360dd87d..e5f7b414dd1d1b682fa9ab1e1615492f8693e5fb 100644
+--- a/tests/test_sync_and_annotations.py
++++ b/tests/test_sync_and_annotations.py
+@@ -25,10 +25,20 @@ def test_sync_all_no_items():
+     assert r.json()["summary"] == "no active items"
+ 
+ 
+-def test_sync_all_syncs_active_items():
++def test_sync_all_syncs_active_items(monkeypatch):
++    # Each linked institution has its own provider account ids. The global
++    # built-in mock reuses one account, which would silently move it between
++    # items without the sync ownership guard.
++    from app.services.plaid_client import PlaidClient
++    monkeypatch.setattr(PlaidClient, "get_accounts", lambda self, token: [
++        {"account_id": f"account-{token}", "name": "Checking", "iso_currency_code": "USD"}
++    ])
++    monkeypatch.setattr(PlaidClient, "sync_transactions", lambda self, token, cursor: {
++        "added": [], "modified": [], "removed": [], "next_cursor": f"cursor-{token}"
++    })
+     with SessionLocal() as db:
+-        db.add(Item(plaid_item_id="all-1", access_token_encrypted=encrypt_token("tok"), status="active"))
+-        db.add(Item(plaid_item_id="all-2", access_token_encrypted=encrypt_token("tok"), status="active"))
++        db.add(Item(plaid_item_id="all-1", access_token_encrypted=encrypt_token("tok-one"), status="active"))
++        db.add(Item(plaid_item_id="all-2", access_token_encrypted=encrypt_token("tok-two"), status="active"))
+         db.commit()
+ 
+     with TestClient(app) as client:
+diff --git a/tests/test_sync_service.py b/tests/test_sync_service.py
+index c296c5b46ed64149b02183d125a31300ea56f95a..c4e04a7b6c3c52271d041e78d1a06a87f8d0cb07 100644
+--- a/tests/test_sync_service.py
++++ b/tests/test_sync_service.py
+@@ -1,4 +1,6 @@
+ from datetime import date, timedelta
++from decimal import Decimal
++import pytest
+ 
+ from app.core.time import utcnow
+ from app.db.session import SessionLocal
+@@ -7,7 +9,9 @@ from app.models.models import (
+     AccountBalanceSnapshot,
+     AnnotationFingerprint,
+     CategoryDecisionEvent,
++    CategoryRule,
+     Item,
++    RejectedTransferPair,
+     SyncRun,
+     SyncState,
+     Transaction,
+@@ -17,6 +21,7 @@ from app.models.models import (
+ from app.services.security import encrypt_token
+ from app.services.sync_service import SyncInProgressError, SyncService
+ from app.services.txn_fingerprint import compute_txn_hash
++from app.services.transfer_detector import manual_pair
+ 
+ 
+ class FakePlaidClient:
+@@ -643,3 +648,192 @@ def test_removed_transaction_takes_its_dependent_rows_with_it():
+ 
+         # And the manual edit is not lost — the fingerprint still carries it.
+         assert db.query(AnnotationFingerprint).count() >= 0
++
++
++class MutableClient(FakePlaidClient):
++    def __init__(self, payload):
++        self.payload = payload
++
++    def sync_transactions(self, _access_token, cursor):
++        return self.payload
++
++    def get_historical_transactions(self, _access_token, start_date, end_date):
++        return self.payload.get("added", [])
++
++
++def _record(id_="posted", **changes):
++    return {"transaction_id": id_, "account_id": "acct-100", "date": "2026-04-10",
++            "amount": 25.31, "name": "Cafe", "plaid_category_primary": "FOOD_AND_DRINK",
++            "pending": False, **changes}
++
++
++def _item(db, name="hardening"):
++    item = Item(plaid_item_id=name, access_token_encrypted=encrypt_token("tok"), status="active")
++    db.add(item)
++    db.commit()
++    return item
++
++
++def test_modified_posting_date_rehashes_and_invalidates_transfer_but_preserves_notes():
++    client = MutableClient({"added": [_record()], "next_cursor": "one"})
++    service = SyncService(client)
++    with SessionLocal() as db:
++        item = _item(db)
++        service.sync_item(db, item.id)
++        tx = db.query(Transaction).one()
++        old_hash = tx.txn_hash
++        account = Account(plaid_account_id="credit", item_id=item.id, name="Card", currency="USD")
++        db.add(account)
++        db.flush()
++        counterparty = Transaction(plaid_transaction_id="payment", account_id=account.id, item_id=item.id,
++                                   date=tx.date, amount=-tx.amount, name="Payment", pending=False)
++        db.add(counterparty)
++        db.add(TransactionAnnotation(transaction_id=tx.id, user_category="FOOD/DINING", notes="keep", reviewed=True))
++        db.flush()
++        manual_pair(db, tx.id, counterparty.id)
++        client.payload = {"modified": [_record(date="2026-05-01")], "next_cursor": "two"}
++        result = service.sync_item(db, item.id)
++        assert result["modified"] == 1
++        assert tx.date == date(2026, 5, 1)
++        assert tx.txn_hash != old_hash
++        assert db.query(TransferPair).count() == 0
++        annotation = db.query(TransactionAnnotation).filter_by(transaction_id=tx.id).one()
++        assert (annotation.user_category, annotation.notes, annotation.reviewed) == ("FOOD/DINING", "keep", True)
++
++
++def test_pending_replacement_keeps_local_identity_and_manual_fingerprint():
++    client = MutableClient({"added": [_record("pending", pending=True)], "next_cursor": "one"})
++    service = SyncService(client)
++    with SessionLocal() as db:
++        item = _item(db)
++        service.sync_item(db, item.id)
++        tx = db.query(Transaction).one()
++        local_id = tx.id
++        db.add(TransactionAnnotation(transaction_id=tx.id, user_category="FOOD/DINING", reviewed=True))
++        db.add(AnnotationFingerprint(txn_hash=tx.txn_hash, txn_occurrence=tx.txn_occurrence,
++            account_mask="1234", txn_date=tx.date, amount=tx.amount, name=tx.name,
++            user_category="FOOD/DINING", reviewed=True, source_transaction_id=tx.id, applied_transaction_id=tx.id))
++        db.commit()
++        client.payload = {"added": [_record(amount=30, date="2026-04-12", _source={"pending_transaction_id": "pending"})],
++                          "removed": [{"transaction_id": "pending"}], "next_cursor": "two"}
++        service.sync_item(db, item.id)
++        tx = db.query(Transaction).one()
++        assert tx.id == local_id
++        assert (tx.plaid_transaction_id, tx.pending, tx.amount, tx.date) == ("posted", False, Decimal("30"), date(2026, 4, 12))
++        assert db.query(TransactionAnnotation).filter_by(transaction_id=tx.id).one().user_category == "FOOD/DINING"
++        fingerprint = db.query(AnnotationFingerprint).one()
++        assert (fingerprint.txn_hash, fingerprint.txn_date, fingerprint.amount) == (tx.txn_hash, tx.date, tx.amount)
++
++
++def test_replayed_provider_ids_are_idempotent_but_same_content_purchases_are_kept():
++    records = [_record("purchase-one"), _record("purchase-two")]
++    client = MutableClient({"added": records, "next_cursor": "one"})
++    service = SyncService(client)
++    with SessionLocal() as db:
++        item = _item(db)
++        assert service.sync_item(db, item.id)["added"] == 2
++        assert service.sync_item(db, item.id)["modified"] == 0
++        assert db.query(Transaction).count() == 2
++        txns = db.query(Transaction).order_by(Transaction.txn_occurrence).all()
++        assert [tx.txn_occurrence for tx in txns] == [0, 1]
++        client.payload = {"removed": [{"transaction_id": "purchase-one"}], "next_cursor": "two"}
++        service.sync_item(db, item.id)
++        client.payload = {"added": [_record("purchase-three")], "next_cursor": "three"}
++        service.sync_item(db, item.id)
++        assert {tx.txn_occurrence for tx in db.query(Transaction)} == {1, 2}
++        assert sum(tx.amount for tx in db.query(Transaction)) == Decimal("50.62")
++
++
++@pytest.mark.parametrize("historical", [False, True])
++def test_failed_batch_rolls_back_records_and_balances_but_logs_failure(historical):
++    client = MutableClient({"added": [_record("valid"), _record("invalid", date="bad-date")], "next_cursor": "bad"})
++    service = SyncService(client)
++    with SessionLocal() as db:
++        item = _item(db)
++        with pytest.raises(ValueError):
++            if historical:
++                service.sync_item_historical(db, item.id, date(2026, 4, 1), date(2026, 4, 30))
++            else:
++                service.sync_item(db, item.id)
++        assert db.query(Transaction).count() == 0
++        assert db.query(Account).count() == 0
++        assert db.query(AccountBalanceSnapshot).count() == 0
++        assert db.query(CategoryDecisionEvent).count() == 0
++        run = db.query(SyncRun).one()
++        assert run.status == "error"
++        assert run.finished_at is not None
++        if not historical:
++            assert db.query(SyncState).one().cursor is None
++        client.payload = {"added": [_record("valid")], "next_cursor": "good"}
++        assert service.sync_item(db, item.id)["added"] == 1
++
++
++def test_sync_applies_category_rules_and_preserves_manual_precedence():
++    client = MutableClient({"added": [_record()], "next_cursor": "one"})
++    service = SyncService(client)
++    with SessionLocal() as db:
++        item = _item(db)
++        db.add(CategoryRule(name="Cafe", description_regex="Cafe", assigned_category="FOOD/DINING", enabled=True))
++        db.commit()
++        service.sync_item(db, item.id)
++        tx = db.query(Transaction).one()
++        annotation = db.query(TransactionAnnotation).filter_by(transaction_id=tx.id).one()
++        assert annotation.rule_category == "FOOD/DINING"
++        assert db.query(CategoryDecisionEvent).filter_by(source="rule").one().new_effective_category == "FOOD/DINING"
++        annotation.user_category = "TRAVEL/MEALS"
++        db.commit()
++        client.payload = {"modified": [_record(name="Grocery")], "next_cursor": "two"}
++        service.sync_item(db, item.id)
++        assert annotation.rule_category is None
++        assert annotation.user_category == "TRAVEL/MEALS"
++
++
++def test_removed_records_clear_rejection_and_fingerprint_row_references():
++    client = MutableClient({"added": [_record()], "next_cursor": "one"})
++    service = SyncService(client)
++    with SessionLocal() as db:
++        item = _item(db)
++        service.sync_item(db, item.id)
++        tx = db.query(Transaction).one()
++        db.add(RejectedTransferPair(txn_out_id=tx.id, txn_in_id=999))
++        db.add(AnnotationFingerprint(txn_hash=tx.txn_hash, txn_occurrence=tx.txn_occurrence,
++            txn_date=tx.date, amount=tx.amount, name=tx.name, source_transaction_id=tx.id,
++            applied_transaction_id=tx.id, notes="persist"))
++        db.commit()
++        client.payload = {"removed": [{"transaction_id": "posted"}], "next_cursor": "two"}
++        service.sync_item(db, item.id)
++        assert db.query(RejectedTransferPair).count() == 0
++        fingerprint = db.query(AnnotationFingerprint).one()
++        assert fingerprint.applied_transaction_id is None
++        assert fingerprint.notes == "persist"
++
++
++def test_new_linked_account_reconsiders_ambiguous_transfer_candidates():
++    client = MutableClient({"added": [_record("out", amount=100), _record("in", account_id="venmo", amount=-100)],
++                            "next_cursor": "one"})
++    service = SyncService(client)
++    with SessionLocal() as db:
++        item = _item(db)
++        db.add(Account(plaid_account_id="venmo", item_id=item.id, name="Venmo", currency="USD"))
++        db.commit()
++        service.sync_item(db, item.id)
++        assert db.query(TransferPair).count() == 1
++        db.add(Account(plaid_account_id="savings", item_id=item.id, name="Savings", currency="USD"))
++        db.commit()
++        client.payload = {"added": [_record("another-in", account_id="savings", amount=-100)], "next_cursor": "two"}
++        service.sync_item(db, item.id)
++        assert db.query(TransferPair).count() == 0
++        assert db.query(Transaction).count() == 3
++
++
++def test_linking_another_item_cannot_steal_an_existing_account():
++    client = MutableClient({"added": [_record()], "next_cursor": "one"})
++    service = SyncService(client)
++    with SessionLocal() as db:
++        item = _item(db)
++        service.sync_item(db, item.id)
++        second = _item(db, "second-item")
++        with pytest.raises(ValueError, match="different linked item"):
++            service.sync_item(db, second.id)
++        assert db.query(Account).one().item_id == item.id
++        assert db.query(Transaction).one().item_id == item.id
+diff --git a/tests/test_transfer_detector.py b/tests/test_transfer_detector.py
+index 2999c2d86f5b4fdd368d48c1797c1df1d5ebe4fc..861e1bdb7b4d622816ed253ba4077fb3c3de7235 100644
+--- a/tests/test_transfer_detector.py
++++ b/tests/test_transfer_detector.py
+@@ -1,5 +1,6 @@
+ from datetime import date
+ from decimal import Decimal
++import pytest
+ 
+ from app.db.session import SessionLocal
+ from app.models.models import Account, Item, Transaction, TransferPair
+@@ -80,9 +81,8 @@ def test_ignores_wide_gap():
+         db.close()
+ 
+ 
+-def test_inflow_before_outflow_is_not_a_transfer():
+-    """Money must leave before it arrives. Allowing the reverse doubles the
+-    window in which unrelated equal amounts can collide."""
++def test_receiving_bank_can_post_before_sending_bank():
++    """Posting dates are institution-specific; a suggestion is still useful."""
+     db = SessionLocal()
+     try:
+         item, checking, credit = _seed_item_and_accounts(db)
+@@ -90,7 +90,10 @@ def test_inflow_before_outflow_is_not_a_transfer():
+         _mk_txn(db, item, checking, 100, date(2024, 1, 12), "leaves later")
+         db.commit()
+ 
+-        assert transfer_detector.detect_candidates(db, window_days=3) == []
++        pairs = transfer_detector.detect_candidates(db, window_days=3)
++        assert len(pairs) == 1
++        assert pairs[0].confirmed is False
++        assert transfer_detector.transfer_txn_ids(db) == set()
+     finally:
+         db.close()
+ 
+@@ -275,3 +278,68 @@ def test_manual_pair_rejects_same_account():
+             pass
+     finally:
+         db.close()
++
++
++def test_refuses_reverse_ambiguity_and_does_not_greedily_take_an_inflow():
++    with SessionLocal() as db:
++        item, checking, credit = _seed_item_and_accounts(db)
++        _mk_txn(db, item, checking, 100, date(2024, 1, 10), "out-a")
++        _mk_txn(db, item, checking, 100, date(2024, 1, 10), "out-b")
++        _mk_txn(db, item, credit, -100, date(2024, 1, 11), "in")
++        db.commit()
++        assert transfer_detector.detect_candidates(db) == []
++
++
++@pytest.mark.parametrize("invalid", ["pending", "zero", "currency", "amount"])
++def test_manual_pair_and_confirmation_validate_financial_structure(invalid):
++    with SessionLocal() as db:
++        item, checking, credit = _seed_item_and_accounts(db)
++        a = _mk_txn(db, item, checking, 100, date(2024, 1, 10), "out")
++        b = _mk_txn(db, item, credit, -100, date(2024, 1, 11), "in")
++        if invalid == "pending":
++            a.pending = True
++        elif invalid == "zero":
++            a.amount = b.amount = 0
++        elif invalid == "currency":
++            checking.currency, credit.currency = "USD", "EUR"
++        else:
++            b.amount = -99
++        db.commit()
++        with pytest.raises(ValueError):
++            transfer_detector.manual_pair(db, a.id, b.id)
++        assert transfer_detector.detect_candidates(db) == []
++        pair = TransferPair(txn_out_id=a.id, txn_in_id=b.id, confirmed=False)
++        db.add(pair)
++        db.commit()
++        with pytest.raises(ValueError):
++            transfer_detector.confirm_pair(db, pair.id)
++        assert transfer_detector.transfer_txn_ids(db) == set()
++
++
++def test_transaction_currency_overrides_account_currency_and_confirmation_accepts_pair():
++    with SessionLocal() as db:
++        item, checking, credit = _seed_item_and_accounts(db)
++        checking.currency = credit.currency = "USD"
++        a = _mk_txn(db, item, checking, 100, date(2024, 1, 10), "out")
++        b = _mk_txn(db, item, credit, -100, date(2024, 1, 11), "in")
++        b.raw_json = '{"iso_currency_code": "EUR"}'
++        db.commit()
++        assert transfer_detector.detect_candidates(db) == []
++        a.raw_json = '{"iso_currency_code": "EUR"}'
++        db.commit()
++        pair = transfer_detector.detect_candidates(db)[0]
++        assert transfer_detector.transfer_txn_ids(db) == set()
++        transfer_detector.confirm_pair(db, pair.id)
++        assert transfer_detector.transfer_txn_ids(db) == {a.id, b.id}
++        with pytest.raises(ValueError, match="already paired"):
++            transfer_detector.manual_pair(db, b.id, a.id)
++
++
++def test_missing_pair_and_invalid_window_are_explicit_errors():
++    with SessionLocal() as db:
++        with pytest.raises(LookupError):
++            transfer_detector.confirm_pair(db, 999)
++        with pytest.raises(ValueError):
++            transfer_detector.manual_pair(db, 998, 999)
++        with pytest.raises(ValueError):
++            transfer_detector.detect_candidates(db, window_days=-1)
+diff --git a/tests/test_transfers_api.py b/tests/test_transfers_api.py
+index aa6d5a0485859da5a0b49c9d79df4c81e5bdc9cb..189897587f8fc6b1f79c4223280a9e6b8ea44740 100644
+--- a/tests/test_transfers_api.py
++++ b/tests/test_transfers_api.py
+@@ -93,7 +93,14 @@ def test_analytics_excludes_transfers_by_default():
+ 
+         client.post("/transfers/detect", headers=AUTH_HEADERS)
+ 
+-        # After detection: transfer is excluded, only the $50 spend remains
++        # Detection creates a candidate: money stays counted until reviewed.
++        assert client.get("/analytics/monthly-spend", headers=AUTH_HEADERS).json() == [
++            {"month": "2026-03", "spend": 250.0}
++        ]
++        pair_id = client.get("/transfers", headers=AUTH_HEADERS).json()["items"][0]["id"]
++        client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS)
++
++        # Confirmation excludes both sides, leaving the $50 purchase.
+         r = client.get("/analytics/monthly-spend", headers=AUTH_HEADERS)
+         assert r.json() == [{"month": "2026-03", "spend": 50.0}]
+ 
+@@ -110,6 +117,8 @@ def test_cashflow_excludes_transfer_both_sides():
+     _seed_transfer_ledger()
+     with TestClient(app) as client:
+         client.post("/transfers/detect", headers=AUTH_HEADERS)
++        pair_id = client.get("/transfers", headers=AUTH_HEADERS).json()["items"][0]["id"]
++        client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS)
+         r = client.get("/analytics/cashflow-trend", headers=AUTH_HEADERS)
+     data = {row["month"]: row for row in r.json()}
+     # Transfer's $200 income side AND $200 expense side should both be gone
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..e86bb54de550bc4464a299df6f31d0d81cf60bcb
+--- /dev/null
++++ b/.github/workflows/tests.yml
+@@ -0,0 +1,42 @@
++name: Tests
++
++on:
++  push:
++  pull_request:
++
++permissions:
++  contents: read
++
++jobs:
++  backend:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.12'
++          cache: pip
++          cache-dependency-path: pyproject.toml
++      - run: python -m pip install -e '.[dev,dashboard]'
++      - run: python -m pytest --cov --cov-report=term-missing --cov-report=xml
++      - uses: actions/upload-artifact@v4
++        if: always()
++        with:
++          name: backend-coverage
++          path: coverage.xml
++  frontend:
++    runs-on: ubuntu-latest
++    defaults:
++      run:
++        working-directory: frontend
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: '24'
++          cache: npm
++          cache-dependency-path: frontend/package-lock.json
++      - run: npm ci
++      - run: npm run typecheck
++      - run: npm test
++      - run: npm run build
+diff --git a/app/services/accounting.py b/app/services/accounting.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..0f6617975e6820bdc3fb9c789b5cd0c551c3b0a9
+--- /dev/null
++++ b/app/services/accounting.py
+@@ -0,0 +1,65 @@
++"""Shared deterministic ledger expressions and comparable reporting periods.
++
++Amounts follow Plaid's sign convention: purchases positive, receipts negative.
++An unconfirmed transfer candidate remains in the ledger until reviewed.
++"""
++import calendar
++from datetime import date
++
++from sqlalchemy import case, select
++
++from app.models.models import Transaction, TransactionAnnotation, TransferPair
++
++
++def exclude_confirmed_transfers(query):
++    return query.filter(
++        ~Transaction.id.in_(select(TransferPair.txn_out_id).where(TransferPair.confirmed.is_(True))),
++        ~Transaction.id.in_(select(TransferPair.txn_in_id).where(TransferPair.confirmed.is_(True))),
++    )
++
++
++def posted_activity(query, include_transfers=False):
++    query = query.filter(Transaction.pending.is_(False))
++    return query if include_transfers else exclude_confirmed_transfers(query)
++
++
++def is_refund():
++    return (Transaction.amount < 0) & TransactionAnnotation.refund_status.in_(["confirmed", "likely"])
++
++
++def expense_amount():
++    return case((is_refund(), Transaction.amount), (Transaction.amount > 0, Transaction.amount), else_=0)
++
++
++def income_amount():
++    # COALESCE avoids SQL NULL treating an unannotated receipt as neither income
++    # nor a refund.
++    from sqlalchemy import func
++    return case(
++        ((Transaction.amount < 0) & ~func.coalesce(is_refund(), False), -Transaction.amount),
++        else_=0,
++    )
++
++
++def comparable_periods(today: date, granularity: str):
++    """Current start/end, previous start/comparable end/full end, inclusive.
++
++    Compare calendar dates, clipping short months and leap days. On the final
++    day of a month, compare both completed months in full.
++    """
++    if granularity == "yearly":
++        prior_year = today.year - 1
++        return (
++            date(today.year, 1, 1), today, date(prior_year, 1, 1),
++            date(prior_year, today.month, min(today.day, calendar.monthrange(prior_year, today.month)[1])),
++            date(prior_year, 12, 31),
++        )
++    if granularity != "monthly":
++        raise ValueError("granularity must be monthly or yearly")
++    year, month = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
++    last = calendar.monthrange(year, month)[1]
++    complete = today.day == calendar.monthrange(today.year, today.month)[1]
++    return (
++        date(today.year, today.month, 1), today, date(year, month, 1),
++        date(year, month, last if complete else min(today.day, last)), date(year, month, last),
++    )
+diff --git a/frontend/src/components/finance/ledger-review.test.tsx b/frontend/src/components/finance/ledger-review.test.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..756ddb78ad5bab9905be5cd16fb33df04bc05a08
+--- /dev/null
++++ b/frontend/src/components/finance/ledger-review.test.tsx
+@@ -0,0 +1,95 @@
++import { act } from "react";
++import { createRoot, type Root } from "react-dom/client";
++import { renderToStaticMarkup } from "react-dom/server";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { AnnotationSheet } from "./AnnotationSheet";
++import { TransactionRow } from "./TransactionRow";
++import { CategoryComparison } from "./CategoryComparison";
++import { canRenderSankey } from "./charts/SankeyChart";
++import type { CashflowSankey, Transaction } from "@/lib/api/types";
++import { invalidateLedger } from "@/lib/api/cache";
++
++const transaction: Transaction = {
++  id: 1, date: "2026-03-10", amount: 120, name: "Dining", pending: false,
++  effective_category: "FOOD/DINING", category_source: "plaid", annotation: { reviewed: false },
++};
++let root: Root | undefined;
++let container: HTMLDivElement;
++let client: QueryClient;
++beforeEach(() => {
++  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
++  container = document.createElement("div");
++  document.body.appendChild(container);
++  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ items: [] }) })));
++});
++afterEach(async () => {
++  if (root) await act(async () => root!.unmount());
++  root = undefined;
++  client.clear();
++  container.remove();
++  vi.unstubAllGlobals();
++});
++
++it("keeps a failed correction open with an actionable error, then permits retry", async () => {
++  const close = vi.fn();
++  const save = vi.fn().mockRejectedValueOnce(new Error("Save failed: network unavailable")).mockResolvedValueOnce(undefined);
++  root = createRoot(container);
++  await act(async () => root!.render(
++    <QueryClientProvider client={client}>
++      <AnnotationSheet tx={transaction} onClose={close} onSave={save} />
++    </QueryClientProvider>,
++  ));
++  const saveButton = () => [...container.querySelectorAll("button")].find((b) => b.textContent === "Save")!;
++  await act(async () => saveButton().click());
++  expect(close).not.toHaveBeenCalled();
++  expect(container.querySelector('[role="alert"]')?.textContent).toContain("network unavailable");
++  await act(async () => saveButton().click());
++  expect(save).toHaveBeenCalledTimes(2);
++  expect(close).toHaveBeenCalledTimes(1);
++});
++
++it("differentiates tentative transfer evidence from excluded confirmed movements", () => {
++  const candidate = renderToStaticMarkup(<TransactionRow tx={{ ...transaction, is_transfer_candidate: true }} />);
++  expect(candidate).toContain("Possible transfer · counted");
++  expect(candidate).not.toContain("Transfer · excluded");
++  const confirmed = renderToStaticMarkup(<TransactionRow tx={{ ...transaction, is_transfer: true }} />);
++  expect(confirmed).toContain("Transfer · excluded");
++  expect(confirmed).not.toContain("Possible transfer");
++});
++
++it("invalidates previously cached charts and review counts after a ledger correction", async () => {
++  const keys = [["overview"], ["cashflow"], ["spending-summary", "yearly"], ["comparison"], ["recurring"], ["all-tx"], ["transfers"]];
++  for (const key of keys) client.setQueryData(key, { previous: true });
++  await invalidateLedger(client);
++  for (const key of keys) expect(client.getQueryState(key)?.isInvalidated).toBe(true);
++});
++
++it("displays negative refund-category totals without invalid CSS widths", () => {
++  const markup = renderToStaticMarkup(<CategoryComparison data={[{ category: "SHOPPING", current: -40, previous: 100 }]} />);
++  expect(markup).toContain("-$40");
++  expect(markup).not.toContain("width:-");
++});
++
++describe("Sankey reconciliation", () => {
++  const base: CashflowSankey = {
++    income: 1000, totalSpend: 100, savings: 900, deficit: 0,
++    incomeSources: [{ category: "Salary", amount: 1000 }],
++    buckets: [{ bucket: "FOOD", amount: 100, categories: [{ category: "FOOD/DINING", amount: 100 }] }],
++  };
++  it("allows a conserved positive flow", () => expect(canRenderSankey(base)).toBe(true));
++  it("rejects omitted net-negative buckets instead of inventing extra income", () => {
++    expect(canRenderSankey({ ...base, totalSpend: 60, savings: 940 })).toBe(false);
++  });
++  it("rejects an expanded bucket whose refund category would be hidden", () => {
++    expect(canRenderSankey({ ...base, buckets: [{ bucket: "FOOD", amount: 100, categories: [{ category: "FOOD/DINING", amount: 140 }] }] })).toBe(false);
++  });
++});
++
++it("explains that sorting a truncated drilldown covers loaded rows only", async () => {
++  const { transactionLimitNotice } = await import("@/routes/transactions");
++  expect(transactionLimitNotice(500, 800)).toContain("500 most recent of 800");
++  expect(transactionLimitNotice(500, 800)).toContain("Sorting applies to loaded rows");
++  expect(transactionLimitNotice(40, 40)).toBeNull();
++});
+diff --git a/frontend/src/lib/api/cache.ts b/frontend/src/lib/api/cache.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..46ba8bb9556d2a58f15843d6d92e4a45b72aaae8
+--- /dev/null
++++ b/frontend/src/lib/api/cache.ts
+@@ -0,0 +1,6 @@
++import type { QueryClient } from "@tanstack/react-query";
++
++/** All cached views describe the same ledger: a correction can affect any chart. */
++export function invalidateLedger(client: QueryClient) {
++  return client.invalidateQueries();
++}
+diff --git a/tests/test_accounting_integrity.py b/tests/test_accounting_integrity.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..1cf63ab4e7b69604bdf3f47debd971e7918f7ef8
+--- /dev/null
++++ b/tests/test_accounting_integrity.py
+@@ -0,0 +1,263 @@
++"""Money conservation and drill-down parity across linked checking/card/Venmo.
++
++These are synthetic ledger examples, independent of Plaid and the live clock.
++"""
++from datetime import date
++
++import pytest
++from fastapi.testclient import TestClient
++from sqlalchemy import text
++
++from app.api import routes
++from app.db.session import SessionLocal, engine
++from app.main import app
++from app.models.models import Account, Item, Transaction, TransactionAnnotation, TransferPair
++from app.services.accounting import comparable_periods
++from app.services.security import encrypt_token
++from tests.conftest import AUTH_HEADERS
++
++
++@pytest.fixture
++def clock(monkeypatch):
++    def set_date(value):
++        class FixedDate(date):
++            @classmethod
++            def today(cls):
++                return value
++        monkeypatch.setattr(routes, "date", FixedDate)
++    set_date(date(2024, 3, 15))
++    return set_date
++
++
++def _seed(rows):
++    """Rows: (id, account name, date, amount, category, pending)."""
++    with SessionLocal() as db:
++        item = Item(plaid_item_id="integrity-item", access_token_encrypted=encrypt_token("test"))
++        db.add(item)
++        db.flush()
++        accounts = {}
++        for name in {row[1] for row in rows}:
++            account = Account(plaid_account_id=name, item_id=item.id, name=name)
++            db.add(account)
++            db.flush()
++            accounts[name] = account.id
++        ids = {}
++        for name, account, day, amount, category, pending in rows:
++            tx = Transaction(plaid_transaction_id=name, account_id=accounts[account],
++                             item_id=item.id, date=day, amount=amount, name=name,
++                             plaid_category_primary=category, pending=pending)
++            db.add(tx)
++            db.flush()
++            ids[name] = tx.id
++        db.commit()
++        return ids
++
++
++def _get(client, path, **params):
++    response = client.get(path, params=params, headers=AUTH_HEADERS)
++    assert response.status_code == 200, response.text
++    return response.json()
++
++
++def test_posted_ledger_matches_every_chart_and_drilldown_before_and_after_confirmation(clock):
++    day = date(2024, 3, 5)
++    ids = _seed([
++        ("salary", "checking", day, -2000, "INCOME", False),
++        ("dinner", "card", day, 120, "FOOD_AND_DRINK", False),
++        ("card payment out", "checking", day, 200, "TRANSFER_OUT", False),
++        ("card payment in", "card", day, -200, "TRANSFER_IN", False),
++        ("funding out", "checking", day, 75, "TRANSFER_OUT", False),
++        ("funding in", "venmo", day, -75, "TRANSFER_IN", False),
++        ("venmo spend", "venmo", day, 25, "FOOD_AND_DRINK", False),
++        ("refund", "card", day, -40, "FOOD_AND_DRINK", False),
++        ("pending dinner", "card", day, 999, "FOOD_AND_DRINK", True),
++        ("pending income", "checking", day, -500, "INCOME", True),
++    ])
++    with SessionLocal() as db:
++        db.add(TransferPair(txn_out_id=ids["funding out"], txn_in_id=ids["funding in"], confirmed=True))
++        candidate = TransferPair(txn_out_id=ids["card payment out"], txn_in_id=ids["card payment in"], confirmed=False)
++        db.add(candidate)
++        db.add(TransactionAnnotation(transaction_id=ids["refund"], refund_status="confirmed"))
++        db.commit()
++        candidate_id = candidate.id
++
++    with TestClient(app) as client:
++        for confirmed, expected_spend, expected_income in [(False, 305, 2200), (True, 105, 2000)]:
++            if confirmed:
++                response = client.post(f"/transfers/{candidate_id}/confirm", headers=AUTH_HEADERS)
++                assert response.status_code == 200
++            monthly = _get(client, "/analytics/monthly-spend")
++            categories = _get(client, "/analytics/category-spend")
++            cash = _get(client, "/analytics/cashflow-trend")[0]
++            overview = _get(client, "/analytics/overview")
++            summary = _get(client, "/analytics/spending-summary")
++            pace = _get(client, "/analytics/cumulative-spend")
++            daily = _get(client, "/analytics/daily-spend", year=2024)
++            sankey = _get(client, "/analytics/cashflow-sankey")
++            drilldown = _get(client, "/transactions", q="is:spend from:2024-03 to:2024-03")
++            all_rows = {t["id"]: t for t in _get(client, "/transactions")["items"]}
++
++            assert monthly == [{"month": "2024-03", "spend": expected_spend}]
++            assert sum(row["spend"] for row in categories) == expected_spend
++            assert cash == {"month": "2024-03", "expenses": expected_spend,
++                            "income": expected_income, "net": 1895}
++            assert overview["month_spend"] == summary["total"] == expected_spend
++            assert overview["month_income"] == expected_income
++            assert pace[14]["current"] == expected_spend
++            assert pace[15]["current"] is None
++            assert sum(row["amount"] for row in daily["days"]) == expected_spend
++            assert sankey["total_spend"] == expected_spend
++            assert sum(row["amount"] for row in drilldown["items"]) == expected_spend
++            assert all_rows[ids["card payment out"]]["is_transfer"] is confirmed
++            assert all_rows[ids["card payment out"]]["is_transfer_candidate"] is not confirmed
++            assert all_rows[ids["card payment out"]]["transfer_pair_id"] == candidate_id
++            visible = {row["id"] for row in _get(client, "/transactions", q="is:not-transfer")["items"]}
++            assert (ids["card payment out"] not in visible) is confirmed
++            assert ids["pending dinner"] in all_rows  # visible, just not recognized spending
++            with engine.connect() as connection:
++                spend, income = connection.execute(text(
++                    "SELECT SUM(expense_amount), SUM(income_amount) FROM effective_transactions"
++                )).one()
++                assert (spend, income) == (expected_spend, expected_income)
++
++        # Raw transfer mode still cannot count authorizations as posted activity.
++        assert _get(client, "/analytics/monthly-spend", include_transfers=True)[0]["spend"] == 380
++
++
++def test_current_periods_do_not_anchor_to_last_transaction_or_compare_future_spend(clock):
++    _seed([
++        ("current", "checking", date(2024, 3, 5), 100, "FOOD_AND_DRINK", False),
++        ("previous early", "checking", date(2024, 2, 10), 80, "FOOD_AND_DRINK", False),
++        ("previous late", "checking", date(2024, 2, 20), 900, "FOOD_AND_DRINK", False),
++        ("prior year early", "checking", date(2023, 3, 10), 60, "FOOD_AND_DRINK", False),
++        ("prior year late", "checking", date(2023, 3, 25), 700, "FOOD_AND_DRINK", False),
++        ("future", "checking", date(2024, 12, 1), 5000, "FOOD_AND_DRINK", False),
++    ])
++    with TestClient(app) as client:
++        summary = _get(client, "/analytics/spending-summary")
++        overview = _get(client, "/analytics/overview")
++        assert summary["total"] == overview["month_spend"] == 100
++        assert summary["previous_total"] == overview["previous_month_spend"] == 80
++        assert summary["previous_full_total"] == overview["previous_month_full_spend"] == 980
++        assert summary["previous_period_end"] == "2024-02-15"
++        yearly = _get(client, "/analytics/spending-summary", granularity="yearly")
++        assert yearly["total"] == 1080
++        assert yearly["previous_total"] == 60
++        assert yearly["previous_full_total"] == 760
++        annual_pace = _get(client, "/analytics/cumulative-spend", granularity="yearly")
++        assert annual_pace[2]["current"] == yearly["total"]
++        assert annual_pace[2]["previous1"] == yearly["previous_total"]
++        clock(date(2025, 7, 3))
++        stale = _get(client, "/analytics/overview")
++        assert stale["period_start"] == "2025-07-01"
++        assert stale["last_transaction_date"] == "2024-12-01"
++        assert stale["month_spend"] == stale["month_income"] == 0
++
++
++@pytest.mark.parametrize("today,previous_end", [
++    (date(2024, 3, 30), date(2024, 2, 29)),
++    (date(2024, 2, 29), date(2024, 1, 31)),
++    (date(2025, 1, 15), date(2024, 12, 15)),
++])
++def test_comparable_month_boundaries(today, previous_end):
++    assert comparable_periods(today, "monthly")[3] == previous_end
++
++
++def test_leap_day_year_comparison():
++    assert comparable_periods(date(2024, 2, 29), "yearly")[3] == date(2023, 2, 28)
++
++
++def test_linked_refund_tracks_purchase_category_and_manual_refund_override(clock):
++    ids = _seed([
++        ("purchase", "card", date(2024, 3, 5), 120, "FOOD_AND_DRINK", False),
++        ("refund", "card", date(2024, 3, 10), -120, "GENERAL_MERCHANDISE", False),
++    ])
++    with SessionLocal() as db:
++        db.add(TransactionAnnotation(transaction_id=ids["purchase"], user_category="FOOD/DINING"))
++        db.add(TransactionAnnotation(transaction_id=ids["refund"], refund_status="confirmed",
++                                     refund_match_transaction_id=ids["purchase"]))
++        db.commit()
++    with TestClient(app) as client:
++        for category in ["FOOD/DINING", "TRAVEL/MEALS"]:
++            assert client.patch(f"/transactions/{ids['purchase']}/annotation", headers=AUTH_HEADERS,
++                                json={"user_category": category}).status_code == 200
++            rows = _get(client, "/transactions", q=f"is:spend category:{category}")["items"]
++            assert {row["id"] for row in rows} == set(ids.values())
++            refund = next(row for row in rows if row["id"] == ids["refund"])
++            assert refund["category_source"] == "refund"
++            assert _get(client, "/analytics/category-spend") == [{"category": category, "spend": 0}]
++            with engine.connect() as conn:
++                assert conn.execute(text("SELECT effective_category FROM effective_transactions WHERE id=:id"),
++                                    {"id": ids["refund"]}).scalar_one() == category
++        assert client.patch(f"/transactions/{ids['refund']}/annotation", headers=AUTH_HEADERS,
++                            json={"user_category": "OTHER/REFUNDS"}).status_code == 200
++        refund = next(row for row in _get(client, "/transactions")["items"] if row["id"] == ids["refund"])
++        assert refund["effective_category"] == "OTHER/REFUNDS"
++        assert refund["category_source"] == "manual"
++
++
++def test_refund_only_category_does_not_inflate_sankey_total(clock):
++    ids = _seed([
++        ("food", "card", date(2024, 3, 5), 100, "FOOD_AND_DRINK", False),
++        ("refund", "card", date(2024, 3, 10), -40, "GENERAL_MERCHANDISE", False),
++    ])
++    with SessionLocal() as db:
++        db.add(TransactionAnnotation(transaction_id=ids["refund"], refund_status="confirmed"))
++        db.commit()
++    with TestClient(app) as client:
++        assert _get(client, "/analytics/cashflow-sankey")["total_spend"] == 60
++        assert _get(client, "/analytics/cashflow-trend")[0]["expenses"] == 60
++
++
++def test_unpair_reclassifies_previously_hidden_refund_immediately(clock):
++    ids = _seed([
++        ("shop purchase", "card", date(2024, 2, 20), 50, "GENERAL_MERCHANDISE", False),
++        ("shop refund", "card", date(2024, 3, 1), -50, "GENERAL_MERCHANDISE", False),
++        ("unrelated", "checking", date(2024, 3, 1), 50, "GENERAL_MERCHANDISE", False),
++    ])
++    with SessionLocal() as db:
++        # Detector's exact merchant evidence is distinct from the provider IDs.
++        for name in ("shop purchase", "shop refund"):
++            db.get(Transaction, ids[name]).name = "SHOP"
++        db.commit()
++    with TestClient(app) as client:
++        pair = client.post("/transfers", headers=AUTH_HEADERS,
++                           json={"txn_a_id": ids["shop refund"], "txn_b_id": ids["unrelated"]})
++        assert pair.status_code == 200
++        assert client.delete(f"/transfers/{pair.json()['id']}", headers=AUTH_HEADERS).status_code == 200
++        march = _get(client, "/analytics/cashflow-trend", start_date="2024-03-01")[0]
++        assert march["expenses"] == march["income"] == 0
++        refund = next(row for row in _get(client, "/transactions")["items"] if row["id"] == ids["shop refund"])
++        assert refund["refund_status"] == "likely"
++
++
++def test_negative_prior_spend_percentage_and_top_driver_use_change(clock):
++    ids = _seed([
++        ("prior refund", "card", date(2024, 2, 10), -100, "FOOD_AND_DRINK", False),
++        ("current food", "card", date(2024, 3, 10), 50, "FOOD_AND_DRINK", False),
++        ("prior stable", "card", date(2024, 2, 10), 1000, "RENT_AND_UTILITIES", False),
++        ("current stable", "card", date(2024, 3, 10), 1000, "RENT_AND_UTILITIES", False),
++    ])
++    with SessionLocal() as db:
++        db.add(TransactionAnnotation(transaction_id=ids["prior refund"], refund_status="confirmed"))
++        db.commit()
++    with TestClient(app) as client:
++        summary = _get(client, "/analytics/spending-summary")
++        assert summary["top_driver"] == {"category": "FOOD/OTHER", "amount": 150}
++        with SessionLocal() as db:
++            for name in ("prior stable", "current stable"):
++                db.delete(db.get(Transaction, ids[name]))
++            db.commit()
++        summary = _get(client, "/analytics/spending-summary")
++        assert summary["change_pct"] == 150
++
++
++@pytest.mark.parametrize("path,params", [
++    ("/analytics/spending-summary", {"granularity": "week"}),
++    ("/analytics/cumulative-spend", {"granularity": "week"}),
++    ("/analytics/category-movers", {"month": "2024-13"}),
++    ("/analytics/daily-spend", {"year": 10000}),
++])
++def test_invalid_reporting_periods_are_validation_errors(path, params):
++    with TestClient(app) as client:
++        assert client.get(path, params=params, headers=AUTH_HEADERS).status_code == 422
+diff --git a/tests/test_dashboard_accounting.py b/tests/test_dashboard_accounting.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..556539bdc1e5d9c25c868d2816db236dfa0fe3c2
+--- /dev/null
++++ b/tests/test_dashboard_accounting.py
+@@ -0,0 +1,92 @@
++"""Exercise real Streamlit reads against the same ledger/API accounting contract."""
++from datetime import date
++
++import pandas as pd
++import pytest
++from fastapi.testclient import TestClient
++
++from app.db.session import SessionLocal, engine
++from app.main import app
++from app.models.models import Account, Item, Transaction, TransactionAnnotation, TransferPair
++from app.services.accounting import comparable_periods
++from dashboard_lib import (
++    add_cashflow_columns,
++    apply_date_filter,
++    apply_scope_filters,
++    load_transactions,
++    spend_transactions,
++    spending_period_summary,
++)
++from tests.conftest import AUTH_HEADERS
++
++
++def _seed():
++    with SessionLocal() as db:
++        item = Item(plaid_item_id="dashboard-item", access_token_encrypted="unused", status="active")
++        db.add(item)
++        db.flush()
++        accounts = [Account(plaid_account_id=f"dashboard-account-{i}", item_id=item.id, name=f"Account {i}", type="depository") for i in range(3)]
++        db.add_all(accounts)
++        db.flush()
++        rows = []
++        for index, (amount, account, pending) in enumerate([
++            (120, 0, False), (-40, 0, False), (-1000, 0, False),
++            (500, 0, False), (-500, 1, False),
++            (70, 1, False), (-70, 2, False),
++            (2000, 0, True), (-5000, 0, True),
++        ]):
++            row = Transaction(plaid_transaction_id=f"dashboard-tx-{index}", item_id=item.id,
++                              account_id=accounts[account].id, date=date(2026, 3, 10),
++                              amount=amount, name=f"Transaction {index}", pending=pending,
++                              plaid_category_primary="FOOD_AND_DRINK")
++            db.add(row)
++            db.flush()
++            rows.append(row)
++        db.add(TransactionAnnotation(transaction_id=rows[1].id, refund_status="confirmed", refund_match_transaction_id=rows[0].id))
++        db.add(TransferPair(txn_out_id=rows[3].id, txn_in_id=rows[4].id, confirmed=True, detected_by="manual"))
++        db.add(TransferPair(txn_out_id=rows[5].id, txn_in_id=rows[6].id, confirmed=False, detected_by="auto"))
++        db.commit()
++
++
++def test_streamlit_scope_matches_api_with_pending_refunds_and_candidate_pairs():
++    _seed()
++    with TestClient(app) as client:
++        load_transactions.clear()
++        frame = load_transactions(engine.url.database)
++        assert frame.loc[frame["is_transfer"], "amount"].tolist() == [500, -500]
++        assert frame.loc[frame["is_transfer_candidate"], "amount"].tolist() == [70, -70]
++        scoped = apply_scope_filters(frame, [], exclude_transfers=True)
++        cashflow = add_cashflow_columns(scoped)
++        spending = spend_transactions(scoped)
++        api = client.get("/analytics/cashflow-trend", headers=AUTH_HEADERS).json()[0]
++        assert cashflow["expense"].sum() == api["expenses"] == 150
++        assert cashflow["income"].sum() == api["income"] == 1070
++        assert spending["amount"].sum() == 150
++        assert not spending["pending"].any()
++        assert -40 in spending["amount"].tolist()
++        assert 70 in spending["amount"].tolist()  # uncertain outflow remains counted
++        drilldown = client.get("/transactions", params={"q": "is:spend"}, headers=AUTH_HEADERS).json()
++        assert set(spending.id) == {row["id"] for row in drilldown["items"]}
++        assert frame["expense_amount"].sum() == 150
++    load_transactions.clear()
++
++
++@pytest.mark.parametrize("today,granularity,prior_end", [
++    (date(2026, 2, 28), "monthly", date(2026, 1, 31)),
++    (date(2026, 3, 31), "monthly", date(2026, 2, 28)),
++    (date(2024, 3, 1), "yearly", date(2023, 3, 1)),
++    (date(2024, 2, 29), "yearly", date(2023, 2, 28)),
++])
++def test_dashboard_uses_shared_comparison_boundaries(today, granularity, prior_end):
++    _, _, start, end, _ = comparable_periods(today, granularity)
++    assert end == prior_end
++    frame = pd.DataFrame([{"date": prior_end, "amount": 100}, {"date": prior_end + pd.Timedelta(days=1), "amount": 999}])
++    assert apply_date_filter(frame, start, end)["amount"].sum() == 100
++
++
++def test_negative_prior_spend_does_not_reverse_growth_direction():
++    current = pd.DataFrame([{"amount": 50, "effective_category": "FOOD"}])
++    previous = pd.DataFrame([{"amount": -100, "effective_category": "FOOD"}])
++    summary = spending_period_summary(current, previous, elapsed_days=31, total_days=31)
++    assert summary["change"] == 150
++    assert summary["change_pct"] == 150
+diff --git a/tests/test_plaid_client.py b/tests/test_plaid_client.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..f0b536c2a18cc8bf98dce962a93e2a6ea85602cd
+--- /dev/null
++++ b/tests/test_plaid_client.py
+@@ -0,0 +1,97 @@
++"""Exercise the real Plaid adapter with a fake SDK transport, never a bank."""
++from datetime import date
++from unittest.mock import Mock
++
++import pytest
++
++from app.services.plaid_client import PlaidClient
++
++
++def adapter():
++    client = PlaidClient()
++    client._mock = False
++    client._client = Mock()
++    return client
++
++
++def txn(identifier, **overrides):
++    return {
++        "transaction_id": identifier,
++        "account_id": "checking",
++        "date": date(2026, 8, 31),
++        "amount": 19.50,
++        "name": "Purchase",
++        "pending": False,
++        **overrides,
++    }
++
++
++def test_sync_reads_all_pages_and_preserves_added_modified_removed():
++    client = adapter()
++    client._client.transactions_sync.side_effect = [
++        {"added": [txn("posted", pending_transaction_id="pending")],
++         "modified": [], "removed": [{"transaction_id": "pending"}],
++         "next_cursor": "page-two", "has_more": True},
++        {"added": [txn("second")], "modified": [txn("old", amount=20)],
++         "removed": [{"transaction_id": "deleted"}],
++         "next_cursor": "done", "has_more": False},
++    ]
++    result = client.sync_transactions("test-access", "start")
++    assert [t["transaction_id"] for t in result["added"]] == ["posted", "second"]
++    assert result["added"][0]["_source"]["pending_transaction_id"] == "pending"
++    assert result["modified"][0]["amount"] == 20
++    assert result["removed"] == [{"transaction_id": "pending"}, {"transaction_id": "deleted"}]
++    assert result["next_cursor"] == "done"
++    requests = [call.args[0] for call in client._client.transactions_sync.call_args_list]
++    assert [request.cursor for request in requests] == ["start", "page-two"]
++
++
++def test_sync_page_failure_never_returns_partial_success():
++    client = adapter()
++    client._client.transactions_sync.side_effect = [
++        {"added": [txn("first")], "next_cursor": "next", "has_more": True},
++        RuntimeError("provider unavailable"),
++    ]
++    with pytest.raises(RuntimeError, match="provider unavailable"):
++        client.sync_transactions("test-access")
++
++
++def test_historical_pagination_keeps_distinct_same_amount_purchases():
++    client = adapter()
++    client._client.transactions_get.side_effect = [
++        {"transactions": [txn(f"t-{i}") for i in range(500)]},
++        {"transactions": [txn("last")]},
++    ]
++    rows = client.get_historical_transactions("test-access", date(2026, 1, 1), date(2026, 8, 31))
++    assert len(rows) == len({row["transaction_id"] for row in rows}) == 501
++    requests = [call.args[0] for call in client._client.transactions_get.call_args_list]
++    assert [request.options.offset for request in requests] == [0, 500]
++    assert all(request.start_date == date(2026, 1, 1) for request in requests)
++
++
++def test_normalization_uses_posting_date_and_preserves_provider_evidence():
++    raw = txn("posted", authorized_date=date(2026, 8, 29), name=None,
++              personal_finance_category={"primary": "FOOD_AND_DRINK", "detailed": "FOOD_AND_DRINK_RESTAURANTS"})
++    normalized = PlaidClient._normalize_txn(raw)
++    assert normalized["date"] == "2026-08-31"
++    assert normalized["name"] == ""
++    assert normalized["plaid_category_primary"] == "FOOD_AND_DRINK"
++    assert normalized["_source"]["personal_finance_category"]["detailed"] == "FOOD_AND_DRINK_RESTAURANTS"
++    assert normalized["_source"]["authorized_date"] == date(2026, 8, 29)
++
++
++def test_accounts_keep_currency_liability_type_and_unavailable_balances():
++    client = adapter()
++    client._client.accounts_get.return_value = {"accounts": [
++        {"account_id": "card", "name": "Card", "type": "credit", "subtype": "credit card",
++         "balances": {"current": 450, "available": None, "iso_currency_code": "USD", "limit": 1000}},
++        {"account_id": "checking", "name": "Checking", "type": "depository",
++         "balances": {"current": None, "available": None, "iso_currency_code": "EUR"}},
++    ]}
++    card, checking = client.get_accounts("test-access")
++    assert card["type"] == "credit"
++    assert card["current_balance"] == 450
++    assert card["available_balance"] is None
++    assert card["limit"] == 1000
++    assert checking["iso_currency_code"] == "EUR"
++    assert checking["current_balance"] is None

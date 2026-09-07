@@ -4,7 +4,9 @@ import { CATEGORY_COLORS } from "@/lib/api/theme";
 import { formatCurrency } from "@/lib/format";
 
 export default function CategoryBarChart({ data }: { data: CategoryComparisonPoint[] }) {
-  const rows = data.filter((c) => c.current > 0).sort((a, b) => b.current - a.current);
+  // Keep signed refund-only categories visible; hiding them would make this
+  // chart disagree with the total shown beside it.
+  const rows = data.filter((c) => c.current !== 0).sort((a, b) => b.current - a.current);
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={rows} layout="vertical" margin={{ left: 0, right: 12, top: 4, bottom: 0 }}>

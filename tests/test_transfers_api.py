@@ -23,6 +23,7 @@ def _seed_transfer_ledger():
             type="depository",
             subtype="checking",
             current_balance=Decimal("1000.00"),
+            currency="USD",
         )
         credit = Account(
             plaid_account_id="a-credit",
@@ -31,6 +32,7 @@ def _seed_transfer_ledger():
             type="credit",
             subtype="credit card",
             current_balance=Decimal("300.00"),
+            currency="USD",
         )
         db.add_all([checking, credit])
         db.flush()
@@ -66,6 +68,10 @@ def test_accounts_summary_groups_and_net_worth():
     assert data["liabilities"] == 300.0
     assert data["net_worth"] == 700.0
     assert set(data["groups"].keys()) == {"depository", "credit"}
+    assert data["coverage"] == {
+        "duplicate_account_coverage": "unverified",
+        "history_coverage": "unverified",
+    }
 
 
 def test_transfers_detect_and_list():
@@ -82,9 +88,11 @@ def test_transfers_detect_and_list():
         assert body["items"][0]["amount"] == 200.0
         assert body["items"][0]["detected_by"] == "auto"
         assert body["items"][0]["confirmed"] is False
+        assert body["items"][0]["out"]["currency"] == "USD"
+        assert body["items"][0]["in"]["currency"] == "USD"
 
 
-def test_analytics_excludes_transfers_by_default():
+def test_analytics_excludes_only_confirmed_transfers_by_default():
     _seed_transfer_ledger()
     with TestClient(app) as client:
         # Before detection: the $200 transfer is counted as spend
@@ -93,7 +101,14 @@ def test_analytics_excludes_transfers_by_default():
 
         client.post("/transfers/detect", headers=AUTH_HEADERS)
 
-        # After detection: transfer is excluded, only the $50 spend remains
+        # Detection is only a candidate: it remains in the trusted total until
+        # the user confirms that the two rows are really an internal movement.
+        r = client.get("/analytics/monthly-spend", headers=AUTH_HEADERS)
+        assert r.json() == [{"month": "2026-03", "spend": 250.0}]
+
+        pair_id = client.get("/transfers", headers=AUTH_HEADERS).json()["items"][0]["id"]
+        assert client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS).status_code == 200
+
         r = client.get("/analytics/monthly-spend", headers=AUTH_HEADERS)
         assert r.json() == [{"month": "2026-03", "spend": 50.0}]
 
@@ -110,6 +125,8 @@ def test_cashflow_excludes_transfer_both_sides():
     _seed_transfer_ledger()
     with TestClient(app) as client:
         client.post("/transfers/detect", headers=AUTH_HEADERS)
+        pair_id = client.get("/transfers", headers=AUTH_HEADERS).json()["items"][0]["id"]
+        client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS)
         r = client.get("/analytics/cashflow-trend", headers=AUTH_HEADERS)
     data = {row["month"]: row for row in r.json()}
     # Transfer's $200 income side AND $200 expense side should both be gone
@@ -156,6 +173,25 @@ def test_transfers_confirm_and_delete():
         assert r.json()["created"] == 0
 
 
+def test_stale_candidate_cannot_be_confirmed():
+    _seed_transfer_ledger()
+    with TestClient(app) as client:
+        client.post("/transfers/detect", headers=AUTH_HEADERS)
+        pair_id = client.get("/transfers", headers=AUTH_HEADERS).json()["items"][0]["id"]
+
+    with SessionLocal() as db:
+        out = db.query(Transaction).filter_by(plaid_transaction_id="tx-out").one()
+        out.amount = Decimal("199.99")
+        db.commit()
+
+    with TestClient(app) as client:
+        r = client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS)
+    assert r.status_code == 400
+    assert "opposite and equal" in r.json()["detail"]
+    with SessionLocal() as db:
+        assert db.get(TransferPair, pair_id).confirmed is False
+
+
 def test_manual_pair_validates_amounts_and_accounts():
     checking_id, credit_id = _seed_transfer_ledger()
     with SessionLocal() as db:
@@ -176,6 +212,91 @@ def test_manual_pair_validates_amounts_and_accounts():
         # cannot pair an already-paired txn
         r = client.post("/transfers", json={"txn_a_id": out_id, "txn_b_id": in_id}, headers=AUTH_HEADERS)
         assert r.status_code == 400
+
+
+def test_manual_pair_rejects_pending_currency_unknown_currency_and_wide_dates():
+    _seed_transfer_ledger()
+    with SessionLocal() as db:
+        out = db.query(Transaction).filter_by(plaid_transaction_id="tx-out").one()
+        inn = db.query(Transaction).filter_by(plaid_transaction_id="tx-in").one()
+        out_id, in_id = out.id, inn.id
+        checking = db.get(Account, out.account_id)
+        credit = db.get(Account, inn.account_id)
+        checking_id, credit_id = checking.id, credit.id
+
+        credit.currency = "EUR"
+        db.commit()
+    with TestClient(app) as client:
+        r = client.post("/transfers", json={"txn_a_id": out_id, "txn_b_id": in_id}, headers=AUTH_HEADERS)
+    assert r.status_code == 400
+    assert "currencies must match" in r.json()["detail"]
+
+    with SessionLocal() as db:
+        db.get(Account, checking_id).currency = None
+        db.get(Account, credit_id).currency = "USD"
+        db.commit()
+    with TestClient(app) as client:
+        r = client.post("/transfers", json={"txn_a_id": out_id, "txn_b_id": in_id}, headers=AUTH_HEADERS)
+    assert r.status_code == 400
+    assert "currencies must be known" in r.json()["detail"]
+
+    with SessionLocal() as db:
+        db.get(Account, checking_id).currency = "USD"
+        inn = db.get(Transaction, in_id)
+        inn.pending = True
+        db.commit()
+    with TestClient(app) as client:
+        r = client.post("/transfers", json={"txn_a_id": out_id, "txn_b_id": in_id}, headers=AUTH_HEADERS)
+    assert r.status_code == 400
+    assert "pending" in r.json()["detail"]
+
+    with SessionLocal() as db:
+        inn = db.get(Transaction, in_id)
+        inn.pending = False
+        inn.date = date(2026, 4, 1)
+        db.commit()
+    with TestClient(app) as client:
+        r = client.post("/transfers", json={"txn_a_id": out_id, "txn_b_id": in_id}, headers=AUTH_HEADERS)
+    assert r.status_code == 400
+    assert "within 14 days" in r.json()["detail"]
+
+
+def test_confirm_revalidates_currency_pending_and_posting_date():
+    _seed_transfer_ledger()
+    with TestClient(app) as client:
+        client.post("/transfers/detect", headers=AUTH_HEADERS)
+        pair_id = client.get("/transfers", headers=AUTH_HEADERS).json()["items"][0]["id"]
+
+    with SessionLocal() as db:
+        out = db.query(Transaction).filter_by(plaid_transaction_id="tx-out").one()
+        inn = db.query(Transaction).filter_by(plaid_transaction_id="tx-in").one()
+        in_id = inn.id
+        in_account_id = inn.account_id
+        db.get(Account, in_account_id).currency = "EUR"
+        db.commit()
+    with TestClient(app) as client:
+        r = client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS)
+    assert r.status_code == 400
+    assert "currencies must match" in r.json()["detail"]
+
+    with SessionLocal() as db:
+        db.get(Account, in_account_id).currency = "USD"
+        db.get(Transaction, in_id).pending = True
+        db.commit()
+    with TestClient(app) as client:
+        r = client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS)
+    assert r.status_code == 400
+    assert "pending" in r.json()["detail"]
+
+    with SessionLocal() as db:
+        inn = db.get(Transaction, in_id)
+        inn.pending = False
+        inn.date = date(2026, 4, 1)
+        db.commit()
+    with TestClient(app) as client:
+        r = client.post(f"/transfers/{pair_id}/confirm", headers=AUTH_HEADERS)
+    assert r.status_code == 400
+    assert "within 14 days" in r.json()["detail"]
 
 
 def test_transfers_unauth():

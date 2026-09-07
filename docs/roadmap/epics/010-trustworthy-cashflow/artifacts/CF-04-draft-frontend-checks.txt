@@ -1,0 +1,86 @@
+
+COMMAND: npm test
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> test
+> vitest run
+
+
+ RUN  v4.1.10 <workspace>/VibeLedger/frontend
+
+
+ Test Files  5 passed (5)
+      Tests  48 passed (48)
+   Start at  17:34:36
+   Duration  1.78s (transform 1.07s, setup 0ms, import 1.84s, tests 228ms, environment 4.58s)
+
+EXIT CODE: 0
+
+COMMAND: npm run typecheck
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> typecheck
+> tsc --noEmit
+
+EXIT CODE: 0
+
+COMMAND: npm run build
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> build
+> vite build
+
+vite v8.1.5 building client environment for production...
+[2K
+transforming...✓ 2489 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/registerSW.js                                  0.17 kB
+dist/manifest.webmanifest                           0.61 kB
+dist/index.html                                     1.28 kB │ gzip:  0.56 kB
+dist/assets/index-CNAj6ELg.css                     33.90 kB │ gzip:  7.00 kB
+dist/assets/chevron-right-DcnofR0G.js               0.12 kB │ gzip:  0.13 kB
+dist/assets/x-75BxwFVu.js                           0.14 kB │ gzip:  0.14 kB
+dist/assets/check-BA7ADFor.js                       0.16 kB │ gzip:  0.16 kB
+dist/assets/pencil-BIV22PhC.js                      0.26 kB │ gzip:  0.21 kB
+dist/assets/BarChart-CnE_B4HB.js                    0.31 kB │ gzip:  0.22 kB
+dist/assets/tag-Cc9_Iv33.js                         0.41 kB │ gzip:  0.28 kB
+dist/assets/theme-BzHIPLLr.js                       0.43 kB │ gzip:  0.30 kB
+dist/assets/KpiCard-nPosg3rX.js                     0.92 kB │ gzip:  0.48 kB
+dist/assets/MoversChart-C-dwVPN6.js                 1.01 kB │ gzip:  0.61 kB
+dist/assets/CategoryBarChart-BqzHJ-lg.js            1.02 kB │ gzip:  0.59 kB
+dist/assets/CumulativeChart-9oGL92ne.js             1.35 kB │ gzip:  0.67 kB
+dist/assets/CalendarHeatmap-C3iFQHiV.js             2.21 kB │ gzip:  1.12 kB
+dist/assets/useMutation-CC0b9bSF.js                 2.25 kB │ gzip:  0.93 kB
+dist/assets/more-C8zPlSpD.js                        2.62 kB │ gzip:  1.22 kB
+dist/assets/TransactionRow-lvGIhuMz.js              2.86 kB │ gzip:  1.05 kB
+dist/assets/CategoryComparison-Bh3b5TW3.js          2.89 kB │ gzip:  1.07 kB
+dist/assets/accounts-C_eorZDo.js                    3.83 kB │ gzip:  1.48 kB
+dist/assets/insights-DV6KNW8r.js                    4.06 kB │ gzip:  1.60 kB
+dist/assets/add-account-k8Sx0Las.js                 4.27 kB │ gzip:  1.64 kB
+dist/assets/spending-wmmAagFX.js                    5.41 kB │ gzip:  2.15 kB
+dist/assets/recurring-BGJleArK.js                   6.54 kB │ gzip:  2.13 kB
+dist/assets/routes-BU8NZuye.js                      7.38 kB │ gzip:  2.41 kB
+dist/assets/jsx-runtime-CdvZGgm7.js                 7.75 kB │ gzip:  2.98 kB
+dist/assets/transfers-BXgtW1gE.js                   8.21 kB │ gzip:  2.46 kB
+dist/assets/CategoryPicker-DHT9HXE9.js              8.61 kB │ gzip:  3.16 kB
+dist/assets/format-DX3NjUsk.js                      9.38 kB │ gzip:  3.53 kB
+dist/assets/rules-CXUb9RXR.js                      10.01 kB │ gzip:  2.88 kB
+dist/assets/Line-yuWcTuHd.js                       10.78 kB │ gzip:  4.10 kB
+dist/assets/client-B2caY9Xf.js                     11.50 kB │ gzip:  4.48 kB
+dist/assets/SankeyChart-BSuAfFfH.js                12.34 kB │ gzip:  4.45 kB
+dist/assets/transactions-Mp-Q4b10.js               12.71 kB │ gzip:  4.00 kB
+dist/assets/AnnotationSheet-CbxjPuw5.js            14.73 kB │ gzip:  4.10 kB
+dist/assets/CashflowChart-AqUIlrX4.js              24.32 kB │ gzip:  6.63 kB
+dist/assets/index-DzafEbEF.js                     161.95 kB │ gzip: 52.14 kB
+dist/assets/generateCategoricalChart-fRY2uu_X.js  368.33 kB │ gzip: 98.14 kB
+
+✓ built in 775ms
+
+PWA v1.3.0
+mode      generateSW
+precache  49 entries (740.34 KiB)
+files generated
+  dist/sw.js
+  dist/workbox-efbd304a.js
+EXIT CODE: 0

@@ -1,0 +1,126 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+rootdir: <workspace>/VibeLedger
+configfile: pyproject.toml
+testpaths: tests
+plugins: cov-7.1.0, anyio-4.14.2
+collected 211 items
+
+tests/test_accounting_integrity.py ..............                        [  6%]
+tests/test_analytics_contracts.py ........                               [ 10%]
+tests/test_auth.py .......                                               [ 13%]
+tests/test_categories_api.py ..........                                  [ 18%]
+tests/test_category_resolver.py .............                            [ 24%]
+tests/test_category_rules_api.py ......                                  [ 27%]
+tests/test_connect_flow.py ..                                            [ 28%]
+tests/test_connect_service.py ..                                         [ 29%]
+tests/test_dashboard_accounting.py ......                                [ 32%]
+tests/test_dashboard_date_periods.py .......                             [ 35%]
+tests/test_health.py .                                                   [ 36%]
+tests/test_insights_analytics.py ...........                             [ 41%]
+tests/test_mobile_analytics.py .....                                     [ 43%]
+tests/test_needs_attention_drilldown.py ....                             [ 45%]
+tests/test_plaid_client.py .....                                         [ 47%]
+tests/test_recurring_api.py ...                                          [ 49%]
+tests/test_recurring_detector.py .......                                 [ 52%]
+tests/test_refund_detector.py ........                                   [ 56%]
+tests/test_scheduler.py F.                                               [ 57%]
+tests/test_search_query.py ...........                                   [ 62%]
+tests/test_security.py .....                                             [ 64%]
+tests/test_sync_and_annotations.py ....                                  [ 66%]
+tests/test_sync_service.py ......................                        [ 77%]
+tests/test_transaction_routes.py .............                           [ 83%]
+tests/test_transaction_search_api.py .........                           [ 87%]
+tests/test_transfer_detector.py ..................                       [ 96%]
+tests/test_transfers_api.py ........                                     [100%]
+
+=================================== FAILURES ===================================
+____________________ test_sync_all_items_syncs_active_items ____________________
+
+    def test_sync_all_items_syncs_active_items():
+        with SessionLocal() as db:
+            item1 = Item(plaid_item_id="sched-1", access_token_encrypted=encrypt_token("tok"), status="active")
+            item2 = Item(plaid_item_id="sched-2", access_token_encrypted=encrypt_token("tok"), status="active")
+            inactive = Item(plaid_item_id="sched-3", access_token_encrypted=encrypt_token("tok"), status="inactive")
+            db.add_all([item1, item2, inactive])
+            db.commit()
+    
+        asyncio.run(_sync_all_items())
+    
+        with SessionLocal() as db:
+            runs = db.query(SyncRun).all()
+            synced_item_ids = {r.item_id for r in runs}
+            # Both active items should have been synced
+            active_ids = {
+                db.query(Item).filter(Item.plaid_item_id == "sched-1").first().id,
+                db.query(Item).filter(Item.plaid_item_id == "sched-2").first().id,
+            }
+            assert synced_item_ids == active_ids
+>           assert all(r.status == "success" for r in runs)
+E           assert False
+E            +  where False = all(<generator object test_sync_all_items_syncs_active_items.<locals>.<genexpr> at 0x7fad1ef55700>)
+
+tests/test_scheduler.py:28: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    app.services.scheduler:scheduler.py:40 Scheduled sync failed for item 2
+Traceback (most recent call last):
+  File "<workspace>/VibeLedger/app/services/scheduler.py", line 35, in _sync_all_items
+    result = service.sync_item(db, item_id)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<workspace>/VibeLedger/app/services/sync_service.py", line 94, in sync_item
+    self._refresh_accounts_and_snapshots(db, item_id, access_token)
+  File "<workspace>/VibeLedger/app/services/sync_service.py", line 210, in _refresh_accounts_and_snapshots
+    raise ValueError("account belongs to a different linked item")
+ValueError: account belongs to a different linked item
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  <workspace>/VibeLedger/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_sync_service.py::test_annotation_survives_item_removal_and_resync
+  <workspace>/VibeLedger/app/services/sync_service.py:92: SAWarning: Identity map already had an identity for (<class 'app.models.models.TransactionAnnotation'>, (1,), None), replacing it with newly flushed object.   Are there load operations occurring inside of an event handler within the flush?
+    with db.begin_nested():
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.13-final-0 _______________
+
+Name                                 Stmts   Miss Branch BrPart  Cover   Missing
+--------------------------------------------------------------------------------
+app/__init__.py                          0      0      0      0   100%
+app/api/__init__.py                      0      0      0      0   100%
+app/api/routes.py                      874    125    256     27    85%   170-184, 200-201, 212-213, 234-275, 280-318, 331-356, 363, 375-423, 433-443, 452-458, 473-477, 514, 811, 845->877, 885-889, 915-921, 977, 979, 981, 1077, 1099, 1103-1104, 1148-1149, 1187, 1219->1221, 1222, 1223->1225, 1271, 1418, 1536->1539, 1639, 1664, 1679, 1732->1735, 1738, 1910, 1914->1918, 1944->1946, 1975-1978, 1992
+app/core/__init__.py                     0      0      0      0   100%
+app/core/auth.py                        21      1      6      1    93%   28
+app/core/config.py                      34     10      6      1    62%   36-47
+app/core/time.py                         3      0      0      0   100%
+app/db/__init__.py                       0      0      0      0   100%
+app/db/base.py                           3      0      0      0   100%
+app/db/schema_patches.py               105     37     52     24    61%   16, 23, 64, 67->79, 79->84, 84->89, 89->exit, 98-99, 105-106, 112-113, 119-120, 126-127, 133-134, 139-140, 146-147, 152-153, 158-159, 164-165, 170-171, 176-177, 307-308, 314-315, 321-322, 328-329
+app/db/session.py                       10      0      2      1    92%   10->13
+app/main.py                             51      5      6      3    86%   30-31, 41, 49-51, 57->exit
+app/models/__init__.py                   0      0      0      0   100%
+app/models/models.py                   180      0      0      0   100%
+app/schemas/__init__.py                  0      0      0      0   100%
+app/schemas/plaid.py                    83      0      0      0   100%
+app/services/__init__.py                 0      0      0      0   100%
+app/services/accounting.py              26      0      4      0   100%
+app/services/category_catalog.py        29      2     14      2    91%   69, 76
+app/services/category_resolver.py      126      8     40      5    92%   144, 151, 179, 189, 192, 246-248
+app/services/connect_service.py         20      0      4      0   100%
+app/services/plaid_client.py           117     47     34      4    57%   15-44, 50-76, 79-89, 189, 229-235, 253, 256-257
+app/services/recurring_detector.py     105      2     20      2    97%   104, 194
+app/services/refund_detector.py         76      4     28      3    93%   30, 32, 43-44, 88->92
+app/services/scheduler.py               31      6      4      1    80%   18-23, 38
+app/services/search_query.py           129     28     60      4    74%   100-101, 109-110, 120, 136->159, 151->154, 174-193, 197, 201, 222
+app/services/security.py                16      0      2      0   100%
+app/services/sync_service.py           270     10     80     11    94%   180->186, 184-185, 214, 271, 273->275, 301->305, 309->336, 325-328, 429->417, 456-458, 460
+app/services/transfer_detector.py      130      3     56      2    97%   40-41, 63, 102->exit
+app/services/txn_fingerprint.py          6      0      0      0   100%
+--------------------------------------------------------------------------------
+TOTAL                                 2445    288    674     91    86%
+Coverage JSON written to file <workspace>/recovered-coverage.json
+Required test coverage of 80.0% reached. Total coverage: 86.05%
+=========================== short test summary info ============================
+FAILED tests/test_scheduler.py::test_sync_all_items_syncs_active_items - asse...
+================== 1 failed, 210 passed, 2 warnings in 15.78s ==================

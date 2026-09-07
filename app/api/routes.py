@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 import calendar
 import re
 from pathlib import Path
@@ -26,6 +26,7 @@ from app.models.models import (
     CategoryRule,
     ConnectSession,
     Item,
+    RejectedTransferPair,
     RecurringOverride,
     SyncRun,
     SyncState,
@@ -51,6 +52,17 @@ from app.services.security import decrypt_token, encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
+from app.services.accounting import (
+    comparison_bounds,
+    comparison_reporting,
+    currency_reporting,
+    exclude_confirmed_transfers,
+    expense_amount,
+    income_amount,
+    is_refund,
+    posted_activity,
+    reporting_scope,
+)
 from app.services.refund_detector import classify_refunds
 from app.services.category_catalog import merge_catalog
 from app.services.recurring_detector import detect_recurring
@@ -222,8 +234,11 @@ def connect_start(session: str, db: Session = Depends(get_db)):
     <script src='https://cdn.plaid.com/link/v2/stable/link-initialize.js'></script>
     <script>
       const sessionToken = {json.dumps(session)};
+      const linkToken = {json.dumps(link_token)};
+      window.localStorage.setItem('vibeledger_connect_session', sessionToken);
+      window.localStorage.setItem('vibeledger_link_token', linkToken);
       const handler = Plaid.create({{
-        token: {json.dumps(link_token)},
+        token: linkToken,
         onSuccess: async (public_token, metadata) => {{
           const completePath = window.location.pathname.replace(/\\/start$/, '/complete');
           const resp = await fetch(completePath, {{
@@ -239,6 +254,49 @@ def connect_start(session: str, db: Session = Depends(get_db)):
         }}
       }});
       document.getElementById('link-button').onclick = () => handler.open();
+    </script>
+  </body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
+@router.get("/connect/oauth", response_class=HTMLResponse)
+def connect_oauth():
+    html = """
+<!doctype html>
+<html>
+  <head><title>VibeLedger Connect</title></head>
+  <body>
+    <h3>Returning to Plaid...</h3>
+    <script src='https://cdn.plaid.com/link/v2/stable/link-initialize.js'></script>
+    <script>
+      const sessionToken = window.localStorage.getItem('vibeledger_connect_session');
+      const linkToken = window.localStorage.getItem('vibeledger_link_token');
+      if (!sessionToken || !linkToken) {
+        document.body.innerHTML = '<h3>Connection session not found. Please generate a new secure link.</h3>';
+      } else {
+        const completePath = window.location.pathname.replace(/\\/oauth$/, '/complete');
+        const handler = Plaid.create({
+          token: linkToken,
+          receivedRedirectUri: window.location.href,
+          onSuccess: async (public_token, metadata) => {
+            const resp = await fetch(completePath, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session_token: sessionToken, public_token })
+            });
+            if (resp.ok) {
+              window.localStorage.removeItem('vibeledger_connect_session');
+              window.localStorage.removeItem('vibeledger_link_token');
+              document.body.innerHTML = '<h3>Account connected. You can return to VibeLedger.</h3>';
+            } else {
+              document.body.innerHTML = '<h3>Failed to connect. Please retry.</h3>';
+            }
+          }
+        });
+        handler.open();
+      }
     </script>
   </body>
 </html>
@@ -326,6 +384,21 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id.in_(txn_ids), TransferPair.txn_in_id.in_(txn_ids))
         ).delete(synchronize_session=False)
+        db.query(RejectedTransferPair).filter(
+            or_(RejectedTransferPair.txn_out_id.in_(txn_ids), RejectedTransferPair.txn_in_id.in_(txn_ids))
+        ).delete(synchronize_session=False)
+        # Fingerprints intentionally survive item removal so a later relink can
+        # restore a user decision.  They must not remain marked as applied to
+        # the transaction row that is about to disappear.
+        db.query(AnnotationFingerprint).filter(
+            AnnotationFingerprint.applied_transaction_id.in_(txn_ids)
+        ).update(
+            {
+                AnnotationFingerprint.applied_transaction_id: None,
+                AnnotationFingerprint.applied_at: None,
+            },
+            synchronize_session=False,
+        )
         db.query(CategoryDecisionEvent).filter(CategoryDecisionEvent.transaction_id.in_(txn_ids)).delete(
             synchronize_session=False
         )
@@ -454,13 +527,15 @@ def _apply_search_query(query, parsed):
     if "uncategorized" in parsed.flags:
         query = query.filter(func.lower(_effective_category_expr()) == "uncategorized")
     if "refund" in parsed.flags:
-        query = query.filter(_is_refund_expr())
+        query = query.filter(is_refund())
     if "likely-refund" in parsed.flags:
         query = query.filter(TransactionAnnotation.refund_status == "likely")
     if "not-transfer" in parsed.flags:
         # Same exclusion the analytics counts use, so a count and the search
         # that drills into it can describe the same set.
         query = _apply_transfer_exclusion(query, include_transfers=False)
+    if "spend" in parsed.flags:
+        query = posted_activity(query, include_transfers=False).filter(expense_amount() != 0)
     if "pending" in parsed.flags:
         query = query.filter(Transaction.pending == True)  # noqa: E712
 
@@ -640,19 +715,19 @@ def list_transactions(
     # excluded from spend/income analytics should say so, otherwise money
     # silently goes missing from the totals with no visible cause.
     page_ids = [row[0].id for row in rows]
-    pair_by_txn: dict[int, int] = {}
+    pair_by_txn: dict[int, tuple[int, bool]] = {}
     if page_ids:
         pair_rows = db.query(
-            TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id
+            TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id, TransferPair.confirmed
         ).filter(
             or_(
                 TransferPair.txn_out_id.in_(page_ids),
                 TransferPair.txn_in_id.in_(page_ids),
             )
         ).all()
-        for pair_id, out_id, in_id in pair_rows:
-            pair_by_txn[out_id] = pair_id
-            pair_by_txn[in_id] = pair_id
+        for pair_id, out_id, in_id, confirmed in pair_rows:
+            pair_by_txn[out_id] = (pair_id, confirmed)
+            pair_by_txn[in_id] = (pair_id, confirmed)
 
     return {
         "total": total,
@@ -673,8 +748,9 @@ def list_transactions(
                 "effective_category": resolved_category,
                 "category_source": resolved_source,
                 "rule_id": a.rule_id if (a and resolved_source == "rule") else None,
-                "transfer_pair_id": pair_by_txn.get(t.id),
-                "is_transfer": t.id in pair_by_txn,
+                "transfer_pair_id": pair_by_txn.get(t.id, (None, None))[0],
+                "is_transfer": pair_by_txn.get(t.id, (None, False))[1] is True,
+                "is_transfer_candidate": pair_by_txn.get(t.id, (None, False))[1] is False and t.id in pair_by_txn,
                 "refund_status": a.refund_status if a else None,
                 "refund_match_transaction_id": a.refund_match_transaction_id if a else None,
                 "refund_reason": a.refund_reason if a else None,
@@ -1177,26 +1253,23 @@ def recompute_all_category_rules(payload: CategoryRuleRecomputeRequest, db: Sess
 
 
 def _apply_transfer_exclusion(q, include_transfers: bool):
-    """Filter out transactions participating in a TransferPair.
+    """Filter out transactions participating in a confirmed TransferPair.
 
     A transfer is a *matched pair* across two covered accounts — that is the only
-    thing that can double-count money as both income and expense. The legacy
+    thing that can double-count money as both income and expense. An automatic
+    candidate is evidence for review, not an accounting conclusion, so it stays
+    in realized totals until the user confirms it. The legacy
     one-sided `is_transfer_override` flag is deliberately no longer honored: it
     removed single transactions from every analytic with no counterparty, could
     not be set or cleared through any API, and survived re-sync via annotation
     fingerprints, so anything carrying it was silently and permanently missing
     from spend and income.
     """
-    if include_transfers:
-        return q
-    return q.filter(
-        ~Transaction.id.in_(select(TransferPair.txn_out_id)),
-        ~Transaction.id.in_(select(TransferPair.txn_in_id)),
-    )
+    return q if include_transfers else exclude_confirmed_transfers(q)
 
 
 def _is_refund_expr():
-    return TransactionAnnotation.refund_status.in_(["confirmed", "likely"])
+    return is_refund()
 
 
 @router.post("/refunds/detect")
@@ -1211,19 +1284,16 @@ def monthly_spend(
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
 ):
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
     month_col = func.strftime("%Y-%m", Transaction.date).label("month")
     q = (
         db.query(
             month_col,
-            func.sum(case(
-                (_is_refund_expr(), Transaction.amount),
-                (Transaction.amount > 0, Transaction.amount),
-                else_=0,
-            )),
+            func.sum(expense_amount()),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
-    q = _apply_transfer_exclusion(q, include_transfers)
+    q = posted_activity(q, include_transfers=include_transfers)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1239,19 +1309,16 @@ def category_spend(
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
 ):
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
     effective_category = _effective_category_expr().label("category")
     q = (
         db.query(
             effective_category,
-            func.sum(case(
-                (_is_refund_expr(), Transaction.amount),
-                (Transaction.amount > 0, Transaction.amount),
-                else_=0,
-            )),
+            func.sum(expense_amount()),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
-    q = _apply_transfer_exclusion(q, include_transfers)
+    q = posted_activity(q, include_transfers=include_transfers)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1267,30 +1334,17 @@ def cashflow_trend(
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
 ):
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
     month_col = func.strftime("%Y-%m", Transaction.date).label("month")
     q = (
         db.query(
             month_col,
-            func.sum(case(
-                (_is_refund_expr(), Transaction.amount),
-                (Transaction.amount > 0, Transaction.amount),
-                else_=0,
-            )).label("expenses"),
-            func.sum(case(
-                (
-                    (Transaction.amount < 0)
-                    & or_(
-                        TransactionAnnotation.refund_status.is_(None),
-                        ~TransactionAnnotation.refund_status.in_(["confirmed", "likely"]),
-                    ),
-                    -Transaction.amount,
-                ),
-                else_=0,
-            )).label("income"),
+            func.sum(expense_amount()).label("expenses"),
+            func.sum(income_amount()).label("income"),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
-    q = _apply_transfer_exclusion(q, include_transfers)
+    q = posted_activity(q, include_transfers=include_transfers)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1310,6 +1364,11 @@ def cashflow_trend(
 @router.get("/analytics/accounts-summary")
 def accounts_summary(db: Session = Depends(get_db)):
     accounts = db.query(Account).all()
+    reporting = currency_reporting(
+        a.currency.strip().upper() if a.currency and a.currency.strip() else None
+        for a in accounts if a.current_balance is not None
+        and a.type in {"depository", "credit", "loan"}
+    )
     by_type: dict[str, list[dict]] = {}
     for a in accounts:
         bal = float(a.current_balance) if a.current_balance is not None else 0.0
@@ -1329,10 +1388,18 @@ def accounts_summary(db: Session = Depends(get_db)):
     liabilities = sum(x["current_balance"] for x in by_type.get("credit", []))
     liabilities += sum(x["current_balance"] for x in by_type.get("loan", []))
     return {
+        "reporting": reporting,
         "assets": round(assets, 2),
         "liabilities": round(liabilities, 2),
         "net_worth": round(assets - liabilities, 2),
         "groups": by_type,
+        # Provider IDs are authoritative for a single link, but two provider
+        # IDs can still describe the same real-world account.  Do not guess
+        # from weak fields such as name or mask; make this uncertainty visible.
+        "coverage": {
+            "duplicate_account_coverage": "unverified",
+            "history_coverage": "unverified",
+        },
     }
 
 
@@ -1359,12 +1426,14 @@ def _month_label(month: str) -> str:
 
 
 def _expense_value_case():
-    """Signed per-transaction expense: positive charges add, refunds subtract."""
-    return case(
-        (_is_refund_expr(), Transaction.amount),
-        (Transaction.amount > 0, Transaction.amount),
-        else_=0,
-    )
+    """Compatibility alias for the shared realized-expense expression."""
+    return expense_amount()
+
+
+def _latest_realized_activity_date(db: Session):
+    """Latest posted, non-transfer activity used to choose analytic periods."""
+    q = db.query(func.max(Transaction.date))
+    return posted_activity(q, include_transfers=False).scalar()
 
 
 def _project_month(month: str, total: float) -> float:
@@ -1391,17 +1460,17 @@ def _merge_comparison(current: dict[str, float], previous: dict[str, float]) -> 
 
 
 @router.get("/analytics/overview")
-def analytics_overview(db: Session = Depends(get_db)):
+def analytics_overview(db: Session = Depends(get_db), reporting_date: date | None = Query(default=None)):
     """One-shot summary for the mobile Overview screen (KPIs + needs-attention)."""
     accounts = accounts_summary(db)
-    cash = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False)
-    by_month = {row["month"]: row for row in cash}
-    latest = cash[-1]["month"] if cash else _month_key(date.today())
-    previous = _prev_month_key(latest)
-    cur = by_month.get(latest, {})
-    pre = by_month.get(previous, {})
-
-    as_of = db.query(func.max(Transaction.date)).scalar() or date.today()
+    as_of = reporting_date if isinstance(reporting_date, date) else date.today()
+    bounds = comparison_bounds(as_of)
+    start, end, previous_start, previous_end = bounds
+    reporting = comparison_reporting(db, bounds)
+    current_rows = cashflow_trend(db, start, end, include_transfers=False)
+    prior_rows = cashflow_trend(db, previous_start, previous_end, include_transfers=False)
+    cur = current_rows[0] if current_rows else {}
+    pre = prior_rows[0] if prior_rows else {}
 
     # Counted over transactions, not annotations: an annotation whose transaction
     # is gone is invisible everywhere else, so counting it here would advertise
@@ -1429,14 +1498,16 @@ def analytics_overview(db: Session = Depends(get_db)):
         )
     ).scalar() or 0
 
-    uncategorized = (
-        db.query(func.count(Transaction.id))
-        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
-        .filter(func.lower(_effective_category_expr()) == "uncategorized")
-        .scalar()
-    ) or 0
+    uncategorized_q = db.query(func.count(Transaction.id)).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+    )
+    uncategorized = _apply_transfer_exclusion(uncategorized_q, include_transfers=False).filter(
+        func.lower(_effective_category_expr()) == "uncategorized"
+    ).scalar() or 0
 
     return {
+        "reporting": reporting,
+        "balance_reporting": accounts["reporting"],
         "as_of_date": str(as_of),
         "net_worth": accounts["net_worth"],
         "assets": accounts["assets"],
@@ -1460,47 +1531,37 @@ def analytics_overview(db: Session = Depends(get_db)):
 def analytics_spending_summary(
     db: Session = Depends(get_db),
     granularity: str = Query(default="monthly"),
+    reporting_date: date | None = Query(default=None),
 ):
     """Period spend total, comparison, projection, top driver, and per-category diff."""
-    monthly = monthly_spend(db, start_date=None, end_date=None, include_transfers=False)
-    spend_by_month = {r["month"]: r["spend"] for r in monthly}
-    latest = monthly[-1]["month"] if monthly else _month_key(date.today())
-
-    if granularity == "yearly":
-        year = int(latest.split("-")[0])
-        prev_year = year - 1
-        total = round(sum(v for m, v in spend_by_month.items() if m.startswith(f"{year}-")), 2)
-        previous_total = round(
-            sum(v for m, v in spend_by_month.items() if m.startswith(f"{prev_year}-")), 2
-        )
-        months_with_data = sum(1 for m in spend_by_month if m.startswith(f"{year}-"))
-        projection = round(total / months_with_data * 12, 2) if months_with_data else 0.0
-        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, date(year, 1, 1), date(year, 12, 31), include_transfers=False)}
-        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, date(prev_year, 1, 1), date(prev_year, 12, 31), include_transfers=False)}
-        period_label = f"{year} YTD"
-    else:
-        previous = _prev_month_key(latest)
-        total = round(spend_by_month.get(latest, 0.0), 2)
-        previous_total = round(spend_by_month.get(previous, 0.0), 2)
-        projection = _project_month(latest, total)
-        cur_start, cur_end = _month_bounds(latest)
-        prev_start, prev_end = _month_bounds(previous)
-        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
-        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
-        period_label = _month_label(latest)
+    as_of = reporting_date if isinstance(reporting_date, date) else date.today()
+    bounds = comparison_bounds(as_of, granularity)
+    cur_start, cur_end, prev_start, prev_end = bounds
+    reporting = comparison_reporting(db, bounds)
+    cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
+    prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
+    total = round(sum(cur_cats.values()), 2)
+    previous_total = round(sum(prev_cats.values()), 2)
+    elapsed_days = (cur_end - cur_start).days + 1
+    full_end = date(as_of.year, 12, 31) if granularity == "yearly" else _month_bounds(_month_key(as_of))[1]
+    full_days = (full_end - cur_start).days + 1
+    projection = round(total / elapsed_days * full_days, 2)
+    period_label = f"{as_of.year} YTD through {as_of.isoformat()}" if granularity == "yearly" else f"{_month_label(_month_key(as_of))} through {as_of.isoformat()}"
+    reporting["projection_qualification"] = "Straight-line estimate from recorded activity, not observed spend; coverage is unverified."
 
     comparison = _merge_comparison(cur_cats, prev_cats)
     top_driver = None
-    if comparison:
+    if comparison and reporting["comparison_available"]:
         top = comparison[0]
         top_driver = {"category": top["category"], "amount": round(top["current"] - top["previous"], 2)}
-    change_pct = round((total - previous_total) / previous_total * 100, 2) if previous_total else None
+    change_pct = round((total - previous_total) / abs(previous_total) * 100, 2) if previous_total and reporting["comparison_available"] else None
 
     return {
+        "reporting": reporting,
         "period_label": period_label,
         "total": total,
         "previous_total": previous_total,
-        "change": round(total - previous_total, 2),
+        "change": round(total - previous_total, 2) if reporting["comparison_available"] else None,
         "change_pct": change_pct,
         "projection": projection,
         "top_driver": top_driver,
@@ -1510,11 +1571,12 @@ def analytics_spending_summary(
 
 def _daily_expense(db: Session, start: date, end: date, bucket: str) -> dict[int, float]:
     """Sum expense per day-of-month ('%d') or per month-of-year ('%m') in [start, end]."""
+    reporting_scope(db, start, end)
     bucket_col = func.strftime(bucket, Transaction.date)
     q = db.query(bucket_col, func.sum(_expense_value_case())).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
-    q = _apply_transfer_exclusion(q, include_transfers=False)
+    q = posted_activity(q, include_transfers=False)
     q = q.filter(Transaction.date >= start, Transaction.date <= end)
     rows = q.group_by(bucket_col).all()
     return {int(b): float(total or 0) for b, total in rows if b is not None}
@@ -1537,15 +1599,16 @@ def _cumulative(daily: dict[int, float], length: int) -> list[float | None]:
 def analytics_cumulative_spend(
     db: Session = Depends(get_db),
     granularity: str = Query(default="monthly"),
+    reporting_date: date | None = Query(default=None),
 ):
     """Cumulative spend pace for the current period vs the prior three."""
-    anchor = db.query(func.max(Transaction.date)).scalar() or date.today()
+    anchor = reporting_date if isinstance(reporting_date, date) else date.today()
     keys = ("current", "previous1", "previous2", "previous3")
 
     if granularity == "yearly":
         years = [anchor.year - i for i in range(4)]
         series = [
-            _cumulative(_daily_expense(db, date(y, 1, 1), date(y, 12, 31), "%m"), 12)
+            _cumulative(_daily_expense(db, date(y, 1, 1), anchor if y == anchor.year else date(y, 12, 31), "%m"), 12)
             for y in years
         ]
         length = 12
@@ -1558,6 +1621,8 @@ def analytics_cumulative_spend(
         series = []
         for mkey in months:
             start, end = _month_bounds(mkey)
+            if mkey == anchor_month:
+                end = anchor
             series.append(_cumulative(_daily_expense(db, start, end, "%d"), length))
 
     return [
@@ -1579,16 +1644,16 @@ def analytics_recurring(
     Transfers and refunds are excluded (only positive expense-side transactions
     are considered). Detection is deterministic — see
     app/services/recurring_detector.py."""
+    reporting = reporting_scope(db, start_date, end_date, expense_only=True)
     effective_merchant = _effective_merchant_expr()
     effective_category = _effective_category_expr()
     q = (
         db.query(Transaction, effective_merchant, effective_category)
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
-        .filter(Transaction.pending == False)  # noqa: E712
-        .filter(Transaction.amount > 0)
+        .filter(expense_amount() > 0)
     )
-    q = _apply_transfer_exclusion(q, include_transfers=False)
+    q = posted_activity(q, include_transfers=False)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1663,6 +1728,7 @@ def analytics_recurring(
     ]
     return {
         "items": items,
+        "reporting": reporting,
         "summary": {
             "count": len(items),
             "active_count": active_count,
@@ -1700,6 +1766,181 @@ def set_recurring_status(
     return {"merchant_key": merchant_key, "manual_status": payload.status}
 
 
+@router.get("/analytics/cashflow-sankey")
+def analytics_cashflow_sankey(
+    db: Session = Depends(get_db),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+):
+    """Income -> top-level category buckets -> categories, plus savings/deficit.
+
+    Buckets are the part of the effective category before the first '/'. Transfers
+    are always excluded; refunds net against their expense category rather than
+    counting as income (same rule as every other analytics endpoint)."""
+    reporting = reporting_scope(db, start_date, end_date)
+    effective_category = _effective_category_expr().label("category")
+    income_expr = income_amount()
+    expense_expr = expense_amount()
+
+    q = (
+        db.query(effective_category, func.sum(income_expr), func.sum(expense_expr))
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+    )
+    q = posted_activity(q, include_transfers=False)
+    if start_date:
+        q = q.filter(Transaction.date >= start_date)
+    if end_date:
+        q = q.filter(Transaction.date <= end_date)
+    rows = q.group_by(effective_category).all()
+
+    income = 0.0
+    income_by_category: dict[str, float] = {}
+    positive_category_totals: dict[str, float] = {}
+    refund_credit_categories: dict[str, float] = {}
+    for category, income_total, expense_total in rows:
+        income_total = float(income_total or 0)
+        expense_total = float(expense_total or 0)
+        if income_total > 0:
+            income_by_category[category] = income_by_category.get(category, 0.0) + income_total
+            income += income_total
+        if expense_total != 0:
+            if expense_total > 0:
+                positive_category_totals[category] = expense_total
+            elif expense_total < 0:
+                # Keep only the residual credit after same-category netting.
+                # It is a credit, not income and not the gross refund volume.
+                refund_credit_categories[category] = -expense_total
+
+    bucket_categories: dict[str, dict[str, float]] = {}
+    bucket_totals: dict[str, float] = {}
+    for category, amount in positive_category_totals.items():
+        bucket = category.split("/", 1)[0] or "UNCATEGORIZED"
+        bucket_totals[bucket] = bucket_totals.get(bucket, 0.0) + amount
+        bucket_categories.setdefault(bucket, {})[category] = amount
+
+    positive_net_spend = sum(bucket_totals.values())
+    net_refund_credits = sum(refund_credit_categories.values())
+    total_spend = positive_net_spend - net_refund_credits
+    savings = max(income + net_refund_credits - positive_net_spend, 0.0)
+    deficit = max(positive_net_spend - income - net_refund_credits, 0.0)
+
+    income_sources = sorted(
+        ({"category": c, "amount": round(a, 2)} for c, a in income_by_category.items()),
+        key=lambda r: r["amount"],
+        reverse=True,
+    )
+    buckets = [
+        {
+            "bucket": bucket,
+            "amount": round(bucket_totals[bucket], 2),
+            "categories": sorted(
+                (
+                    {"category": c, "amount": round(a, 2)}
+                    for c, a in bucket_categories.get(bucket, {}).items()
+                ),
+                key=lambda r: r["amount"],
+                reverse=True,
+            ),
+        }
+        for bucket in sorted(bucket_totals, key=lambda b: bucket_totals[b], reverse=True)
+    ]
+
+    return {
+        "reporting": reporting,
+        "negative_categories": [
+            # Legacy signed field retained for API compatibility. New clients
+            # should use net_refund_credit_categories (positive credit values).
+            {"category": category, "amount": round(-amount, 2)}
+            for category, amount in sorted(refund_credit_categories.items())
+        ],
+        "net_refund_credits": round(net_refund_credits, 2),
+        "net_refund_credit_categories": [
+            {"category": category, "amount": round(amount, 2)}
+            for category, amount in sorted(refund_credit_categories.items())
+        ],
+        "positive_net_spend": round(positive_net_spend, 2),
+        "sankey_supported": True,
+        "visualization_qualification": (
+            "Net refund credits are residual category credits after netting; they are not income."
+            if net_refund_credits > 0 else None
+        ),
+        "income": round(income, 2),
+        "total_spend": round(total_spend, 2),
+        "savings": round(savings, 2),
+        "deficit": round(deficit, 2),
+        "income_sources": income_sources,
+        "buckets": buckets,
+    }
+
+
+@router.get("/analytics/category-movers")
+def analytics_category_movers(
+    db: Session = Depends(get_db),
+    month: str | None = Query(default=None, description="YYYY-MM historical month; defaults to current month-to-date"),
+    limit: int = Query(default=12, ge=1, le=50),
+    reporting_date: date | None = Query(default=None),
+):
+    """Top categories by absolute change in spend vs the previous month."""
+    as_of = reporting_date if isinstance(reporting_date, date) else date.today()
+    if isinstance(month, str):
+        try:
+            as_of = _month_bounds(month)[1]
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+    anchor = _month_key(as_of)
+    previous = _prev_month_key(anchor)
+    bounds = comparison_bounds(as_of)
+    cur_start, cur_end, prev_start, prev_end = bounds
+    reporting = comparison_reporting(db, bounds)
+    current = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
+    previous_totals = {
+        r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)
+    }
+
+    rows = [
+        {
+            "category": cat,
+            "current": round(current.get(cat, 0.0), 2),
+            "previous": round(previous_totals.get(cat, 0.0), 2),
+            "change": round(current.get(cat, 0.0) - previous_totals.get(cat, 0.0), 2),
+        }
+        for cat in (set(current) | set(previous_totals))
+    ]
+    rows.sort(key=lambda r: abs(r["change"]), reverse=True)
+    return {
+        "reporting": reporting,
+        "month": anchor,
+        "previous_month": previous,
+        "items": rows[:limit],
+    }
+
+
+@router.get("/analytics/daily-spend")
+def analytics_daily_spend(
+    db: Session = Depends(get_db),
+    year: int | None = Query(default=None),
+):
+    """Daily expense totals for one calendar year (refund-netted, transfers excluded)."""
+    anchor_year = year or (_latest_realized_activity_date(db) or date.today()).year
+    start, end = date(anchor_year, 1, 1), date(anchor_year, 12, 31)
+    by_day_of_year = _daily_expense(db, start, end, "%j")
+
+    days = []
+    current, day_of_year = start, 1
+    while current <= end:
+        days.append({"date": str(current), "amount": round(by_day_of_year.get(day_of_year, 0.0), 2)})
+        current += timedelta(days=1)
+        day_of_year += 1
+
+    available_years = sorted(
+        {int(y) for (y,) in db.query(func.strftime("%Y", Transaction.date)).distinct().all() if y},
+        reverse=True,
+    )
+
+    return {"year": anchor_year, "available_years": available_years, "days": days,
+            "reporting": reporting_scope(db, start, end)}
+
+
 @router.post("/transfers/detect")
 def transfers_detect(
     db: Session = Depends(get_db),
@@ -1723,7 +1964,7 @@ def _transfer_side(db: Session, txn_id: int) -> dict:
     txn = db.get(Transaction, txn_id)
     if not txn:
         return {"transaction_id": txn_id, "account_id": None, "account_name": None,
-                "account_type": None, "date": None, "name": None, "amount": None}
+                "account_type": None, "currency": None, "date": None, "name": None, "amount": None}
     account = db.get(Account, txn.account_id)
     account_name = None
     if account:
@@ -1735,6 +1976,7 @@ def _transfer_side(db: Session, txn_id: int) -> dict:
         "account_id": txn.account_id,
         "account_name": account_name,
         "account_type": account.type if account else None,
+        "currency": account.currency if account else None,
         "date": str(txn.date),
         "name": txn.name,
         "amount": round(float(txn.amount), 2) if txn.amount is not None else None,
@@ -1787,8 +2029,10 @@ def transfers_confirm(pair_id: int, db: Session = Depends(get_db)):
     pair = db.get(TransferPair, pair_id)
     if not pair:
         raise HTTPException(status_code=404, detail="pair not found")
-    pair.confirmed = True
-    db.commit()
+    try:
+        pair = transfer_detector.confirm_pair(db, pair)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"id": pair.id, "confirmed": True}
 
 

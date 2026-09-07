@@ -1,0 +1,112 @@
+{
+  "expected_posted": {
+    "income": 2200,
+    "expenses": 305,
+    "net": 1895
+  },
+  "monthly-spend": [
+    {
+      "month": "2024-03",
+      "spend": 1104.0
+    }
+  ],
+  "category-spend": [
+    {
+      "category": "FOOD/OTHER",
+      "spend": 1104.0
+    },
+    {
+      "category": "INCOME",
+      "spend": 0.0
+    }
+  ],
+  "cashflow-trend": [
+    {
+      "month": "2024-03",
+      "expenses": 1104.0,
+      "income": 2500.0,
+      "net": 1396.0
+    }
+  ],
+  "overview": {
+    "as_of_date": "2024-03-05",
+    "net_worth": 0.0,
+    "assets": 0.0,
+    "liabilities": 0.0,
+    "month_spend": 1104.0,
+    "previous_month_spend": 0.0,
+    "month_income": 2500.0,
+    "previous_month_income": 0.0,
+    "net_cashflow": 1396.0,
+    "previous_net_cashflow": 0.0,
+    "needs_attention": {
+      "unreviewed_transactions": 6,
+      "uncategorized_transactions": 0,
+      "likely_refunds": 0,
+      "transfer_pairs_pending": 1
+    }
+  },
+  "sql_scope": [
+    {
+      "name": "salary",
+      "amount": -2000,
+      "pending": 0,
+      "pair_confirmed": null
+    },
+    {
+      "name": "dinner",
+      "amount": 120,
+      "pending": 0,
+      "pair_confirmed": null
+    },
+    {
+      "name": "repayment out",
+      "amount": 200,
+      "pending": 0,
+      "pair_confirmed": 0
+    },
+    {
+      "name": "repayment in",
+      "amount": -200,
+      "pending": 0,
+      "pair_confirmed": 0
+    },
+    {
+      "name": "fund out",
+      "amount": 75,
+      "pending": 0,
+      "pair_confirmed": 1
+    },
+    {
+      "name": "fund in",
+      "amount": -75,
+      "pending": 0,
+      "pair_confirmed": 1
+    },
+    {
+      "name": "purchase",
+      "amount": 25,
+      "pending": 0,
+      "pair_confirmed": null
+    },
+    {
+      "name": "refund",
+      "amount": -40,
+      "pending": 0,
+      "pair_confirmed": null
+    },
+    {
+      "name": "pending purchase",
+      "amount": 999,
+      "pending": 1,
+      "pair_confirmed": null
+    },
+    {
+      "name": "pending income",
+      "amount": -500,
+      "pending": 1,
+      "pair_confirmed": null
+    }
+  ],
+  "spend_drilldown_count": 0
+}

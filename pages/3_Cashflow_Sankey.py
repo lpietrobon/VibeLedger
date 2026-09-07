@@ -58,15 +58,23 @@ spend["bucket"] = (
 spend["category"] = spend["effective_category"].fillna("Uncategorized").astype(str).str.strip()
 spend.loc[spend["category"] == "", "category"] = "Uncategorized"
 bucket_totals = spend.groupby("bucket")["amount"].sum().sort_values(ascending=False)
-bucket_totals = bucket_totals[bucket_totals > 0]
 category_totals = (
     spend.groupby(["bucket", "category"], as_index=False)["amount"]
     .sum()
     .sort_values(["bucket", "amount"], ascending=[True, False])
 )
-category_totals = category_totals[
-    category_totals["bucket"].isin(bucket_totals.index) & (category_totals["amount"] > 0)
-]
+total_spend = float(cashflow["expense"].sum())
+refund_credits = category_totals[category_totals["amount"] < 0].copy()
+net_refund_credits = float((-refund_credits["amount"]).sum())
+if net_refund_credits > 0:
+    st.info(
+        "Net refund credits are refunds remaining after offsetting spending in the same category. "
+        "They are not income."
+    )
+    st.metric("Net refund credits", f"${net_refund_credits:,.2f}")
+category_totals = category_totals[category_totals["amount"] > 0]
+bucket_totals = bucket_totals[bucket_totals > 0]
+category_totals = category_totals[category_totals["bucket"].isin(bucket_totals.index)]
 bucket_label, bucket_control = st.columns([1, 5])
 with bucket_label:
     st.markdown("**Expand**")
@@ -89,9 +97,9 @@ visible_category_totals = (
     else category_totals.iloc[0:0]
 )
 visible_income_totals = income_totals if selected_bucket == "Income sources" else income_totals.iloc[0:0]
-total_spend = float(bucket_totals.sum())
-savings = max(income - total_spend, 0.0)
-deficit = max(total_spend - income, 0.0)
+positive_net_spend = float(bucket_totals.sum())
+savings = max(income + net_refund_credits - positive_net_spend, 0.0)
+deficit = max(positive_net_spend - income - net_refund_credits, 0.0)
 
 if income <= 0 and total_spend <= 0:
     st.info("No income or spending is available for this period.")
@@ -111,8 +119,9 @@ def _node_label(name: str, value: float) -> str:
     return f"{name}<br>{_compact_value(value)}"
 
 
-labels = [_node_label("Income", income)]
+labels = [_node_label("Income", income), _node_label("Available cash", income + net_refund_credits + deficit)]
 income_idx = 0
+available_idx = 1
 income_source_indices: dict[str, int] = {}
 for income_category, amount in visible_income_totals.items():
     income_source_indices[income_category] = len(labels)
@@ -122,6 +131,11 @@ deficit_idx = None
 if deficit > 0:
     deficit_idx = len(labels)
     labels.append(_node_label("Deficit funding", deficit))
+
+refund_idx = None
+if net_refund_credits > 0:
+    refund_idx = len(labels)
+    labels.append(_node_label("Net refund credits", net_refund_credits))
 
 bucket_indices: dict[str, int] = {}
 for bucket, amount in bucket_totals.items():
@@ -151,18 +165,33 @@ for income_category, amount in visible_income_totals.items():
     values.append(float(amount))
     colors.append("rgba(44, 160, 44, 0.35)")
 
-income_available_for_spend = min(income, total_spend)
+sources.append(income_idx)
+targets.append(available_idx)
+values.append(income)
+colors.append("rgba(44, 160, 44, 0.35)")
+if refund_idx is not None:
+    sources.append(refund_idx)
+    targets.append(available_idx)
+    values.append(net_refund_credits)
+    colors.append("rgba(14, 165, 233, 0.35)")
+if deficit_idx is not None:
+    sources.append(deficit_idx)
+    targets.append(available_idx)
+    values.append(deficit)
+    colors.append("rgba(214, 39, 40, 0.35)")
+
+income_available_for_spend = min(income + net_refund_credits, positive_net_spend)
 for bucket, amount in bucket_totals.items():
     amount = float(amount)
-    income_share = amount * income_available_for_spend / total_spend if total_spend else 0.0
+    income_share = amount * income_available_for_spend / positive_net_spend if positive_net_spend else 0.0
     deficit_share = amount - income_share
     if income_share > 0:
-        sources.append(income_idx)
+        sources.append(available_idx)
         targets.append(bucket_indices[bucket])
         values.append(income_share)
         colors.append("rgba(44, 160, 44, 0.45)")
     if deficit_share > 0 and deficit_idx is not None:
-        sources.append(deficit_idx)
+        sources.append(available_idx)
         targets.append(bucket_indices[bucket])
         values.append(deficit_share)
         colors.append("rgba(214, 39, 40, 0.4)")
@@ -174,15 +203,17 @@ for row in visible_category_totals.itertuples(index=False):
     colors.append("rgba(148, 103, 189, 0.35)")
 
 if savings_idx is not None:
-    sources.append(income_idx)
+    sources.append(available_idx)
     targets.append(savings_idx)
     values.append(savings)
     colors.append("rgba(31, 119, 180, 0.45)")
 
-node_colors = ["#2ca02c"]
+node_colors = ["#2ca02c", "#34d399"]
 node_colors.extend(["#8fd18f"] * len(visible_income_totals))
 if deficit_idx is not None:
     node_colors.append("#d62728")
+if refund_idx is not None:
+    node_colors.append("#0ea5e9")
 node_colors.extend(["#9467bd"] * len(bucket_totals))
 node_colors.extend(["#c5a3de"] * len(visible_category_totals))
 if savings_idx is not None:

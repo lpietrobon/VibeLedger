@@ -7,6 +7,7 @@ import { KpiCard } from "@/components/finance/KpiCard";
 import { getRecurring, setRecurringStatus } from "@/lib/api/client";
 import type { RecurringSeries } from "@/lib/api/types";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { invalidateLedger } from "@/lib/api/cache";
 
 type StatusFilter = "active" | "all" | "inactive";
 
@@ -40,7 +41,7 @@ export default function RecurringPage() {
   const setStatusMutation = useMutation({
     mutationFn: ({ key, value }: { key: string; value: "auto" | "kept" | "canceled" }) =>
       setRecurringStatus(key, value),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["recurring"] }),
+    onSuccess: () => invalidateLedger(queryClient),
   });
 
   const items = recurring.data?.items ?? [];
@@ -87,6 +88,16 @@ export default function RecurringPage() {
         />
       </div>
 
+      {recurring.isError ? (
+        <p role="alert" className="mt-3 text-sm text-red-600">Could not load recurring payments: {recurring.error.message}</p>
+      ) : recurring.data ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Estimates are inferred from posted charges. {recurring.data.reporting?.qualification ?? "Historical coverage is unverified."}
+        </p>
+      ) : null}
+      {setStatusMutation.isSuccess ? <p role="status" className="mt-2 text-xs text-emerald-700">Subscription status saved.</p> : null}
+      {setStatusMutation.isError ? <p role="alert" className="mt-2 text-sm text-red-600">Could not save subscription status: {setStatusMutation.error.message}</p> : null}
+
       <Section title="Detected series" className="mt-4">
         {/* Desktop table */}
         <div className="hidden md:block">
@@ -98,6 +109,7 @@ export default function RecurringPage() {
                 <th className="py-2 text-right font-medium">Avg</th>
                 <th className="py-2 text-right font-medium">Monthly</th>
                 <th className="py-2 font-medium">Next</th>
+                <th className="py-2 text-right font-medium">Evidence</th>
                 <th className="py-2 font-medium">Status</th>
               </tr>
             </thead>
@@ -118,8 +130,9 @@ export default function RecurringPage() {
                   <td className="py-2 text-right tabular-nums">{formatCurrency(series.average_amount)}</td>
                   <td className="py-2 text-right font-semibold tabular-nums">{formatCurrency(series.monthly_estimate)}</td>
                   <td className="py-2 text-muted-foreground">{formatDate(series.next_expected_date)}</td>
+                  <td className="py-2 text-right text-xs text-muted-foreground">{series.occurrences} posted charges</td>
                   <td className="py-2">
-                    <StatusControl series={series} onSet={onSet} />
+                    <StatusControl series={series} onSet={onSet} saving={setStatusMutation.isPending} />
                   </td>
                 </tr>
               ))}
@@ -138,7 +151,7 @@ export default function RecurringPage() {
                     <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {CADENCE_LABEL[series.cadence] ?? series.cadence} · next {formatDate(series.next_expected_date)}
+                    {CADENCE_LABEL[series.cadence] ?? series.cadence} · {series.occurrences} posted charges · next {formatDate(series.next_expected_date)}
                   </div>
                 </div>
                 <div className="shrink-0 text-right">
@@ -147,7 +160,7 @@ export default function RecurringPage() {
                 </div>
               </a>
               <div className="mt-2 flex items-center gap-2">
-                <StatusControl series={series} onSet={onSet} />
+                <StatusControl series={series} onSet={onSet} saving={setStatusMutation.isPending} />
                 {!series.amount_consistent ? (
                   <span className="rounded bg-secondary px-1 py-0.5 text-[10px] text-muted-foreground">variable amount</span>
                 ) : null}
@@ -176,9 +189,11 @@ export default function RecurringPage() {
 function StatusControl({
   series,
   onSet,
+  saving,
 }: {
   series: RecurringSeries;
   onSet: (key: string, value: "auto" | "kept" | "canceled") => void;
+  saving?: boolean;
 }) {
   const badge = statusBadge(series);
   const value = series.manual_status ?? "auto";
@@ -196,6 +211,7 @@ function StatusControl({
           e.stopPropagation();
           onSet(series.merchant_key, e.target.value as "auto" | "kept" | "canceled");
         }}
+        disabled={saving}
         aria-label={`Set status for ${series.merchant_label}`}
         className="h-7 rounded-md border border-input bg-background px-1 text-xs text-muted-foreground"
       >

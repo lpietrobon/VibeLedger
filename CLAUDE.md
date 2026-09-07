@@ -2,6 +2,23 @@
 
 Single-user personal finance ledger. FastAPI + SQLite + Plaid, with a multipage Streamlit dashboard (Overview / Transactions / Spending / Cashflow / Accounts, plus Recurring / Flow / Transfers / Rules / Experimental / Add account under "More") served alongside the API.
 
+## Roadmap
+
+Current execution lives in `/docs/roadmap`, not in this file.
+
+- `docs/roadmap/epics/<NN-slug>/_epic.md` — scope, status, revision log.
+- `docs/roadmap/epics/<NN-slug>/spirit.md` — durable problem and intent.
+- `docs/roadmap/epics/<NN-slug>/tasks/*.md` — task metadata, acceptance, logs.
+- `docs/roadmap/_registry.md` and `_blocked.md` — generated; never hand-edit.
+- `docs/roadmap/_archive/` — reserved for retained historical work.
+
+Before selecting work, install `docs/roadmap/requirements.txt` if needed, run
+`python docs/roadmap/scan.py`, read the registry, and open the epic and task.
+Run the scan again before committing task changes. A task may start only when
+all dependencies are done. Follow `docs/roadmap/README.md` for coordination.
+The broader `docs/finance-intelligence-roadmap.md` backlog is deferred while
+existing cashflow correctness is hardened.
+
 ## Setup
 
 ```bash

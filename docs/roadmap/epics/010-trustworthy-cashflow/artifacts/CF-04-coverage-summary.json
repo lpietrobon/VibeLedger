@@ -1,0 +1,83 @@
+{
+  "baseline": {
+    "meta": {
+      "format": 3,
+      "version": "7.16.0",
+      "timestamp": "2026-09-02T05:31:37.991979",
+      "branch_coverage": true,
+      "show_contexts": false
+    },
+    "totals": {
+      "covered_lines": 1922,
+      "num_statements": 2290,
+      "percent_covered": 81.34482758620689,
+      "percent_covered_display": "81",
+      "missing_lines": 368,
+      "excluded_lines": 0,
+      "percent_statements_covered": 83.93013100436681,
+      "percent_statements_covered_display": "84",
+      "num_branches": 610,
+      "num_partial_branches": 99,
+      "covered_branches": 437,
+      "missing_branches": 173,
+      "percent_branches_covered": 71.63934426229508,
+      "percent_branches_covered_display": "72"
+    },
+    "source": "app/",
+    "frontend_included": false
+  },
+  "earlier_draft": {
+    "meta": {
+      "format": 3,
+      "version": "7.16.0",
+      "timestamp": "2026-09-02T05:40:44.368324",
+      "branch_coverage": true,
+      "show_contexts": false
+    },
+    "totals": {
+      "covered_lines": 2146,
+      "num_statements": 2436,
+      "percent_covered": 85.98582474226804,
+      "percent_covered_display": "86",
+      "missing_lines": 290,
+      "excluded_lines": 0,
+      "percent_statements_covered": 88.0952380952381,
+      "percent_statements_covered_display": "88",
+      "num_branches": 668,
+      "num_partial_branches": 89,
+      "covered_branches": 523,
+      "missing_branches": 145,
+      "percent_branches_covered": 78.2934131736527,
+      "percent_branches_covered_display": "78"
+    },
+    "source": "app/",
+    "frontend_included": false
+  },
+  "recovered_draft": {
+    "meta": {
+      "format": 3,
+      "version": "7.16.0",
+      "timestamp": "2026-09-02T17:34:51.670235",
+      "branch_coverage": true,
+      "show_contexts": false
+    },
+    "totals": {
+      "covered_lines": 2157,
+      "num_statements": 2445,
+      "percent_covered": 86.05322218659826,
+      "percent_covered_display": "86",
+      "missing_lines": 288,
+      "excluded_lines": 0,
+      "percent_statements_covered": 88.22085889570552,
+      "percent_statements_covered_display": "88",
+      "num_branches": 674,
+      "num_partial_branches": 91,
+      "covered_branches": 527,
+      "missing_branches": 147,
+      "percent_branches_covered": 78.18991097922849,
+      "percent_branches_covered_display": "78"
+    },
+    "source": "app/",
+    "frontend_included": false
+  }
+}

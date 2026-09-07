@@ -28,13 +28,14 @@ function appHref(path: string) {
 export default function OverviewPage() {
   const summary = useQuery({ queryKey: ["overview"], queryFn: getOverviewSummary });
   const cashflow = useQuery({ queryKey: ["cashflow"], queryFn: getCashflowTrend });
-  const comparison = useQuery({ queryKey: ["comparison"], queryFn: getCategoryComparison });
+  const comparison = useQuery({ queryKey: ["comparison"], queryFn: () => getCategoryComparison() });
   const recent = useQuery({
     queryKey: ["recent-tx"],
     queryFn: () => getTransactions({ limit: 8 }),
   });
 
   const s = summary.data;
+  const comparisonAvailable = s?.reporting.comparisonAvailable ?? false;
 
   return (
     <AppShell>
@@ -64,7 +65,7 @@ export default function OverviewPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Overview</h1>
           <p className="text-sm text-muted-foreground">
-            As of {s?.asOfDate ?? "—"} · single household
+            Reporting through {s?.asOfDate ?? "—"} · single household
           </p>
         </div>
       </div>
@@ -76,41 +77,58 @@ export default function OverviewPage() {
         ) : (
           <>
             <KpiCard
+              label="Month spend"
+              value={formatCurrency(s.monthSpend, { compact: true })}
+              sublabel={comparisonAvailable
+                ? `vs ${formatCurrency(s.previousMonthSpend, { compact: true })} prior MTD`
+                : "No comparable recorded prior period"}
+              tone="spend"
+              delta={comparisonAvailable ? <Delta current={s.monthSpend} previous={s.previousMonthSpend} goodDirection="down" /> : undefined}
+            />
+            <KpiCard
+              label="Month income"
+              value={formatCurrency(s.monthIncome, { compact: true })}
+              sublabel={comparisonAvailable
+                ? `vs ${formatCurrency(s.previousMonthIncome, { compact: true })} prior MTD`
+                : "Recorded posted income"}
+              tone="income"
+              delta={comparisonAvailable ? <Delta current={s.monthIncome} previous={s.previousMonthIncome} goodDirection="up" /> : undefined}
+            />
+            <KpiCard
+              label="Net cashflow"
+              value={formatCurrency(s.netCashflow, { compact: true, sign: true })}
+              sublabel={comparisonAvailable
+                ? `vs ${formatCurrency(s.previousNetCashflow, { compact: true, sign: true })} prior MTD`
+                : "Recorded posted activity"}
+              tone="net"
+              delta={comparisonAvailable ? <Delta current={s.netCashflow} previous={s.previousNetCashflow} goodDirection="up" /> : undefined}
+            />
+            <KpiCard
               label="Net worth"
               value={formatCurrency(s.netWorth, { compact: true })}
               sublabel={`${formatCurrency(s.assets, { compact: true })} assets · ${formatCurrency(s.liabilities, { compact: true })} debt`}
               tone="net"
             />
-            <KpiCard
-              label="Month spend"
-              value={formatCurrency(s.monthSpend, { compact: true })}
-              sublabel={`vs ${formatCurrency(s.previousMonthSpend, { compact: true })} last mo`}
-              tone="spend"
-              delta={<Delta current={s.monthSpend} previous={s.previousMonthSpend} goodDirection="down" />}
-            />
-            <KpiCard
-              label="Month income"
-              value={formatCurrency(s.monthIncome, { compact: true })}
-              sublabel={`vs ${formatCurrency(s.previousMonthIncome, { compact: true })} last mo`}
-              tone="income"
-              delta={<Delta current={s.monthIncome} previous={s.previousMonthIncome} goodDirection="up" />}
-            />
-            <KpiCard
-              label="Net cashflow"
-              value={formatCurrency(s.netCashflow, { compact: true, sign: true })}
-              sublabel={`vs ${formatCurrency(s.previousNetCashflow, { compact: true, sign: true })} last mo`}
-              tone="net"
-              delta={<Delta current={s.netCashflow} previous={s.previousNetCashflow} goodDirection="up" />}
-            />
           </>
         )}
       </div>
+
+      {summary.isError ? (
+        <p role="alert" className="mt-3 text-sm text-red-600">Could not load the spending summary: {summary.error.message}</p>
+      ) : s ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {s.reporting.comparisonQualification}
+          {s.needsAttention.transferPairsPending > 0 ? " Possible transfers remain counted until reviewed." : ""}
+        </p>
+      ) : null}
 
       {/* Charts */}
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <Section title="Cashflow · last 12 months" className="lg:col-span-2">
           <div className="h-64">
-            {cashflow.data ? (
+            {cashflow.isError ? (
+              <p role="alert" className="grid h-full place-items-center text-sm text-red-600">Could not load cashflow: {cashflow.error.message}</p>
+            ) : cashflow.data ? (
               <Suspense fallback={<ChartSkeleton />}>
                 <CashflowChart data={cashflow.data} />
               </Suspense>
@@ -162,8 +180,14 @@ export default function OverviewPage() {
             </a>
           }
         >
-          {comparison.data ? (
-            <CategoryComparison data={comparison.data} />
+          {comparison.isError ? (
+            <p role="alert" className="grid h-40 place-items-center text-sm text-red-600">Could not load category comparison: {comparison.error.message}</p>
+          ) : comparison.data ? (
+            <CategoryComparison
+              data={comparison.data}
+              currentLabel="This month to date"
+              previousLabel="Prior comparable period"
+            />
           ) : (
             <ChartSkeleton />
           )}
@@ -171,7 +195,9 @@ export default function OverviewPage() {
 
         <Section title="Current month by category">
           <div className="h-64">
-            {comparison.data ? (
+            {comparison.isError ? (
+              <p role="alert" className="grid h-full place-items-center text-sm text-red-600">Category chart unavailable.</p>
+            ) : comparison.data ? (
               <Suspense fallback={<ChartSkeleton />}>
                 <CategoryBarChart data={comparison.data} />
               </Suspense>
