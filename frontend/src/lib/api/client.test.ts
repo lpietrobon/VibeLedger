@@ -125,6 +125,76 @@ describe("getSpendingSummary", () => {
     expect(s.changePct).toBe(25);
     expect(s.topDriver).toEqual({ category: "FOOD/OTHER", amount: 100 });
   });
+
+  it("keeps legacy responses usable when reporting metadata is absent", async () => {
+    mockFetch({
+      period_label: "March 2026",
+      total: 500,
+      previous_total: 400,
+      change: 100,
+      change_pct: 25,
+      projection: 500,
+      top_driver: null,
+      category_comparison: [],
+    });
+
+    const s = await getSpendingSummary({ granularity: "monthly" });
+    expect(s.total).toBe(500);
+    expect(s.reporting.currencyStatus).toBe("unknown");
+    expect(s.reporting.comparisonAvailable).toBe(false);
+    expect(s.reporting.currentPeriod.startDate).toBeNull();
+    expect(s.reporting.comparisonQualification).toContain("API is updated");
+  });
+});
+
+describe("reporting metadata compatibility", () => {
+  it("does not crash overview mapping during a rolling frontend/backend update", async () => {
+    mockFetch({
+      as_of_date: "2026-03-10",
+      net_worth: 1000,
+      assets: 1200,
+      liabilities: 200,
+      month_spend: 500,
+      previous_month_spend: 400,
+      month_income: 1200,
+      previous_month_income: 1000,
+      net_cashflow: 700,
+      previous_net_cashflow: 600,
+      needs_attention: {
+        unreviewed_transactions: 0,
+        uncategorized_transactions: 0,
+        likely_refunds: 0,
+        transfer_pairs_pending: 0,
+      },
+    });
+
+    const s = await getOverviewSummary();
+    expect(s.monthSpend).toBe(500);
+    expect(s.reporting.currency).toBeNull();
+    expect(s.reporting.comparisonAvailable).toBe(false);
+    expect(s.reporting.qualification).toContain("metadata is unavailable");
+  });
+
+  it("degrades incomplete nested metadata instead of dereferencing undefined", async () => {
+    const partial = reportingPayload();
+    delete (partial as Partial<typeof partial>).current_period;
+    mockFetch({
+      reporting: partial,
+      period_label: "March 2026",
+      total: 500,
+      previous_total: 400,
+      change: 100,
+      change_pct: 25,
+      projection: 500,
+      top_driver: null,
+      category_comparison: [],
+    });
+
+    const s = await getSpendingSummary({ granularity: "monthly" });
+    expect(s.reporting.currency).toBe("USD");
+    expect(s.reporting.comparisonAvailable).toBe(false);
+    expect(s.reporting.currentPeriod.startDate).toBe("2026-03-01");
+  });
 });
 
 describe("spending report scope", () => {

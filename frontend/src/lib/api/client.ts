@@ -64,7 +64,7 @@ function apiOrigin() {
 // --- Analytics (all computed server-side; the client only fetches + maps) ---
 
 type OverviewResponse = {
-  reporting: ReportingResponse;
+  reporting?: ReportingResponse;
   as_of_date: string;
   net_worth: number;
   assets: number;
@@ -106,31 +106,40 @@ type ReportingResponse = ReportingScopeResponse & {
   projection_qualification?: string;
 };
 
-function mapReportingScope(r: ReportingScopeResponse): ReportingScope {
+const REPORTING_UNAVAILABLE =
+  "Reporting metadata is unavailable. Totals show recorded activity, but period coverage and comparison confidence cannot be verified until the API is updated.";
+
+function mapReportingScope(r?: Partial<ReportingScopeResponse>): ReportingScope {
+  const status = r?.currency_status;
   return {
-    currency: r.currency,
-    currencyStatus: r.currency_status,
-    currencies: r.currencies,
-    historyCoverage: r.history_coverage,
-    duplicateAccountCoverage: r.duplicate_account_coverage,
-    qualification: r.qualification,
-    startDate: r.start_date,
-    endDate: r.end_date,
-    recordedRowCount: r.recorded_row_count,
-    firstRecordedDate: r.first_recorded_date,
-    lastRecordedDate: r.last_recorded_date,
+    currency: r?.currency ?? null,
+    currencyStatus: status === "empty" || status === "single" || status === "mixed" || status === "unknown"
+      ? status
+      : "unknown",
+    currencies: Array.isArray(r?.currencies) ? r.currencies : [],
+    historyCoverage: "unverified",
+    duplicateAccountCoverage: "unverified",
+    qualification: r?.qualification ?? REPORTING_UNAVAILABLE,
+    startDate: r?.start_date ?? null,
+    endDate: r?.end_date ?? null,
+    recordedRowCount: typeof r?.recorded_row_count === "number" ? r.recorded_row_count : 0,
+    firstRecordedDate: r?.first_recorded_date ?? null,
+    lastRecordedDate: r?.last_recorded_date ?? null,
   };
 }
 
-function mapReporting(r: ReportingResponse): ComparisonReporting {
+function mapReporting(r?: Partial<ReportingResponse>): ComparisonReporting {
+  const hasComparablePeriods = Boolean(r?.current_period && r?.previous_period);
   return {
     ...mapReportingScope(r),
-    reportingDate: r.reporting_date,
-    currentPeriod: mapReportingScope(r.current_period),
-    previousPeriod: mapReportingScope(r.previous_period),
-    comparisonAvailable: r.comparison_available,
-    comparisonQualification: r.comparison_qualification,
-    projectionQualification: r.projection_qualification,
+    reportingDate: r?.reporting_date ?? "",
+    currentPeriod: mapReportingScope(r?.current_period ?? r),
+    previousPeriod: mapReportingScope(r?.previous_period),
+    comparisonAvailable: hasComparablePeriods && r?.comparison_available === true,
+    comparisonQualification: hasComparablePeriods
+      ? (r?.comparison_qualification ?? REPORTING_UNAVAILABLE)
+      : REPORTING_UNAVAILABLE,
+    projectionQualification: r?.projection_qualification,
   };
 }
 
@@ -184,7 +193,7 @@ export async function getCategorySpend(params?: {
 }
 
 type SpendingSummaryResponse = {
-  reporting: ReportingResponse;
+  reporting?: ReportingResponse;
   period_label: string;
   total: number;
   previous_total: number;
