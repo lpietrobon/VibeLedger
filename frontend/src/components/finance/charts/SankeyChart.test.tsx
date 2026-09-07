@@ -9,6 +9,8 @@ import type { CashflowSankey } from "@/lib/api/types";
 const data = {
   sankeySupported: true,
   visualizationQualification: null,
+  negativeCategories: [{ category: "SHOPPING", amount: -120 }],
+  positiveNetSpend: 90,
   income: 3000,
   totalSpend: -30,
   savings: 3030,
