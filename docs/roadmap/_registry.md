@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-08T15:41:11+00:00_
+_Last scan: 2026-09-08T15:46:20+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -39,7 +39,7 @@ dependencies are done; a blank assignment means unassigned.
 | [PI-06](epics/020-product-integrity/tasks/PI-06.md) | 020-product-integrity | done |  |  | Diagnose credit-card-payment contributions in Sankey |
 | [PI-07](epics/020-product-integrity/tasks/PI-07.md) | 020-product-integrity | todo | PI-06, PI-19 |  | Resolve the diagnosed card-payment Sankey gap |
 | [PI-08](epics/020-product-integrity/tasks/PI-08.md) | 020-product-integrity | todo | PI-21 |  | Improve Sankey label readability |
-| [PI-09](epics/020-product-integrity/tasks/PI-09.md) | 020-product-integrity | todo | PI-06 |  | Explore a simpler common-case Sankey composition |
+| [PI-09](epics/020-product-integrity/tasks/PI-09.md) | 020-product-integrity | done | PI-06 |  | Explore a simpler common-case Sankey composition |
 | [PI-10](epics/020-product-integrity/tasks/PI-10.md) | 020-product-integrity | todo | PI-07, PI-08, PI-09, PI-23 |  | Implement the simpler Sankey composition |
 | [PI-11](epics/020-product-integrity/tasks/PI-11.md) | 020-product-integrity | todo | PI-25 |  | Standardize ordinary textual date formatting |
 | [PI-12](epics/020-product-integrity/tasks/PI-12.md) | 020-product-integrity | todo | PI-01, PI-14, PI-16, PI-18, PI-20, PI-22, PI-24, PI-26 |  | Independently verify the integrated product-integrity work |
