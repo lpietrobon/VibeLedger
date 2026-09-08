@@ -6,14 +6,18 @@ import { Section } from "@/components/finance/Section";
 import { SearchBar, SearchChips } from "@/components/finance/SearchBar";
 import { TransactionRow } from "@/components/finance/TransactionRow";
 import { AnnotationSheet, BatchAnnotationSheet } from "@/components/finance/AnnotationSheet";
+import { Sheet } from "@/components/layout/Sheet";
 import {
   CATEGORIES,
   CATEGORY_GROUPS,
   getTransactions,
+  getDuplicateCorrections,
+  createDuplicateCorrection,
+  reverseDuplicateCorrection,
   patchTransactionAnnotation,
   patchTransactionAnnotations,
 } from "@/lib/api/client";
-import type { Transaction } from "@/lib/api/types";
+import type { DuplicateCorrection, Transaction } from "@/lib/api/types";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { invalidateLedger } from "@/lib/api/cache";
 
@@ -88,6 +92,11 @@ export default function TransactionsPage() {
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [batchOpen, setBatchOpen] = useState(false);
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+  const [canonicalId, setCanonicalId] = useState<number | null>(null);
+  const [reverseCorrectionId, setReverseCorrectionId] = useState<number | null>(null);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [duplicateFeedback, setDuplicateFeedback] = useState<string | null>(null);
   const [onlyUnreviewed, setOnlyUnreviewed] = useState(false);
   const limit = filter || startDate || endDate || category !== "All" || query ? 500 : 100;
   const serverQuery = [filter ? FILTER_QUERY[filter] : "", query].filter(Boolean).join(" ");
@@ -96,6 +105,16 @@ export default function TransactionsPage() {
     queryKey: ["all-tx", serverQuery, category, startDate, endDate, limit],
     queryFn: () => getTransactions({ query: serverQuery, category, startDate, endDate, limit }),
   });
+
+  const duplicateCorrections = useQuery({
+    queryKey: ["duplicate-corrections"],
+    queryFn: getDuplicateCorrections,
+  });
+
+  const activeCorrections = useMemo(
+    () => (duplicateCorrections.data?.items ?? []).filter((correction) => correction.status === "active"),
+    [duplicateCorrections.data?.items],
+  );
 
   const items = useMemo(() => {
     const filtered = (tx.data?.items ?? []).filter((t) => {
@@ -110,7 +129,9 @@ export default function TransactionsPage() {
       }
       const dateDiff = a.date.localeCompare(b.date);
       if (dateDiff !== 0) return dateDiff * direction;
-      return (a.id - b.id) * direction;
+      // Keep equal-date rows in stable ledger/import order regardless of the
+      // date direction. This makes selecting a same-day pair predictable.
+      return a.id - b.id;
     });
   }, [onlyUnreviewed, order, sort, tx.data?.items]);
 
@@ -136,6 +157,8 @@ export default function TransactionsPage() {
   };
 
   const selectedCount = selectedIds.size;
+  const selectedTransactions = items.filter((item) => selectedIds.has(item.id));
+  const duplicateSelectionIssue = duplicateSelectionValidation(selectedTransactions, activeCorrections);
   const allVisibleSelected = items.length > 0 && items.every((t) => selectedIds.has(t.id));
 
   const toggleSelected = (id: number) => {
@@ -167,6 +190,52 @@ export default function TransactionsPage() {
     await patchTransactionAnnotations(ids, payload);
     setSelectedIds(new Set());
     await invalidateLedger(queryClient);
+  };
+
+  const openDuplicateDialog = () => {
+    if (selectedCount !== 2 || duplicateSelectionIssue) return;
+    setCanonicalId(selectedTransactions[0]?.id ?? null);
+    setDuplicateError(null);
+    setDuplicateFeedback(null);
+    setDuplicateDialogOpen(true);
+  };
+
+  const handleCreateDuplicateCorrection = async () => {
+    if (canonicalId === null || selectedTransactions.length !== 2) return;
+    const duplicate = selectedTransactions.find((transaction) => transaction.id !== canonicalId);
+    if (!duplicate) return;
+    setDuplicateError(null);
+    try {
+      await createDuplicateCorrection({
+        canonicalTransactionId: canonicalId,
+        duplicateTransactionId: duplicate.id,
+      });
+      setDuplicateDialogOpen(false);
+      setSelectedIds(new Set());
+      setDuplicateFeedback("Duplicate correction saved.");
+      await invalidateLedger(queryClient);
+    } catch (error) {
+      setDuplicateError(error instanceof Error ? error.message : "Could not save duplicate correction.");
+    }
+  };
+
+  const handleReverseDuplicateCorrection = async () => {
+    if (reverseCorrectionId === null) return;
+    setDuplicateError(null);
+    try {
+      await reverseDuplicateCorrection(reverseCorrectionId);
+      setReverseCorrectionId(null);
+      setDuplicateFeedback("Duplicate correction reversed.");
+      await invalidateLedger(queryClient);
+    } catch (error) {
+      setDuplicateError(error instanceof Error ? error.message : "Could not reverse duplicate correction.");
+    }
+  };
+
+  const selectedRelationship = selected ? duplicateRelationshipFor(selected, activeCorrections) : undefined;
+  const openRelatedTransaction = (transactionId: number) => {
+    const related = items.find((item) => item.id === transactionId);
+    if (related) setSelected(related);
   };
 
   return (
@@ -297,6 +366,20 @@ export default function TransactionsPage() {
             <span className="text-xs text-muted-foreground">{selectedCount} selected</span>
             <button
               type="button"
+              onClick={openDuplicateDialog}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openDuplicateDialog();
+                }
+              }}
+              disabled={selectedCount !== 2 || Boolean(duplicateSelectionIssue)}
+              className="inline-flex h-8 items-center rounded-md border border-violet-300 px-2.5 text-xs font-medium text-violet-800 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Mark as duplicates
+            </button>
+            <button
+              type="button"
               onClick={() => setBatchOpen(true)}
               disabled={!selectedCount}
               className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-md bg-foreground px-2.5 text-xs font-medium text-background hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
@@ -314,6 +397,19 @@ export default function TransactionsPage() {
             </button>
           </div>
         ) : null}
+        {selectedCount > 0 && duplicateSelectionIssue ? (
+          <p className="mb-3 text-xs text-muted-foreground">{duplicateSelectionIssue}</p>
+        ) : null}
+        {duplicateFeedback ? (
+          <p role="status" className="mb-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+            {duplicateFeedback}
+          </p>
+        ) : null}
+        {duplicateError ? (
+          <p role="alert" className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+            Duplicate correction failed: {duplicateError}
+          </p>
+        ) : null}
 
         {/* Mobile: rows. Desktop: table. */}
         <div className="md:hidden -mx-4 -mb-4">
@@ -329,7 +425,11 @@ export default function TransactionsPage() {
                 />
               </label>
               <div className="min-w-0 flex-1">
-                <TransactionRow tx={t} onClick={() => setSelected(t)} selected={selected?.id === t.id} />
+                <TransactionRow
+                  tx={withDuplicateStatus(t, duplicateRelationshipFor(t, activeCorrections))}
+                  onClick={() => setSelected(t)}
+                  selected={selected?.id === t.id}
+                />
               </div>
             </div>
           ))}
@@ -365,6 +465,7 @@ export default function TransactionsPage() {
             <tbody>
               {items.map((t) => {
                 const isIncome = t.amount < 0;
+                const duplicateRelationship = duplicateRelationshipFor(t, activeCorrections);
                 return (
                   <tr
                     key={t.id}
@@ -403,7 +504,15 @@ export default function TransactionsPage() {
                       {formatCurrency(Math.abs(t.amount))}
                     </td>
                     <td className="py-2 text-right">
-                      {t.is_transfer ? (
+                      {duplicateRelationship?.role === "canonical" ? (
+                        <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium text-violet-700">
+                          Canonical
+                        </span>
+                      ) : duplicateRelationship?.role === "duplicate" ? (
+                        <span className="rounded bg-orange-50 px-1.5 py-0.5 text-[11px] font-medium text-orange-700">
+                          Marked duplicate
+                        </span>
+                      ) : t.is_transfer ? (
                         <span
                           className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700"
                           title="Part of a transfer pair — excluded from spend and income totals"
@@ -449,13 +558,192 @@ export default function TransactionsPage() {
         </div>
       </Section>
 
-      <AnnotationSheet tx={selected} onClose={() => setSelected(null)} onSave={handleSave} />
+      <AnnotationSheet
+        tx={selected}
+        onClose={() => setSelected(null)}
+        onSave={handleSave}
+        duplicateRelationship={selectedRelationship}
+        onReverseDuplicate={(correctionId) => setReverseCorrectionId(correctionId)}
+        onOpenRelated={openRelatedTransaction}
+      />
+      {duplicateDialogOpen ? (
+        <DuplicateCorrectionSheet
+          transactions={selectedTransactions}
+          canonicalId={canonicalId}
+          onCanonicalChange={setCanonicalId}
+          onClose={() => setDuplicateDialogOpen(false)}
+          onConfirm={handleCreateDuplicateCorrection}
+          error={duplicateError}
+        />
+      ) : null}
+      {reverseCorrectionId !== null ? (
+        <DuplicateReverseSheet
+          onClose={() => setReverseCorrectionId(null)}
+          onConfirm={handleReverseDuplicateCorrection}
+          error={duplicateError}
+        />
+      ) : null}
       <BatchAnnotationSheet
         count={batchOpen ? selectedCount : 0}
         onClose={() => setBatchOpen(false)}
         onSave={handleBatchSave}
       />
     </AppShell>
+  );
+}
+
+function duplicateSelectionValidation(
+  transactions: Transaction[],
+  activeCorrections: DuplicateCorrection[],
+): string | null {
+  if (transactions.length !== 2) return "Select exactly two transactions to mark as duplicates.";
+  if (transactions.some((transaction) => transaction.pending)) {
+    return "Duplicate correction is only available for posted transactions.";
+  }
+  if (transactions.some((transaction) => transaction.is_transfer || transaction.is_transfer_candidate)) {
+    return "Resolve transfer relationships before marking transactions as duplicates.";
+  }
+  if (transactions.some((transaction) => transaction.refund_status === "confirmed" || transaction.refund_status === "likely")) {
+    return "Resolve refund relationships before marking transactions as duplicates.";
+  }
+  if (transactions.some((transaction) => activeCorrections.some(
+    (correction) => correction.canonical_transaction_id === transaction.id || correction.duplicate_transaction_id === transaction.id,
+  ))) {
+    return "Reverse the existing duplicate correction before selecting these transactions again.";
+  }
+  if (transactions[0].effective_account_name !== transactions[1].effective_account_name) {
+    return "Duplicate correction requires two transactions from the same account.";
+  }
+  if (transactions[0].amount !== transactions[1].amount) {
+    return "Duplicate correction requires transactions with the same signed amount.";
+  }
+  if (
+    transactions[0].plaid_transaction_id &&
+    transactions[0].plaid_transaction_id === transactions[1].plaid_transaction_id
+  ) {
+    return "These rows share a provider identity; resolve the import replay instead.";
+  }
+  return null;
+}
+
+function duplicateRelationshipFor(
+  transaction: Transaction,
+  activeCorrections: DuplicateCorrection[],
+) {
+  const correction = activeCorrections.find(
+    (candidate) =>
+      candidate.canonical_transaction_id === transaction.id ||
+      candidate.duplicate_transaction_id === transaction.id,
+  );
+  if (!correction || correction.canonical_transaction_id === null || correction.duplicate_transaction_id === null) {
+    return undefined;
+  }
+  const role = correction.canonical_transaction_id === transaction.id ? "canonical" : "duplicate";
+  return {
+    correctionId: correction.id,
+    role: role as "canonical" | "duplicate",
+    relatedTransactionId:
+      role === "canonical" ? correction.duplicate_transaction_id : correction.canonical_transaction_id,
+  };
+}
+
+function withDuplicateStatus(
+  transaction: Transaction,
+  relationship:
+    | { correctionId: number; role: "canonical" | "duplicate"; relatedTransactionId: number }
+    | undefined,
+): Transaction {
+  if (!relationship || transaction.duplicate_status) return transaction;
+  return { ...transaction, duplicate_status: relationship.role };
+}
+
+function DuplicateCorrectionSheet({
+  transactions,
+  canonicalId,
+  onCanonicalChange,
+  onClose,
+  onConfirm,
+  error,
+}: {
+  transactions: Transaction[];
+  canonicalId: number | null;
+  onCanonicalChange: (id: number) => void;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+  error: string | null;
+}) {
+  return (
+    <Sheet label="Duplicate correction" title="Confirm duplicate correction" onClose={onClose}>
+      <div className="px-4 py-4">
+        <h2 className="text-sm font-semibold">Choose the canonical transaction</h2>
+        <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Both imported records will remain visible. Only the record marked duplicate will be excluded from spending and income totals.
+        </p>
+        <fieldset className="mt-4 space-y-2">
+          <legend className="sr-only">Choose the canonical transaction</legend>
+          {transactions.map((transaction) => (
+            <label key={transaction.id} className="flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-3 hover:bg-secondary/60">
+              <input
+                type="radio"
+                name="canonical-transaction"
+                checked={canonicalId === transaction.id}
+                onChange={() => onCanonicalChange(transaction.id)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span className="min-w-0 text-sm">
+                <span className="block font-medium">{transaction.effective_merchant ?? transaction.name}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {formatDate(transaction.date)} · {transaction.effective_account_name} · {formatCurrency(Math.abs(transaction.amount))}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <div className="mt-4 flex gap-2">
+          <button type="button" onClick={onClose} className="flex-1 rounded-md border border-input px-3 py-2 text-sm font-medium hover:bg-secondary">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={canonicalId === null}
+            className="flex-1 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Confirm duplicate correction
+          </button>
+        </div>
+        {error ? <p role="alert" className="mt-2 text-sm text-red-600">Duplicate correction failed: {error}</p> : null}
+      </div>
+    </Sheet>
+  );
+}
+
+function DuplicateReverseSheet({
+  onClose,
+  onConfirm,
+  error,
+}: {
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+  error: string | null;
+}) {
+  return (
+    <Sheet level={1} label="Reverse duplicate correction" title="Reverse duplicate correction" onClose={onClose}>
+      <div className="px-4 py-4">
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Both records will again count normally.
+        </p>
+        <div className="mt-4 flex gap-2">
+          <button type="button" onClick={onClose} className="flex-1 rounded-md border border-input px-3 py-2 text-sm font-medium hover:bg-secondary">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} className="flex-1 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90">
+            Reverse correction
+          </button>
+        </div>
+        {error ? <p role="alert" className="mt-2 text-sm text-red-600">Duplicate correction failed: {error}</p> : null}
+      </div>
+    </Sheet>
   );
 }
 

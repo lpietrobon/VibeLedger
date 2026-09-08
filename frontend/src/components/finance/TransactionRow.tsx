@@ -42,6 +42,15 @@ export function TransactionRow({
           Possible transfer
         </span>
       ) : null}
+          {tx.duplicate_status === "canonical" ? (
+            <span className="rounded bg-violet-50 px-1 py-0.5 text-[10px] font-medium text-violet-700">
+              Canonical
+            </span>
+          ) : tx.duplicate_status === "duplicate" ? (
+            <span className="rounded bg-orange-50 px-1 py-0.5 text-[10px] font-medium text-orange-700">
+              Marked duplicate
+            </span>
+          ) : null}
       {tx.pending ? (
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700">
               <Clock className="h-2.5 w-2.5" />

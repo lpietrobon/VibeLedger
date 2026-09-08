@@ -20,6 +20,8 @@ import type {
   DailySpend,
   ComparisonReporting,
   ReportingScope,
+  DuplicateCorrection,
+  DuplicateCorrectionsResponse,
 } from "./types";
 import { CATEGORY_COLORS } from "./theme";
 
@@ -381,6 +383,34 @@ export async function patchTransactionAnnotations(
     "/transactions/annotations/batch",
     undefined,
     jsonBody("PATCH", { transaction_ids: transactionIds, ...payload }),
+  );
+}
+
+// --- Duplicate corrections ---
+
+export async function getDuplicateCorrections(): Promise<DuplicateCorrectionsResponse> {
+  return jsonFetch<DuplicateCorrectionsResponse>("/duplicate-corrections");
+}
+
+export async function createDuplicateCorrection(payload: {
+  canonicalTransactionId: number;
+  duplicateTransactionId: number;
+}): Promise<DuplicateCorrection> {
+  return jsonFetch<DuplicateCorrection>(
+    "/duplicate-corrections",
+    undefined,
+    jsonBody("POST", {
+      canonical_transaction_id: payload.canonicalTransactionId,
+      duplicate_transaction_id: payload.duplicateTransactionId,
+    }),
+  );
+}
+
+export async function reverseDuplicateCorrection(correctionId: number): Promise<{ id: number; status: "reversed" }> {
+  return jsonFetch<{ id: number; status: "reversed" }>(
+    `/duplicate-corrections/${correctionId}`,
+    undefined,
+    { method: "DELETE" },
   );
 }
 

@@ -39,10 +39,20 @@ export function AnnotationSheet({
   tx,
   onClose,
   onSave,
+  duplicateRelationship,
+  onReverseDuplicate,
+  onOpenRelated,
 }: {
   tx: Transaction | null;
   onClose: () => void;
   onSave: (id: number, payload: AnnotationPayload) => Promise<void>;
+  duplicateRelationship?: {
+    correctionId: number;
+    role: "canonical" | "duplicate";
+    relatedTransactionId: number;
+  };
+  onReverseDuplicate?: (correctionId: number) => void;
+  onOpenRelated?: (transactionId: number) => void;
 }) {
   const [category, setCategory] = useState("");
   const [merchant, setMerchant] = useState("");
@@ -181,7 +191,41 @@ export function AnnotationSheet({
               {tx.refund_reason ? ` · ${tx.refund_reason}` : ""}
             </p>
           ) : null}
-
+          {duplicateRelationship ? (
+            <div className="mb-3 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900">
+              <div className="font-semibold">
+                {duplicateRelationship.role === "canonical" ? "Canonical" : "Marked duplicate"}
+              </div>
+              <div className="mt-1">
+                Linked to transaction {duplicateRelationship.relatedTransactionId}. Both imported records
+                remain visible; the marked duplicate is excluded from spending and income totals.
+              </div>
+              {onOpenRelated ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenRelated(duplicateRelationship.relatedTransactionId)}
+                  className="mt-2 rounded-md border border-violet-300 bg-background px-2.5 py-1.5 text-xs font-medium text-violet-900 hover:bg-violet-100"
+                >
+                  View related transaction
+                </button>
+              ) : null}
+              {onReverseDuplicate ? (
+                <button
+                  type="button"
+                  onClick={() => onReverseDuplicate(duplicateRelationship.correctionId)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onReverseDuplicate(duplicateRelationship.correctionId);
+                    }
+                  }}
+                  className="mt-2 rounded-md border border-violet-300 bg-background px-2.5 py-1.5 text-xs font-medium text-violet-900 hover:bg-violet-100"
+                >
+                  Reverse duplicate correction
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <Field label="Category">
             <CategoryPicker value={category} onChange={setCategory} placeholder="Choose a category" />
             <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">

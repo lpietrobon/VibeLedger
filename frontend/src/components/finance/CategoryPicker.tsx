@@ -180,7 +180,10 @@ export function CategoryPicker({
 
   const catalog = useQuery({
     queryKey: ["category-catalog"],
-    queryFn: getCategoryCatalog,
+    // Keep the client lookup lazy. Besides avoiding unnecessary requests while
+    // the picker is closed, this lets lightweight consumers mock the closed
+    // picker without having to provide an unused catalog method.
+    queryFn: () => getCategoryCatalog(),
     enabled: open,
     staleTime: 5 * 60 * 1000,
   });

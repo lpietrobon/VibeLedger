@@ -111,12 +111,25 @@ export type Transaction = {
   refund_status?: "confirmed" | "likely" | "not_refund" | null;
   refund_match_transaction_id?: number | null;
   refund_reason?: string | null;
+  /** Active manual duplicate-correction role, when present. */
+  duplicate_status?: "canonical" | "duplicate";
   annotation: {
     user_category?: string | null;
     merchant_name_override?: string | null;
     notes?: string | null;
     reviewed: boolean;
   };
+};
+
+export type DuplicateCorrection = {
+  id: number;
+  canonical_transaction_id: number | null;
+  duplicate_transaction_id: number | null;
+  status: "active" | "reversed" | "invalidated";
+};
+
+export type DuplicateCorrectionsResponse = {
+  items: DuplicateCorrection[];
 };
 
 export type TransactionsResponse = {
