@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-08T14:19:31+00:00_
+_Last scan: 2026-09-08T14:27:02+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -34,7 +34,7 @@ dependencies are done; a blank assignment means unassigned.
 | [PI-01](epics/020-product-integrity/tasks/PI-01.md) | 020-product-integrity | done |  |  | Retire the legacy Streamlit application |
 | [PI-02](epics/020-product-integrity/tasks/PI-02.md) | 020-product-integrity | todo | PI-13 |  | Make category summary drilldowns consistent |
 | [PI-03](epics/020-product-integrity/tasks/PI-03.md) | 020-product-integrity | done |  |  | Define the manual duplicate-correction contract |
-| [PI-04](epics/020-product-integrity/tasks/PI-04.md) | 020-product-integrity | todo | PI-03, PI-15 |  | Implement durable duplicate relationships and accounting exclusion |
+| [PI-04](epics/020-product-integrity/tasks/PI-04.md) | 020-product-integrity | done | PI-03, PI-15 | pi04_duplicate_implementation | Implement durable duplicate relationships and accounting exclusion |
 | [PI-05](epics/020-product-integrity/tasks/PI-05.md) | 020-product-integrity | todo | PI-16, PI-17 |  | Add the duplicate correction and reversal workflow |
 | [PI-06](epics/020-product-integrity/tasks/PI-06.md) | 020-product-integrity | todo |  |  | Diagnose credit-card-payment contributions in Sankey |
 | [PI-07](epics/020-product-integrity/tasks/PI-07.md) | 020-product-integrity | todo | PI-06, PI-19 |  | Resolve the diagnosed card-payment Sankey gap |

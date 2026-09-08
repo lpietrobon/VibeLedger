@@ -25,6 +25,7 @@ from app.models.models import (
     CategoryDecisionEvent,
     CategoryRule,
     ConnectSession,
+    DuplicateCorrection,
     Item,
     RejectedTransferPair,
     RecurringOverride,
@@ -43,6 +44,7 @@ from app.schemas.plaid import (
     CategoryRuleRecomputeRequest,
     ConnectCompleteRequest,
     CreateConnectSessionRequest,
+    DuplicateCorrectionCreateRequest,
     PatchAccountRequest,
     PatchAnnotationRequest,
     RecurringStatusRequest,
@@ -62,6 +64,12 @@ from app.services.accounting import (
     is_refund,
     posted_activity,
     reporting_scope,
+)
+from app.services.duplicate_corrections import (
+    create_correction,
+    invalidate_missing_endpoints,
+    mark_invalidated,
+    response as duplicate_response,
 )
 from app.services.refund_detector import classify_refunds
 from app.services.category_catalog import merge_catalog
@@ -372,6 +380,8 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
     txn_ids = [t.id for t in db.query(Transaction.id).filter(Transaction.item_id == item_id)]
 
     if txn_ids:
+        for txn_id in txn_ids:
+            mark_invalidated(db, txn_id, "source item removed")
         db.query(TransactionAnnotation).filter(
             TransactionAnnotation.refund_match_transaction_id.in_(txn_ids)
         ).update(
@@ -419,6 +429,41 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "removed", "item_id": item_id}
+
+
+@router.get("/duplicate-corrections")
+def list_duplicate_corrections(db: Session = Depends(get_db)):
+    invalidate_missing_endpoints(db)
+    db.commit()
+    corrections = db.query(DuplicateCorrection).order_by(DuplicateCorrection.id).all()
+    return {"items": [duplicate_response(correction) for correction in corrections]}
+
+
+@router.post("/duplicate-corrections")
+def create_duplicate_correction(
+    payload: DuplicateCorrectionCreateRequest,
+    db: Session = Depends(get_db),
+):
+    correction = create_correction(
+        db,
+        payload.canonical_transaction_id,
+        payload.duplicate_transaction_id,
+    )
+    db.commit()
+    return duplicate_response(correction)
+
+
+@router.delete("/duplicate-corrections/{correction_id}")
+def reverse_duplicate_correction(correction_id: int, db: Session = Depends(get_db)):
+    correction = db.get(DuplicateCorrection, correction_id)
+    if not correction:
+        raise HTTPException(status_code=404, detail="duplicate correction not found")
+    if correction.status != "active":
+        raise HTTPException(status_code=400, detail="duplicate correction is not active")
+    correction.status = "reversed"
+    correction.invalidation_reason = None
+    db.commit()
+    return {"id": correction.id, "status": correction.status}
 
 
 @router.post("/sync/item/{item_id}/historical")
@@ -716,6 +761,7 @@ def list_transactions(
     # silently goes missing from the totals with no visible cause.
     page_ids = [row[0].id for row in rows]
     pair_by_txn: dict[int, tuple[int, bool]] = {}
+    duplicate_by_txn: dict[int, str] = {}
     if page_ids:
         pair_rows = db.query(
             TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id, TransferPair.confirmed
@@ -728,6 +774,19 @@ def list_transactions(
         for pair_id, out_id, in_id, confirmed in pair_rows:
             pair_by_txn[out_id] = (pair_id, confirmed)
             pair_by_txn[in_id] = (pair_id, confirmed)
+        duplicate_rows = db.query(
+            DuplicateCorrection.canonical_transaction_id,
+            DuplicateCorrection.duplicate_transaction_id,
+        ).filter(
+            DuplicateCorrection.status == "active",
+            or_(
+                DuplicateCorrection.canonical_transaction_id.in_(page_ids),
+                DuplicateCorrection.duplicate_transaction_id.in_(page_ids),
+            ),
+        ).all()
+        for canonical_id, duplicate_id in duplicate_rows:
+            duplicate_by_txn[canonical_id] = "canonical"
+            duplicate_by_txn[duplicate_id] = "duplicate"
 
     return {
         "total": total,
@@ -751,6 +810,7 @@ def list_transactions(
                 "transfer_pair_id": pair_by_txn.get(t.id, (None, None))[0],
                 "is_transfer": pair_by_txn.get(t.id, (None, False))[1] is True,
                 "is_transfer_candidate": pair_by_txn.get(t.id, (None, False))[1] is False and t.id in pair_by_txn,
+                "duplicate_status": duplicate_by_txn.get(t.id),
                 "refund_status": a.refund_status if a else None,
                 "refund_match_transaction_id": a.refund_match_transaction_id if a else None,
                 "refund_reason": a.refund_reason if a else None,

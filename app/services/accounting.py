@@ -8,9 +8,9 @@ import calendar
 from datetime import date, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import case, func, select
+from sqlalchemy import case, exists, func, select
 
-from app.models.models import Account, Transaction, TransactionAnnotation, TransferPair
+from app.models.models import Account, DuplicateCorrection, Transaction, TransactionAnnotation, TransferPair
 
 
 def comparison_bounds(reporting_date: date, granularity: str = "monthly"):
@@ -111,9 +111,18 @@ def exclude_confirmed_transfers(query):
     )
 
 
+def exclude_active_duplicates(query):
+    """Exclude only the explicitly marked duplicate from financial queries."""
+    return query.filter(~exists(select(1).where(
+        DuplicateCorrection.status == "active",
+        DuplicateCorrection.duplicate_transaction_id == Transaction.id,
+    )))
+
+
 def posted_activity(query, *, include_transfers: bool = False):
     query = query.filter(Transaction.pending.is_(False))
-    return query if include_transfers else exclude_confirmed_transfers(query)
+    query = query if include_transfers else exclude_confirmed_transfers(query)
+    return exclude_active_duplicates(query)
 
 
 def is_refund():

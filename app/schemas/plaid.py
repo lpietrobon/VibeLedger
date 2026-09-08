@@ -57,6 +57,11 @@ class TransferCreateRequest(BaseModel):
     txn_b_id: int
 
 
+class DuplicateCorrectionCreateRequest(BaseModel):
+    canonical_transaction_id: int
+    duplicate_transaction_id: int
+
+
 class CategoryRuleDraft(BaseModel):
     rank: int = 0
     enabled: bool = True

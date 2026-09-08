@@ -92,6 +92,15 @@ def _purge_orphan_transaction_rows(engine: Engine) -> None:
                 "(SELECT id FROM transactions)"
             ))
 
+        if "duplicate_corrections" in tables:
+            conn.execute(text(
+                "UPDATE duplicate_corrections SET status = 'invalidated', "
+                "invalidation_reason = 'source transaction removed' "
+                "WHERE status = 'active' AND ("
+                "canonical_transaction_id NOT IN (SELECT id FROM transactions) OR "
+                "duplicate_transaction_id NOT IN (SELECT id FROM transactions))"
+            ))
+
 
 def apply_patches(engine: Engine) -> None:
     if not _has_column(engine, "transaction_annotations", "is_transfer_override"):
@@ -185,6 +194,11 @@ def apply_patches(engine: Engine) -> None:
     if unhashed:
         _backfill_txn_hashes(engine)
 
+    # Source rows can be removed outside the ORM (for example during recovery).
+    # Keep the durable duplicate decision, but never leave an active exclusion
+    # pointing at a missing transaction.
+    _purge_orphan_transaction_rows(engine)
+
     # effective_transactions view — single canonical source for all COALESCE
     # definitions. Recreated on every startup (safe: views hold no data). The
     # Plaid->friendly category CASE is generated from the shared PLAID_FRIENDLY_MAP
@@ -273,8 +287,12 @@ def apply_patches(engine: Engine) -> None:
             )
             SELECT effective.*,
                 CASE WHEN pending = 0 AND is_transfer = 0 AND (amount > 0 OR is_refund = 1)
+                    AND NOT EXISTS (SELECT 1 FROM duplicate_corrections dc
+                        WHERE dc.status = 'active' AND dc.duplicate_transaction_id = id)
                     THEN amount ELSE 0 END AS expense_amount,
                 CASE WHEN pending = 0 AND is_transfer = 0 AND amount < 0 AND is_refund = 0
+                    AND NOT EXISTS (SELECT 1 FROM duplicate_corrections dc
+                        WHERE dc.status = 'active' AND dc.duplicate_transaction_id = id)
                     THEN -amount ELSE 0 END AS income_amount
             FROM effective
         """))

@@ -21,6 +21,7 @@ from app.models.models import (
 )
 from app.services.plaid_client import PlaidClient
 from app.services.refund_detector import classify_refunds
+from app.services.duplicate_corrections import mark_invalidated, reapply_relinked
 from app.services.security import decrypt_token
 from app.services.transfer_detector import clear_auto_pairs, detect_candidates
 from app.services.txn_fingerprint import compute_txn_hash
@@ -153,6 +154,10 @@ class SyncService:
                 self._refresh_accounts_and_snapshots(db, item_id, access_token)
                 data = self.client.get_historical_transactions(access_token, start_date, end_date)
                 added_count, modified_count, removed_count = self._apply_changes(db, item_id, {"added": data})
+                # Historical sync is also the relink path. Reattach only when
+                # both provider identities resolve uniquely and still satisfy
+                # the immutable duplicate contract.
+                reapply_relinked(db)
         except Exception as exc:
             now = utcnow()
             run.status = "error"
@@ -335,6 +340,7 @@ class SyncService:
             ).first()
             if existing:
                 removed_count += 1
+                mark_invalidated(db, existing.id, "source transaction removed")
                 self._delete_dependent_rows(db, existing.id)
                 db.delete(existing)
 
@@ -342,6 +348,7 @@ class SyncService:
 
     def _clear_reconciliation(self, db: Session, txn_id: int) -> None:
         """Source changes invalidate derived matches without discarding user notes."""
+        mark_invalidated(db, txn_id, "provider changed source transaction")
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id == txn_id, TransferPair.txn_in_id == txn_id)
         ).delete(synchronize_session=False)
@@ -399,6 +406,7 @@ class SyncService:
         of the annotation is not lost — it lives on in annotation_fingerprints
         and is reapplied if the transaction comes back.
         """
+        mark_invalidated(db, txn_id, "source transaction removed")
         db.query(TransactionAnnotation).filter(
             TransactionAnnotation.refund_match_transaction_id == txn_id
         ).update(

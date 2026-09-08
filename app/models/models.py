@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     UniqueConstraint,
     Index,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -72,6 +73,40 @@ class Transaction(Base):
     raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     txn_hash: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     txn_occurrence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class DuplicateCorrection(Base):
+    """A deliberate, reversible relationship between two imported records.
+
+    Endpoint IDs are retained after source deletion so the audit record remains
+    inspectable.  ``evidence_json`` stores provider identities and the source
+    fingerprint needed to reattach a decision after an item is relinked.
+    """
+
+    __tablename__ = "duplicate_corrections"
+    __table_args__ = (
+        Index(
+            "uq_duplicate_correction_canonical_active",
+            "canonical_transaction_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+        ),
+        Index(
+            "uq_duplicate_correction_duplicate_active",
+            "duplicate_transaction_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    canonical_transaction_id: Mapped[int | None] = mapped_column(nullable=True, index=True)
+    duplicate_transaction_id: Mapped[int | None] = mapped_column(nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    evidence_json: Mapped[str] = mapped_column(Text, default="{}")
+    invalidation_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
