@@ -47,12 +47,14 @@ PLAID_PRODUCTS=transactions
 PLAID_COUNTRY_CODES=US
 PLAID_REDIRECT_URI=
 PLAID_USE_MOCK=false
-APP_BASE_URL=https://<your-public-url>
+APP_BASE_URL=https://<machine>.example.ts.net:8444/vibeledger
 TOKEN_ENCRYPTION_KEY=<fernet-key>
 ```
 
 - `TOKEN_ENCRYPTION_KEY`: encrypts/decrypts stored Plaid `access_token` values in DB (Fernet key). Validated at startup.
 - `PLAID_USE_MOCK=false`: enables real Plaid API calls. Set `true` only for local development without Plaid credentials.
+- `APP_BASE_URL`: the complete browser-visible base URL, including a non-default
+  port and `/vibeledger` prefix when used. Do not add a trailing slash.
 
 Generate a Fernet key:
 
@@ -140,85 +142,41 @@ Then browse to `https://<machine>.tail1234.ts.net/vibeledger/dash/` from any tai
 
 ## Production deployment
 
+The supported production shape, systemd user-service templates, one-command
+deployment procedure, and deployment doctor are documented in
+[`docs/deployment.md`](docs/deployment.md). Use that procedure so API, dashboard,
+and React are rebuilt/restarted and verified as one release.
+
 ### Tailscale HTTPS (recommended)
 
-Use `tailscale serve` to proxy the app with automatic HTTPS:
+Keep all three processes on loopback and use Tailscale Serve as the HTTPS edge:
 
 ```bash
-# Start the app on localhost
-uvicorn app.main:app --host 127.0.0.1 --port 8000
-
-# In another shell, expose via Tailscale with HTTPS
-tailscale serve --bg https / http://127.0.0.1:8000
+tailscale serve --bg --https=8444 --set-path /vibeledger \
+  http://127.0.0.1:5173/vibeledger
+tailscale serve --bg --https=8444 --set-path /vibeledger/dash \
+  http://127.0.0.1:8501/vibeledger/dash
 ```
 
-The app is now reachable at `https://<your-machine>.tail1234.ts.net` with a valid TLS certificate, accessible only from your Tailnet.
-
-**Bind to Tailscale IP only (alternative):**
+Use the actual Serve port in the environment file:
 
 ```bash
-uvicorn app.main:app --host $(tailscale ip -4) --port 8000
+APP_BASE_URL=https://<machine>.example.ts.net:8444/vibeledger
 ```
 
-### Running as a systemd service (optional)
+The port may be omitted only when Serve listens on standard HTTPS port 443.
+Ordinary phone access stays tailnet-only and does not need Funnel.
 
-If you want the app to start on boot and restart on failure, create a systemd unit:
+### Running as systemd user services
 
-```ini
-# /etc/systemd/system/vibeledger.service
-[Unit]
-Description=VibeLedger
-After=network-online.target tailscaled.service
-Wants=network-online.target
+Version-controlled templates for all three processes live in `deploy/systemd/`.
+See [`docs/deployment.md`](docs/deployment.md) for rendering and installation.
 
-[Service]
-Type=simple
-User=<your-user>
-WorkingDirectory=/path/to/VibeLedger
-EnvironmentFile=/path/to/VibeLedger/.env
-ExecStart=/path/to/VibeLedger/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-And an optional sibling unit for the dashboard:
-
-```ini
-# /etc/systemd/system/vibeledger-dash.service
-[Unit]
-Description=VibeLedger dashboard
-After=vibeledger.service
-
-[Service]
-Type=simple
-User=<your-user>
-WorkingDirectory=/path/to/VibeLedger
-EnvironmentFile=/path/to/VibeLedger/.env
-ExecStart=/path/to/VibeLedger/.venv/bin/streamlit run Spend.py --server.address 127.0.0.1 --server.port 8501 --server.headless true --server.baseUrlPath /vibeledger/dash --browser.gatherUsageStats false
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then enable and start:
+Deploy and verify the complete release with:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now vibeledger vibeledger-dash
-```
-
-### Recommended env vars for production
-
-```bash
-VIBELEDGER_API_TOKEN=<strong-random-token>
-ALLOWED_HOSTS=<your-machine>.tail1234.ts.net
-SYNC_INTERVAL_HOURS=0
-APP_BASE_URL=https://<your-machine>.tail1234.ts.net
+VIBELEDGER_ENV_FILE="$HOME/.config/vibeledger/vibeledger.env" \
+  ./scripts/deploy.sh main
 ```
 
 ## Notes
