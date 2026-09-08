@@ -4,10 +4,13 @@ import tempfile
 _tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp.close()
 
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{_tmp.name}")
-os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
-os.environ.setdefault("PLAID_USE_MOCK", "true")
-os.environ.setdefault("VIBELEDGER_API_TOKEN", "test-token")
+# Test isolation must override inherited deployment settings.  Using setdefault
+# here allowed a shell with DATABASE_URL already exported to run destructive
+# reset_db fixtures against that database.
+os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
+os.environ["TOKEN_ENCRYPTION_KEY"] = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+os.environ["PLAID_USE_MOCK"] = "true"
+os.environ["VIBELEDGER_API_TOKEN"] = "test-token"
 
 import pytest
 
