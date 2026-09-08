@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.models import (
@@ -23,22 +23,52 @@ REVERSED = "reversed"
 INVALIDATED = "invalidated"
 
 
-def _currency(txn: Transaction, account: Account) -> str | None:
-    """Return only trustworthy reporting currency evidence."""
-    value = None
-    if txn.raw_json:
+def _currency_from_raw(raw_json: str | None, account_currency: str | None) -> str | None:
+    """Return currency only when provider and account evidence is compatible."""
+    provider = None
+    if raw_json:
         try:
-            raw = json.loads(txn.raw_json)
+            raw = json.loads(raw_json)
         except (TypeError, ValueError):
             return None
-        value = raw.get("iso_currency_code")
-        unofficial = raw.get("unofficial_currency_code")
-        if unofficial:
+        provider = raw.get("iso_currency_code")
+        if raw.get("unofficial_currency_code"):
             return None
-    value = value or account.currency
-    if not value or not str(value).strip():
+
+    provider = str(provider).strip().upper() if provider and str(provider).strip() else None
+    account = str(account_currency).strip().upper() if account_currency and str(account_currency).strip() else None
+    if provider and account and provider != account:
         return None
-    return str(value).strip().upper()
+    return provider or account
+
+
+def _currency(txn: Transaction, account: Account) -> str | None:
+    """Return only trustworthy reporting currency evidence."""
+    return _currency_from_raw(txn.raw_json, account.currency)
+
+
+def transaction_currency(txn: Transaction, account: Account) -> str | None:
+    """Expose the same source-currency interpretation to sync lifecycle code."""
+    return _currency(txn, account)
+
+
+def payload_currency(raw_json: str | None, account: Account) -> str | None:
+    """Interpret incoming provider currency before it is written to a row."""
+    return _currency_from_raw(raw_json, account.currency)
+
+
+def active_duplicate_ids(db: Session) -> set[int]:
+    """Return duplicate endpoints excluded from downstream matching detectors."""
+    return {
+        txn_id
+        for txn_id in db.execute(
+            select(DuplicateCorrection.duplicate_transaction_id).where(
+                DuplicateCorrection.status == ACTIVE,
+                DuplicateCorrection.duplicate_transaction_id.is_not(None),
+            )
+        ).scalars()
+        if txn_id is not None
+    }
 
 
 def _snapshot(txn: Transaction, account: Account) -> dict:
@@ -119,7 +149,11 @@ def validate_pair(db: Session, canonical_id: int, duplicate_id: int) -> tuple[Tr
             TransactionAnnotation.refund_match_transaction_id.in_([canonical.id, duplicate.id]),
         )
     ).all()
-    if any(a.refund_status in {"confirmed", "likely"} for a in annotations):
+    if any(
+        a.refund_status in {"confirmed", "likely"}
+        or a.refund_match_transaction_id in {canonical.id, duplicate.id}
+        for a in annotations
+    ):
         raise HTTPException(status_code=400, detail="refund-related transactions must be resolved first")
     return canonical, duplicate, canonical_account, duplicate_account
 

@@ -30,6 +30,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.models import Account, RejectedTransferPair, Transaction, TransferPair
+from app.services.duplicate_corrections import active_duplicate_ids
 
 
 MAX_POSTING_GAP_DAYS = 14
@@ -153,12 +154,14 @@ def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
     rejected = _rejected_pairs(db)
 
     # Pending rows are transient and their amounts can still change.
+    active_duplicates = active_duplicate_ids(db)
     txns = (
         db.query(Transaction)
         .filter(Transaction.pending == False)  # noqa: E712
         .order_by(Transaction.date.asc(), Transaction.id.asc())
         .all()
     )
+    txns = [txn for txn in txns if txn.id not in active_duplicates]
 
     # Index inflows by absolute amount so matching is a lookup rather than a
     # full scan per outflow (this used to be O(n^2) over the whole ledger).

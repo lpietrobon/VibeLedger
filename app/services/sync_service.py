@@ -21,7 +21,12 @@ from app.models.models import (
 )
 from app.services.plaid_client import PlaidClient
 from app.services.refund_detector import classify_refunds
-from app.services.duplicate_corrections import mark_invalidated, reapply_relinked
+from app.services.duplicate_corrections import (
+    mark_invalidated,
+    payload_currency,
+    reapply_relinked,
+    transaction_currency,
+)
 from app.services.security import decrypt_token
 from app.services.transfer_detector import clear_auto_pairs, detect_candidates
 from app.services.txn_fingerprint import compute_txn_hash
@@ -312,11 +317,15 @@ class SyncService:
                 if not changed:
                     continue
 
+                old_account = db.get(Account, existing.account_id)
+                old_currency = transaction_currency(existing, old_account) if old_account else None
+                new_currency = payload_currency(values["raw_json"], account)
                 if (
                     existing.amount != values["amount"]
                     or existing.date != tx_date
                     or existing.account_id != account.id
                     or existing.pending != values["pending"]
+                    or old_currency != new_currency
                 ):
                     self._clear_reconciliation(db, existing.id)
 
@@ -375,6 +384,8 @@ class SyncService:
         ]
         if not txn_ids:
             return
+        for txn_id in txn_ids:
+            mark_invalidated(db, txn_id, "provider changed source currency")
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id.in_(txn_ids), TransferPair.txn_in_id.in_(txn_ids))
         ).delete(synchronize_session=False)
