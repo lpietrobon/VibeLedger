@@ -1,10 +1,13 @@
 # Roadmap
 
-Start with [_registry.md](_registry.md), then open the relevant epic and task. The
-active priority is [trustworthy cashflow](epics/010-trustworthy-cashflow/_epic.md).
-Read its [spirit](epics/010-trustworthy-cashflow/spirit.md) before choosing an
-implementation. The [earlier feature backlog](../finance-intelligence-roadmap.md)
-is preserved and deferred; it is not the current execution queue.
+Start with [_registry.md](_registry.md), then open the relevant epic and task.
+[Trustworthy cashflow](epics/010-trustworthy-cashflow/_epic.md) is complete. The
+planned epics are [product integrity and cleanup](epics/020-product-integrity/_epic.md)
+and [inspectable aggregates](epics/030-inspectable-aggregates/_epic.md), with the
+explicit cross-epic dependency recorded in their task metadata. Read an
+epic's `spirit.md` before choosing an implementation. The
+[earlier feature backlog](../finance-intelligence-roadmap.md) is preserved and
+deferred; it is not the current execution queue.
 
 Earlier partial work is inventoried in the epic's
 [recovered progress report](epics/010-trustworthy-cashflow/artifacts/CF-01-recovered-progress.md).
@@ -47,8 +50,10 @@ documents in `artifacts/` are not tasks.
   before completion; append dated entries to the execution log.
 - One coordinator owns changes to the registry and epic scope. Independent
   verification is performed by someone other than the implementer of that slice.
-- For this setup, publish to `pr-22` as requested. Future parallel implementation
-  should use isolated task branches/worktrees and coordinated integration.
+- PR #22 has been merged. Base new work on the repository's current canonical
+  branch, rechecking remote state before creating an implementation branch. Future
+  parallel implementation should use isolated task branches/worktrees and
+  coordinated integration.
 - On a task pivot, retain the old file in place, mark it `superseded`, set
   `superseded_by` where applicable, and create a new ID. Never reuse IDs or delete
   history. Superseding an epic also requires a revision-log explanation.

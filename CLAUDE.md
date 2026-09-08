@@ -1,6 +1,6 @@
 # VibeLedger
 
-Single-user personal finance ledger. FastAPI + SQLite + Plaid, with a multipage Streamlit dashboard (Overview / Transactions / Spending / Cashflow / Accounts, plus Recurring / Flow / Transfers / Rules / Experimental / Add account under "More") served alongside the API.
+Single-user personal finance ledger. FastAPI + SQLite + Plaid with a React/Vite product UI served alongside the API.
 
 ## Roadmap
 
@@ -24,35 +24,31 @@ existing cashflow correctness is hardened.
 ```bash
 python3 -m venv .venv          # requires Python 3.11+
 source .venv/bin/activate
-pip install -e '.[dev,dashboard]'
+pip install -e '.[dev]'
 ```
 
-- `dev` is enough for tests/API work; `dashboard` extra adds Streamlit/pandas/requests.
 - If the venv breaks after moving the repo: `rm -rf .venv && python3 -m venv .venv && source .venv/bin/activate && pip install -e .[dev]`
 
 ## Running the app
 
-**Do not run uvicorn/streamlit manually** (`nohup`+`&` won't survive agent exec boundaries). Two systemd **user** services do this, with lingering enabled so they survive reboot/logout:
+**Do not run uvicorn manually** (`nohup`+`&` won't survive agent exec boundaries). The systemd **user** service does this, with lingering enabled so it survives reboot/logout:
 
 | Service | Port | What | URL |
 |---|---|---|---|
 | `vibeledger.service` | 8000 | FastAPI (`--reload`, `--root-path /vibeledger`) | `/vibeledger/` |
-| `vibeledger-dash.service` | 8501 | Streamlit dashboard | `/vibeledger/dash/` |
 
-- **First action for agents:** `curl http://127.0.0.1:8000/health` and `curl http://127.0.0.1:8501/vibeledger/dash/_stcore/health` — both services are normally already up. Only restart on failure.
-- Restart after code changes: `systemctl --user restart vibeledger` (app/.env) or `vibeledger-dash` (dashboard files).
-- Logs: `journalctl --user -u vibeledger -n 100` (also `/tmp/vibeledger.log`); same pattern for `-dash`.
-- **Never `pkill -f uvicorn/streamlit`** — use `systemctl --user restart <service>`.
+- **First action for agents:** `curl http://127.0.0.1:8000/health`. Restart only on failure.
+- Restart after code changes: `systemctl --user restart vibeledger`.
+- Logs: `journalctl --user -u vibeledger -n 100` (also `/tmp/vibeledger.log`).
+- **Never `pkill -f uvicorn`** — use `systemctl --user restart vibeledger`.
 - Edited a unit file? `systemctl --user daemon-reload` first.
 - Requires `.env` (see `.env.example`); app refuses to start without `TOKEN_ENCRYPTION_KEY` (Fernet) and `VIBELEDGER_API_TOKEN`.
 
 **Tailnet access** (already configured, persists across reboots — don't re-run unless routes are removed):
 ```bash
 sudo tailscale serve --bg --set-path /vibeledger http://127.0.0.1:8000
-sudo tailscale serve --bg --set-path /vibeledger/dash http://127.0.0.1:8501/vibeledger/dash
 ```
-- `https://contabo.tail6fb821.ts.net/vibeledger/` → API, `.../vibeledger/dash/` → dashboard.
-- The dashboard target URL repeats `/vibeledger/dash` because `--set-path` strips that prefix before proxying, and Streamlit's `--server.baseUrlPath` expects it back. The API doesn't need this trick (uvicorn `--root-path` accepts a stripped prefix).
+- `https://contabo.tail6fb821.ts.net/vibeledger/` → API and React UI.
 - `.env`'s `APP_BASE_URL` must be exactly `https://contabo.tail6fb821.ts.net/vibeledger` (no trailing slash) — used to build Plaid Link `connect_url`.
 
 **Troubleshooting:**
@@ -111,22 +107,8 @@ app/
     category_resolver.py     # Rule compilation + Plaid->friendly category map (shared by API and SQL view)
     category_catalog.py      # DEFAULT_CATEGORIES + merge of ledger/rule/default vocab for pickers (pure)
     search_query.py          # Canonical transaction search grammar (pure parser)
-Spend.py                     # Streamlit "Overview" entry page (net worth, month spend/income, needs-attention)
-dashboard_lib.py             # Cached SQLite loaders + HTTP helpers for mutations + shared nav/filters
-pages/
-  0_Transfers.py             # Review queue: confirm/unpair, manual pairing
-  1_Accounts.py              # Balances grouped by type, net worth estimate
-  2_Cashflow.py              # Income, expenses, and net cashflow trend
-  2_Spending.py              # Spending analysis: category breakdown, comparison, drill-down
-  3_Cashflow_Sankey.py       # Income allocation into top-level category buckets
-  4_Experimental.py          # Month-over-month movers and calendar heatmap
-  5_Rules.py                 # Category rule management
-  6_Transactions.py          # Transaction browsing and annotation
-  7_Debt_and_Cash_Runway.py  # Placeholder for debt payoff and runway planning
-  8_Recurring.py             # Subscriptions & recurring payments review (reads /analytics/recurring)
-  9_Add_Account.py           # Launch Plaid Link to connect a new bank account, then sync
+frontend/                    # Mobile-first React/Vite product UI;
 analytics/                   # Standalone ad-hoc plotting scripts (not part of the dashboard app)
-frontend/                    # Mobile-first React/Vite app (at parity with Streamlit for daily flows);
                              #   thin client — all analytics come from /analytics/* endpoints. See frontend/README.md.
 scripts/
   connect_funnel.sh          # Tailscale Funnel automation for connect flow
@@ -178,11 +160,9 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 - **Unpairing is remembered.** `DELETE /transfers/{id}` records the combination in `rejected_transfer_pairs`, because detection re-runs after every sync — without it an unpaired false positive reappears immediately and the review page is a treadmill. Manually pairing the same two transactions clears the rejection.
 - Matching is deliberately conservative but **not precise**: with only amount + date + different-account it cannot tell a real transfer from two unrelated transactions of the same size (a rent payment vs a card payment). Accepted for now — the mitigation is visibility (Transfer badge in the transactions list) plus durable manual correction.
 
-**Dashboard:**
-- Reads SQLite directly (cached, fast); writes go through the FastAPI endpoints (auth/validation/transfer logic stay centralized). Server-computed analytics (e.g. the Recurring page) read via the API so the logic isn't duplicated in the dashboard.
-- **Add account** (under "More") drives the connect flow from the browser: it calls `POST /connect/sessions` and opens the returned `connect_url` (Plaid Link), then offers `POST /sync/all`. Same flow as the curl steps in "Linking a bank account" below.
+**React UI:**
+- Reads server-computed analytics and uses FastAPI endpoints for all writes.
 - Date range pickers default to the last 90 days even though more history may be loaded — widen the range to see older data.
-- Restart after changes: `systemctl --user restart vibeledger-dash`.
 
 ## Key design decisions
 

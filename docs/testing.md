@@ -3,7 +3,7 @@
 From the repository root, using its Python 3.12 environment:
 
 ```bash
-python -m pip install -e '.[dev,dashboard]'
+python -m pip install -e '.[dev]'
 python -m pytest --cov --cov-report=term-missing --cov-report=json:coverage.json
 cd frontend
 npm ci
@@ -15,7 +15,7 @@ npm run build
 Coverage includes all `app/` statements and branches, with no source omissions.
 The gate is **81.34% combined**, preserving the measured pre-hardening baseline
 (83.93% statements / 71.64% branches). This is backend coverage; it does not claim
-React or Streamlit coverage. Improve critical scenario coverage even when the
+React coverage is maintained separately from the backend gate. Improve critical scenario coverage even when the
 percentage passes. Snapshot measurements and accepted runs belong in the CF-04
 log; a failing suite is not successful just because coverage passes.
 
