@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-09T13:46:43+00:00_
+_Last scan: 2026-09-09T16:04:55+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -37,7 +37,7 @@ dependencies are done; a blank assignment means unassigned.
 | [PI-04](epics/020-product-integrity/tasks/PI-04.md) | 020-product-integrity | done | PI-03, PI-15 | pi04_duplicate_implementation | Implement durable duplicate relationships and accounting exclusion |
 | [PI-05](epics/020-product-integrity/tasks/PI-05.md) | 020-product-integrity | done | PI-16, PI-17 |  | Add the duplicate correction and reversal workflow |
 | [PI-06](epics/020-product-integrity/tasks/PI-06.md) | 020-product-integrity | done |  |  | Diagnose credit-card-payment contributions in Sankey |
-| [PI-07](epics/020-product-integrity/tasks/PI-07.md) | 020-product-integrity | todo | PI-06, PI-19 |  | Resolve the diagnosed card-payment Sankey gap |
+| [PI-07](epics/020-product-integrity/tasks/PI-07.md) | 020-product-integrity | done | PI-06, PI-19 |  | Resolve the diagnosed card-payment Sankey gap |
 | [PI-08](epics/020-product-integrity/tasks/PI-08.md) | 020-product-integrity | todo | PI-21 |  | Improve Sankey label readability |
 | [PI-09](epics/020-product-integrity/tasks/PI-09.md) | 020-product-integrity | done | PI-06 |  | Explore a simpler common-case Sankey composition |
 | [PI-10](epics/020-product-integrity/tasks/PI-10.md) | 020-product-integrity | todo | PI-07, PI-08, PI-09, PI-23 |  | Implement the simpler Sankey composition |
@@ -49,7 +49,7 @@ dependencies are done; a blank assignment means unassigned.
 | [PI-16](epics/020-product-integrity/tasks/PI-16.md) | 020-product-integrity | done | PI-04 |  | Independently verify duplicate accounting TDD compliance |
 | [PI-17](epics/020-product-integrity/tasks/PI-17.md) | 020-product-integrity | done | PI-16 |  | Pin duplicate-correction interaction behavior with failing tests |
 | [PI-18](epics/020-product-integrity/tasks/PI-18.md) | 020-product-integrity | done | PI-05 |  | Independently verify duplicate-correction UI TDD compliance |
-| [PI-19](epics/020-product-integrity/tasks/PI-19.md) | 020-product-integrity | todo | PI-06 |  | Pin the diagnosed card-payment Sankey regression with failing tests |
+| [PI-19](epics/020-product-integrity/tasks/PI-19.md) | 020-product-integrity | done | PI-06 |  | Pin the diagnosed card-payment Sankey regression with failing tests |
 | [PI-20](epics/020-product-integrity/tasks/PI-20.md) | 020-product-integrity | todo | PI-07 |  | Independently verify the card-payment Sankey correction |
 | [PI-21](epics/020-product-integrity/tasks/PI-21.md) | 020-product-integrity | todo |  |  | Pin Sankey readability and accessibility cases before visual changes |
 | [PI-22](epics/020-product-integrity/tasks/PI-22.md) | 020-product-integrity | todo | PI-08 |  | Independently verify Sankey readability TDD compliance |

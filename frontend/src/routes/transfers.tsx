@@ -75,6 +75,9 @@ export default function TransfersPage() {
       <p className="mb-3 text-sm text-muted-foreground">
         Possible transfers remain in income and spending until confirmed. Unpairing only removes the relationship; it does not delete either transaction.
       </p>
+      <p className="mb-3 text-sm text-muted-foreground">
+        Detection can only suggest a transfer when both posted sides appear in linked-account history. Unmatched payments remain counted and are not silently treated as transfers.
+      </p>
 
       <Section title="Transfer pairs">
         <div className="hidden md:block">
@@ -101,7 +104,9 @@ export default function TransfersPage() {
                     </div>
                     {item.gap_days ? (
                       <div className="text-xs text-muted-foreground">
-                        settles after {item.gap_days} day{item.gap_days === 1 ? "" : "s"}
+                        {item.gap_days > 0
+                          ? `settles after ${item.gap_days} day${item.gap_days === 1 ? "" : "s"}`
+                          : `card credit posted ${Math.abs(item.gap_days)} day${Math.abs(item.gap_days) === 1 ? "" : "s"} before outflow`}
                       </div>
                     ) : null}
                   </td>

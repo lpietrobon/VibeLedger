@@ -23,17 +23,116 @@ Plaid sign convention: positive = money leaving the account.
 """
 from __future__ import annotations
 
+import json
+import re
 from collections import defaultdict
 from decimal import Decimal
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.models import Account, RejectedTransferPair, Transaction, TransferPair
+from app.models.models import (
+    Account,
+    RejectedTransferPair,
+    Transaction,
+    TransactionAnnotation,
+    TransferPair,
+)
+from app.services.category_resolver import detailed_category
 from app.services.duplicate_corrections import active_duplicate_ids
 
 
 MAX_POSTING_GAP_DAYS = 14
+# Card issuers can post the credit to the card before the funding account's
+# outflow.  Keep this exception deliberately narrower than the manual-pair
+# validation window and the generic detector window: PI-06 observed gaps of up
+# to four days, while unrelated reverse-order equal amounts remain invalid.
+CARD_PAYMENT_REVERSE_GAP_DAYS = 4
+CARD_PAYMENT_CATEGORY = "FINANCE/CREDIT_CARD_PAYMENT"
+_PAYMENT_WORD = re.compile(r"\bpayment\b|\bautopay\b", re.IGNORECASE)
+
+
+def _is_checking(account: Account | None) -> bool:
+    return bool(
+        account
+        and (account.type or "").lower() == "depository"
+        and (account.subtype or "").lower().replace("_", " ") == "checking"
+    )
+
+
+def _is_credit_card(account: Account | None) -> bool:
+    return bool(
+        account
+        and (account.type or "").lower() == "credit"
+        and (account.subtype or "").lower().replace("_", " ") == "credit card"
+    )
+
+
+def _explicit_category(txn: Transaction, annotation: TransactionAnnotation | None) -> str | None:
+    if annotation and annotation.user_category:
+        return annotation.user_category
+    if annotation and annotation.rule_category:
+        return annotation.rule_category
+    return None
+
+
+def _provider_card_payment_detail(txn: Transaction) -> bool:
+    """Recognize Plaid's explicit credit-card-payment detail, if present."""
+    try:
+        raw = json.loads(txn.raw_json or "{}")
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(raw, dict):
+        return False
+    category = raw.get("personal_finance_category") or {}
+    if not isinstance(category, dict):
+        return False
+    detail = category.get("detailed") or ""
+    if not isinstance(detail, str):
+        return False
+    detail = detail.upper()
+    return "CREDIT_CARD" in detail and "PAYMENT" in detail
+
+
+def _has_payment_evidence(txn: Transaction, annotation: TransactionAnnotation | None) -> bool:
+    """Require explicit payment evidence on each leg of the card exception.
+
+    An exact user/rule category or provider detailed category is strongest.  A
+    provider description containing payment/autopay is retained as evidence for
+    issuers whose category detail is absent, as documented by PI-06.
+    """
+    category = (_explicit_category(txn, annotation) or "").upper()
+    if category == CARD_PAYMENT_CATEGORY:
+        return True
+    if _provider_card_payment_detail(txn):
+        return True
+    return bool(_PAYMENT_WORD.search(txn.name or "") or _PAYMENT_WORD.search(txn.merchant_name or ""))
+
+
+def _is_evidence_qualified_card_repayment(
+    db: Session,
+    out: Transaction,
+    inn: Transaction,
+) -> bool:
+    """Return true only for a checking outflow ↔ credit-card payment credit."""
+    out_account = db.get(Account, out.account_id)
+    in_account = db.get(Account, inn.account_id)
+    # The exception is specifically for a checking-account repayment whose
+    # receipt was posted on the credit-card side first.  A reverse credit-card
+    # outflow to checking is a different movement and must retain the generic
+    # posting-order guard.
+    if not (_is_checking(out_account) and _is_credit_card(in_account)):
+        return False
+
+    annotations = {
+        row.transaction_id: row
+        for row in db.query(TransactionAnnotation).filter(
+            TransactionAnnotation.transaction_id.in_([out.id, inn.id])
+        ).all()
+    }
+    return _has_payment_evidence(out, annotations.get(out.id)) and _has_payment_evidence(
+        inn, annotations.get(inn.id)
+    )
 
 
 def _paired_ids(db: Session) -> set[int]:
@@ -121,8 +220,13 @@ def validate_pair(
 
     gap = (inn.date - out.date).days
     if gap < 0:
-        raise ValueError("transfer outflow must post on or before its inflow")
-    if gap > max_gap_days:
+        if not _is_evidence_qualified_card_repayment(db, out, inn):
+            raise ValueError("transfer outflow must post on or before its inflow")
+        if abs(gap) > CARD_PAYMENT_REVERSE_GAP_DAYS:
+            raise ValueError(
+                f"card payment posting dates must be within {CARD_PAYMENT_REVERSE_GAP_DAYS} days"
+            )
+    elif gap > max_gap_days:
         raise ValueError(f"transfer posting dates must be within {max_gap_days} days")
 
     out_account = db.get(Account, out.account_id)
@@ -184,7 +288,9 @@ def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
                 out, inn = validate_pair(db, out_txn, in_txn, max_gap_days=window_days)
             except ValueError:
                 continue
-            gap = (inn.date - out.date).days
+            # Forward pairs have a non-negative gap; the card-payment exception
+            # can be reverse ordered, so rank all candidates by elapsed days.
+            gap = abs((inn.date - out.date).days)
             candidates_by_out[out.id].append((gap, inn))
             candidates_by_in[inn.id].append((gap, out))
 
