@@ -58,41 +58,58 @@ function buildGraph(data: CashflowSankey, expanded: string | null) {
   const links: Array<{ source: number; target: number; value: number; color: string }> = [];
   const push = (n: NodeDatum) => nodes.push(n) - 1;
 
-  const incomeIdx = push({ name: "Income", color: "#10b981", key: "__income_node__", expandable: false });
-  const availableIdx = push({ name: "Available cash", color: "#34d399", key: "__available__", expandable: false });
+  // The allocation hub is useful only when the server reports an exceptional
+  // source of funding. In the ordinary case, linking Income directly to the
+  // spending/savings destinations keeps the chart focused on the common story.
+  const hasExceptionStage = data.deficit > 0 || data.netRefundCredits > 0;
+  const incomeIdx = data.income > 0
+    ? push({ name: "Income", color: "#10b981", key: "__income_node__", expandable: false })
+    : null;
+  const availableIdx = hasExceptionStage
+    ? push({ name: "Available cash", color: "#34d399", key: "__available__", expandable: false })
+    : null;
 
   let deficitIdx: number | null = null;
-  if (data.deficit > 0) {
+  if (data.deficit > 0 && availableIdx !== null) {
     deficitIdx = push({ name: "Deficit funding", color: "#dc2626", key: "__deficit__", expandable: false });
     links.push({ source: deficitIdx, target: availableIdx, value: data.deficit, color: "rgba(220,38,38,0.35)" });
   }
 
-  if (data.netRefundCredits > 0) {
+  if (data.netRefundCredits > 0 && availableIdx !== null) {
     const refundIdx = push({ name: "Net refund credits", color: "#0ea5e9", key: "__refund_credits__", expandable: false });
     links.push({ source: refundIdx, target: availableIdx, value: data.netRefundCredits, color: "rgba(14,165,233,0.35)" });
   }
-  links.push({ source: incomeIdx, target: availableIdx, value: data.income, color: "rgba(16,185,129,0.35)" });
+  if (incomeIdx !== null) {
+    const target = hasExceptionStage ? availableIdx : incomeIdx;
+    // In the exception case income feeds the allocation stage. In the normal
+    // case this is intentionally no self-link; destinations are linked below.
+    if (target !== null && target !== incomeIdx) {
+      links.push({ source: incomeIdx, target, value: data.income, color: "rgba(16,185,129,0.35)" });
+    }
+  }
 
-  if (expanded === INCOME_KEY) {
+  if (expanded === INCOME_KEY && incomeIdx !== null) {
     for (const src of data.incomeSources) {
+      if (src.amount <= 0) continue;
       const i = push({ name: src.category, color: "#6ee7b7", key: `income:${src.category}`, expandable: false });
       links.push({ source: i, target: incomeIdx, value: src.amount, color: "rgba(16,185,129,0.35)" });
     }
   }
 
+  const allocationIdx = hasExceptionStage ? availableIdx : incomeIdx;
   const bucketIdx = new Map<string, number>();
   for (const bucket of data.buckets) {
+    if (allocationIdx === null || bucket.amount <= 0) continue;
     const color = BUCKET_COLORS[bucket.bucket] ?? BUCKET_COLOR_FALLBACK;
     const i = push({ name: bucket.bucket, color, key: `bucket:${bucket.bucket}`, expandable: bucket.categories.length > 0 });
     bucketIdx.set(bucket.bucket, i);
   }
 
-  const positiveNetSpend = data.positiveNetSpend || data.buckets.reduce((sum, bucket) => sum + bucket.amount, 0);
   for (const bucket of data.buckets) {
     const target = bucketIdx.get(bucket.bucket);
     if (target === undefined) continue;
-    if (positiveNetSpend > 0 && bucket.amount > 0) {
-      links.push({ source: availableIdx, target, value: bucket.amount, color: "rgba(16,185,129,0.35)" });
+    if (allocationIdx !== null && bucket.amount > 0) {
+      links.push({ source: allocationIdx, target, value: bucket.amount, color: "rgba(16,185,129,0.35)" });
     }
   }
 
@@ -102,21 +119,24 @@ function buildGraph(data: CashflowSankey, expanded: string | null) {
     if (bucket && source !== undefined) {
       const color = BUCKET_COLORS[bucket.bucket] ?? BUCKET_COLOR_FALLBACK;
       for (const cat of bucket.categories) {
+        if (cat.amount <= 0) continue;
         const i = push({ name: cat.category, color, key: `cat:${cat.category}`, expandable: false });
         links.push({ source, target: i, value: cat.amount, color: hexToRgba(color, 0.35) });
       }
     }
   }
 
-  if (data.savings > 0) {
+  if (data.savings > 0 && allocationIdx !== null) {
     const i = push({ name: "Savings", color: "#0ea5e9", key: "__savings__", expandable: false });
-    links.push({ source: availableIdx, target: i, value: data.savings, color: "rgba(14,165,233,0.35)" });
+    links.push({ source: allocationIdx, target: i, value: data.savings, color: "rgba(14,165,233,0.35)" });
   }
 
   const columns = [
-    (expanded === INCOME_KEY ? data.incomeSources.length : 1) + (data.deficit > 0 ? 1 : 0) + (data.netRefundCredits > 0 ? 1 : 0),
-    2,
-    data.buckets.length + (data.savings > 0 ? 1 : 0),
+    expanded === INCOME_KEY
+      ? data.incomeSources.filter((source) => source.amount > 0).length + (data.deficit > 0 ? 1 : 0) + (data.netRefundCredits > 0 ? 1 : 0)
+      : (incomeIdx !== null ? 1 : 0) + (data.deficit > 0 ? 1 : 0) + (data.netRefundCredits > 0 ? 1 : 0),
+    (incomeIdx !== null ? 1 : 0) + (availableIdx !== null ? 1 : 0),
+    bucketIdx.size + (data.savings > 0 && allocationIdx !== null ? 1 : 0),
     expanded && expanded !== INCOME_KEY ? (data.buckets.find((b) => b.bucket === expanded)?.categories.length ?? 0) : 0,
   ];
   const height = Math.min(760, Math.max(320, 42 * Math.max(...columns) + 60));
@@ -136,6 +156,9 @@ export default function SankeyChart({
   const { height, laidOutNodes, laidOutLinks } = useMemo(() => {
     if (!data.sankeySupported) return { height: 0, laidOutNodes: [], laidOutLinks: [] };
     const graph = buildGraph(data, expanded);
+    if (!graph.nodes.length || !graph.links.length) {
+      return { height: graph.height, laidOutNodes: [], laidOutLinks: [] };
+    }
     const generator = sankey<NodeDatum, LinkDatum>()
       .nodeWidth(14)
       .nodePadding(18)
