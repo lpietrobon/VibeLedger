@@ -1,0 +1,35 @@
+{
+  "currency": "USD",
+  "reporting_period": {
+    "start": "2032-04-01",
+    "end": "2032-04-30"
+  },
+  "categories": {
+    "aggregate": "FOOD/OTHER",
+    "parent": "FOOD",
+    "child": "FOOD/DINING"
+  },
+  "rows": [
+    { "id": "food-charge-1", "date": "2032-04-02", "amount": 40, "category": "FOOD/OTHER", "state": "posted-charge" },
+    { "id": "food-charge-2", "date": "2032-04-03", "amount": 25, "category": "FOOD/OTHER", "state": "posted-charge" },
+    { "id": "food-refund", "date": "2032-04-04", "amount": -10, "category": "FOOD/OTHER", "state": "confirmed-refund", "refund_of": "food-charge-2" },
+    { "id": "pending-food", "date": "2032-04-05", "amount": 999, "category": "FOOD/OTHER", "state": "pending" },
+    { "id": "candidate-out", "date": "2032-04-06", "amount": 12, "category": "FOOD/OTHER", "state": "unconfirmed-candidate", "pair": "candidate" },
+    { "id": "candidate-in", "date": "2032-04-06", "amount": -12, "category": "OTHER_INCOME", "state": "unconfirmed-candidate", "pair": "candidate" },
+    { "id": "confirmed-out", "date": "2032-04-07", "amount": 30, "category": "FOOD/OTHER", "state": "confirmed-transfer", "pair": "confirmed" },
+    { "id": "confirmed-in", "date": "2032-04-07", "amount": -30, "category": "OTHER_INCOME", "state": "confirmed-transfer", "pair": "confirmed" },
+    { "id": "food-child", "date": "2032-04-08", "amount": 20, "category": "FOOD/DINING", "state": "posted-child-charge" },
+    { "id": "shopping-charge", "date": "2032-04-09", "amount": 17, "category": "SHOPPING/GENERAL", "state": "posted-charge" }
+  ],
+  "oracle": {
+    "exact_spend_ids": ["food-charge-1", "food-charge-2", "food-refund", "candidate-out"],
+    "exact_spend_amount": 67,
+    "parent_spend_ids": ["food-charge-1", "food-charge-2", "food-refund", "candidate-out", "food-child"],
+    "parent_spend_amount": 87,
+    "excluded_ids": ["pending-food", "confirmed-out", "confirmed-in"],
+    "stable_descending_exact_pages": [
+      ["candidate-out", "food-refund"],
+      ["food-charge-2", "food-charge-1"]
+    ]
+  }
+}
