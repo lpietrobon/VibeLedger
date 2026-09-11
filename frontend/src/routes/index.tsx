@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/client";
 import { CATEGORY_COLORS } from "@/lib/api/theme";
 import { formatCurrency } from "@/lib/format";
+import { categoryDrilldownHref } from "@/lib/categoryDrilldown";
 
 const CashflowChart = lazy(() => import("@/components/finance/charts/CashflowChart"));
 const CategoryBarChart = lazy(() => import("@/components/finance/charts/CategoryBarChart"));
@@ -36,6 +37,10 @@ export default function OverviewPage() {
 
   const s = summary.data;
   const comparisonAvailable = s?.reporting.comparisonAvailable ?? false;
+  const currentPeriod = s?.reporting.currentPeriod;
+  const drilldownBounds = currentPeriod?.startDate && currentPeriod.endDate
+    ? { startDate: currentPeriod.startDate, endDate: currentPeriod.endDate }
+    : null;
 
   return (
     <AppShell>
@@ -187,6 +192,9 @@ export default function OverviewPage() {
               data={comparison.data}
               currentLabel="This month to date"
               previousLabel="Prior comparable period"
+              getCategoryHref={drilldownBounds
+                ? (category) => categoryDrilldownHref({ category, ...drilldownBounds })
+                : undefined}
             />
           ) : (
             <ChartSkeleton />

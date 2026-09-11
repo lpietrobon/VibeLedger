@@ -19,15 +19,9 @@ import {
 import type { Transaction } from "@/lib/api/types";
 import { formatCurrency } from "@/lib/format";
 import { invalidateLedger } from "@/lib/api/cache";
+import { categoryDrilldownHref } from "@/lib/categoryDrilldown";
 
 const CumulativeChart = lazy(() => import("@/components/finance/charts/CumulativeChart"));
-
-const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
-
-function appHref(path: string, params?: Record<string, string>) {
-  const query = new URLSearchParams(params).toString();
-  return `${basePath}${path}${query ? `?${query}` : ""}`;
-}
 
 function activePeriodBounds(granularity: "monthly" | "yearly") {
   const today = new Date();
@@ -187,16 +181,11 @@ export default function SpendingPage() {
               data={comparison.data}
               currentLabel={granularity === "yearly" ? "This year to date" : "This month to date"}
               previousLabel="Prior comparable period"
-              getCategoryHref={(categoryName) =>
-                appHref("/transactions", {
-                  category: categoryName,
-                  query: "is:spend",
-                  startDate: periodBounds.startDate,
-                  endDate: periodBounds.endDate,
-                  sort: "date",
-                  order: "desc",
-                })
-              }
+              getCategoryHref={(categoryName) => categoryDrilldownHref({
+                category: categoryName,
+                startDate: periodBounds.startDate,
+                endDate: periodBounds.endDate,
+              })}
             />
           ) : (
             <div className="h-64 animate-pulse rounded bg-secondary" />
