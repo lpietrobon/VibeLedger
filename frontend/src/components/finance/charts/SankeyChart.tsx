@@ -6,11 +6,44 @@ import { formatCurrency } from "@/lib/format";
 
 const INCOME_KEY = "__income__";
 const CHART_WIDTH = 640;
+const LABEL_FONT_SIZE = 12;
+const LABEL_GAP = 8;
+const ESTIMATED_CHAR_WIDTH = 7;
 
 type NodeDatum = { name: string; color: string; key: string; expandable: boolean };
 type LinkDatum = { color: string };
 type Node = SankeyNode<NodeDatum, LinkDatum>;
 type Link = SankeyLink<NodeDatum, LinkDatum>;
+
+function displayNameForNode(name: string) {
+  // Keep the stable HEALTH bucket key while giving users a descriptive label.
+  return name === "HEALTH" ? "Medical and pharmacy" : name;
+}
+
+function labelForNode(
+  name: string,
+  amount: number,
+  labelX: number,
+  textAnchor: "start" | "end",
+) {
+  const displayName = displayNameForNode(name);
+  const amountLabel = ` ${formatCurrency(amount, { compact: true })}`;
+  const availableWidth = textAnchor === "start" ? CHART_WIDTH - labelX : labelX;
+  const maxCharacters = Math.floor(availableWidth / ESTIMATED_CHAR_WIDTH);
+  const fullLabelWidth = (displayName + amountLabel).length * ESTIMATED_CHAR_WIDTH;
+
+  if (fullLabelWidth <= availableWidth || maxCharacters <= amountLabel.length + 2) {
+    return { fullName: displayName, displayName, amountLabel, truncated: false };
+  }
+
+  const nameCharacters = Math.max(1, maxCharacters - amountLabel.length - 1);
+  return {
+    fullName: displayName,
+    displayName: `${displayName.slice(0, Math.max(1, nameCharacters - 1))}…`,
+    amountLabel,
+    truncated: true,
+  };
+}
 
 function hexToRgba(hex: string, alpha: number) {
   const n = parseInt(hex.slice(1), 16);
@@ -161,13 +194,31 @@ export default function SankeyChart({
       <g>
         {laidOutNodes.map((n: Node) => {
           const isLeftHalf = (n.x0 ?? 0) < CHART_WIDTH / 2;
-          const labelX = isLeftHalf ? (n.x1 ?? 0) + 6 : (n.x0 ?? 0) - 6;
+          const labelX = isLeftHalf ? (n.x1 ?? 0) + LABEL_GAP : (n.x0 ?? 0) - LABEL_GAP;
           const isExpanded = n.key === `bucket:${expanded}` || (n.key === "__income_node__" && expanded === INCOME_KEY);
           const clickable = n.expandable || (n.key === "__income_node__" && data.incomeSources.length > 0);
           const toggleKey = n.key === "__income_node__" ? INCOME_KEY : n.key.replace(/^bucket:/, "");
+          const label = labelForNode(n.name, n.value ?? 0, labelX, isLeftHalf ? "start" : "end");
+          const accessibleLabel = `${label.fullName}: ${formatCurrency(n.value ?? 0)}`;
 
           return (
-            <g key={n.key}>
+            <g
+              key={n.key}
+              data-sankey-key={n.key}
+              role={clickable ? "button" : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              aria-label={clickable ? accessibleLabel : undefined}
+              onKeyDown={
+                clickable
+                  ? (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onToggle(toggleKey);
+                      }
+                    }
+                  : undefined
+              }
+            >
               <rect
                 x={n.x0}
                 y={n.y0}
@@ -187,11 +238,15 @@ export default function SankeyChart({
                 y={((n.y0 ?? 0) + (n.y1 ?? 0)) / 2}
                 textAnchor={isLeftHalf ? "start" : "end"}
                 dominantBaseline="middle"
-                className={"select-none text-[10px] " + (clickable ? "cursor-pointer fill-foreground font-medium" : "fill-foreground")}
+                fontSize={LABEL_FONT_SIZE}
+                data-full-label={label.fullName}
+                aria-label={label.fullName}
+                className={"select-none " + (clickable ? "cursor-pointer fill-foreground font-medium" : "fill-foreground")}
                 onClick={clickable ? () => onToggle(toggleKey) : undefined}
               >
-                {n.name}
-                <tspan className="fill-muted-foreground"> {formatCurrency(n.value ?? 0, { compact: true })}</tspan>
+                {label.truncated ? <title>{`${n.name}: ${formatCurrency(n.value ?? 0)}`}</title> : null}
+                {label.displayName}
+                <tspan className="fill-muted-foreground">{label.amountLabel}</tspan>
               </text>
             </g>
           );
