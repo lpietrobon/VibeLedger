@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-11T05:08:43+00:00_
+_Last scan: 2026-09-11T05:14:20+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -44,7 +44,7 @@ dependencies are done; a blank assignment means unassigned.
 | [PI-11](epics/020-product-integrity/tasks/PI-11.md) | 020-product-integrity | todo | PI-25 |  | Standardize ordinary textual date formatting |
 | [PI-12](epics/020-product-integrity/tasks/PI-12.md) | 020-product-integrity | todo | PI-01, PI-14, PI-16, PI-18, PI-20, PI-22, PI-24, PI-26 |  | Independently verify the integrated product-integrity work |
 | [PI-13](epics/020-product-integrity/tasks/PI-13.md) | 020-product-integrity | done |  |  | Pin category drilldown semantics with failing tests |
-| [PI-14](epics/020-product-integrity/tasks/PI-14.md) | 020-product-integrity | todo | PI-02 |  | Independently verify category drilldown TDD compliance |
+| [PI-14](epics/020-product-integrity/tasks/PI-14.md) | 020-product-integrity | done | PI-02 |  | Independently verify category drilldown TDD compliance |
 | [PI-15](epics/020-product-integrity/tasks/PI-15.md) | 020-product-integrity | done | PI-03 |  | Pin duplicate-accounting and lifecycle behavior with failing tests |
 | [PI-16](epics/020-product-integrity/tasks/PI-16.md) | 020-product-integrity | done | PI-04 |  | Independently verify duplicate accounting TDD compliance |
 | [PI-17](epics/020-product-integrity/tasks/PI-17.md) | 020-product-integrity | done | PI-16 |  | Pin duplicate-correction interaction behavior with failing tests |
