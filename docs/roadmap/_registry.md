@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-11T05:28:27+00:00_
+_Last scan: 2026-09-11T05:35:05+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -53,7 +53,7 @@ dependencies are done; a blank assignment means unassigned.
 | [PI-20](epics/020-product-integrity/tasks/PI-20.md) | 020-product-integrity | done | PI-07 |  | Independently verify the card-payment Sankey correction |
 | [PI-21](epics/020-product-integrity/tasks/PI-21.md) | 020-product-integrity | done |  |  | Pin Sankey readability and accessibility cases before visual changes |
 | [PI-22](epics/020-product-integrity/tasks/PI-22.md) | 020-product-integrity | done | PI-08 |  | Independently verify Sankey readability TDD compliance |
-| [PI-23](epics/020-product-integrity/tasks/PI-23.md) | 020-product-integrity | todo | PI-07, PI-09, PI-22 |  | Pin the accepted Sankey composition with failing tests |
+| [PI-23](epics/020-product-integrity/tasks/PI-23.md) | 020-product-integrity | done | PI-07, PI-09, PI-22 |  | Pin the accepted Sankey composition with failing tests |
 | [PI-24](epics/020-product-integrity/tasks/PI-24.md) | 020-product-integrity | todo | PI-10 |  | Independently verify Sankey composition TDD compliance |
 | [PI-25](epics/020-product-integrity/tasks/PI-25.md) | 020-product-integrity | todo |  |  | Pin current-year-aware date formatting with failing tests |
 | [PI-26](epics/020-product-integrity/tasks/PI-26.md) | 020-product-integrity | todo | PI-11 |  | Independently verify date-formatting TDD compliance |
