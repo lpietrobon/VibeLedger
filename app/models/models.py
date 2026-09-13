@@ -204,6 +204,7 @@ class TransferPair(Base):
     txn_in_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), index=True)
     detected_by: Mapped[str] = mapped_column(String(16), default="auto")
     confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    decision_evidence: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import (
     Account,
+    Item,
     RejectedTransferPair,
     Transaction,
     TransactionAnnotation,
@@ -50,6 +51,33 @@ MAX_POSTING_GAP_DAYS = 14
 CARD_PAYMENT_REVERSE_GAP_DAYS = 4
 CARD_PAYMENT_CATEGORY = "FINANCE/CREDIT_CARD_PAYMENT"
 _PAYMENT_WORD = re.compile(r"\bpayment\b|\bautopay\b", re.IGNORECASE)
+_SIGNATURE_WORD = re.compile(r"[^a-z0-9]+")
+
+
+def _provider_detail(txn: Transaction) -> str:
+    """Return the normalized provider detailed category without inferring one."""
+    try:
+        raw = json.loads(txn.raw_json or "{}")
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(raw, dict):
+        return ""
+    category = raw.get("personal_finance_category") or {}
+    if not isinstance(category, dict):
+        return ""
+    detailed = category.get("detailed") or ""
+    return detailed.upper() if isinstance(detailed, str) else ""
+
+
+def _has_structured_transfer_evidence(txn: Transaction) -> bool:
+    """Accept explicit provider transfer/payment classifications, never prose alone."""
+    detail = _provider_detail(txn)
+    return "TRANSFER" in detail or "CREDIT_CARD_PAYMENT" in detail
+
+
+def _normalized_signature(txn: Transaction) -> str:
+    """A deliberately exact, stable name signature for a user-confirmed route."""
+    return _SIGNATURE_WORD.sub(" ", (txn.name or "").lower()).strip()
 
 
 def _is_checking(account: Account | None) -> bool:
@@ -78,20 +106,19 @@ def _explicit_category(txn: Transaction, annotation: TransactionAnnotation | Non
 
 def _provider_card_payment_detail(txn: Transaction) -> bool:
     """Recognize Plaid's explicit credit-card-payment detail, if present."""
-    try:
-        raw = json.loads(txn.raw_json or "{}")
-    except (TypeError, ValueError):
-        return False
-    if not isinstance(raw, dict):
-        return False
-    category = raw.get("personal_finance_category") or {}
-    if not isinstance(category, dict):
-        return False
-    detail = category.get("detailed") or ""
-    if not isinstance(detail, str):
-        return False
-    detail = detail.upper()
+    detail = _provider_detail(txn)
     return "CREDIT_CARD" in detail and "PAYMENT" in detail
+
+
+def _active_linked_accounts(db: Session, out: Transaction, inn: Transaction) -> bool:
+    """Both legs must remain inside the active linked-account boundary."""
+    out_account = db.get(Account, out.account_id)
+    in_account = db.get(Account, inn.account_id)
+    if not out_account or not in_account:
+        return False
+    out_item = db.get(Item, out_account.item_id)
+    in_item = db.get(Item, in_account.item_id)
+    return bool(out_item and in_item and out_item.status == "active" and in_item.status == "active")
 
 
 def _has_payment_evidence(txn: Transaction, annotation: TransactionAnnotation | None) -> bool:
@@ -133,6 +160,54 @@ def _is_evidence_qualified_card_repayment(
     return _has_payment_evidence(out, annotations.get(out.id)) and _has_payment_evidence(
         inn, annotations.get(inn.id)
     )
+
+
+def _has_confirmed_route_signature(
+    db: Session, out: Transaction, inn: Transaction, *, exclude_pair_id: int | None = None
+) -> bool:
+    """Reuse only an exact, already-confirmed two-sided route signature."""
+    if not _normalized_signature(out) or not _normalized_signature(inn):
+        return False
+    pairs = db.query(TransferPair).filter(TransferPair.confirmed == True).all()  # noqa: E712
+    for pair in pairs:
+        if exclude_pair_id is not None and pair.id == exclude_pair_id:
+            continue
+        historical_out = db.get(Transaction, pair.txn_out_id)
+        historical_in = db.get(Transaction, pair.txn_in_id)
+        if not historical_out or not historical_in:
+            continue
+        if (
+            historical_out.account_id == out.account_id
+            and historical_in.account_id == inn.account_id
+            and _normalized_signature(historical_out) == _normalized_signature(out)
+            and _normalized_signature(historical_in) == _normalized_signature(inn)
+        ):
+            return True
+    return False
+
+
+def _auto_confirmation_evidence(
+    db: Session, out: Transaction, inn: Transaction, *, exclude_pair_id: int | None = None
+) -> dict[str, str] | None:
+    """Return auditable high-confidence evidence, or abstain.
+
+    Amount/date proximity and one row's free-form wording deliberately never get
+    here.  A qualifying pair needs independent structured evidence on both legs,
+    or a precise route that a person has previously confirmed.
+    """
+    if _has_structured_transfer_evidence(out) and _has_structured_transfer_evidence(inn):
+        return {
+            "kind": "two_sided_structured",
+            "out_provider_detail": _provider_detail(out),
+            "in_provider_detail": _provider_detail(inn),
+        }
+    if _has_confirmed_route_signature(db, out, inn, exclude_pair_id=exclude_pair_id):
+        return {
+            "kind": "confirmed_route_signature",
+            "out_signature": _normalized_signature(out),
+            "in_signature": _normalized_signature(inn),
+        }
+    return None
 
 
 def _paired_ids(db: Session) -> set[int]:
@@ -218,13 +293,19 @@ def validate_pair(
     if out.account_id == inn.account_id:
         raise ValueError("transfer pair must span two accounts")
 
+    if not _active_linked_accounts(db, out, inn):
+        raise ValueError("transfer pair must use active linked accounts")
+
     gap = (inn.date - out.date).days
     if gap < 0:
-        if not _is_evidence_qualified_card_repayment(db, out, inn):
+        card_repayment = _is_evidence_qualified_card_repayment(db, out, inn)
+        generic_structured = _has_structured_transfer_evidence(out) and _has_structured_transfer_evidence(inn)
+        if not (card_repayment or generic_structured):
             raise ValueError("transfer outflow must post on or before its inflow")
-        if abs(gap) > CARD_PAYMENT_REVERSE_GAP_DAYS:
+        allowed_gap = CARD_PAYMENT_REVERSE_GAP_DAYS if card_repayment else max_gap_days
+        if abs(gap) > allowed_gap:
             raise ValueError(
-                f"card payment posting dates must be within {CARD_PAYMENT_REVERSE_GAP_DAYS} days"
+                f"transfer posting dates must be within {allowed_gap} days"
             )
     elif gap > max_gap_days:
         raise ValueError(f"transfer posting dates must be within {max_gap_days} days")
@@ -310,11 +391,13 @@ def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
             # A one-sided winner is still ambiguous: another same-size outflow
             # may be the inbound leg's equally plausible (or closer) match.
             continue
+        evidence = _auto_confirmation_evidence(db, out_txn, match)
         pair = TransferPair(
             txn_out_id=out_txn.id,
             txn_in_id=match.id,
-            detected_by="auto",
-            confirmed=False,
+            detected_by="auto_confirmed" if evidence else "auto",
+            confirmed=bool(evidence),
+            decision_evidence=json.dumps(evidence or {}),
         )
         db.add(pair)
         created.append(pair)
@@ -324,6 +407,29 @@ def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
         for p in created:
             db.refresh(p)
     return created
+
+
+def revalidate_auto_confirmed_pairs(db: Session) -> int:
+    """Remove automatic decisions whose imported source evidence no longer holds."""
+    invalidated = 0
+    pairs = db.query(TransferPair).filter(
+        TransferPair.detected_by == "auto_confirmed", TransferPair.confirmed == True  # noqa: E712
+    ).all()
+    for pair in pairs:
+        out = db.get(Transaction, pair.txn_out_id)
+        inn = db.get(Transaction, pair.txn_in_id)
+        try:
+            if not out or not inn:
+                raise ValueError("source transaction removed")
+            validate_pair(db, out, inn)
+            if not _auto_confirmation_evidence(db, out, inn, exclude_pair_id=pair.id):
+                raise ValueError("automatic evidence no longer qualifies")
+        except ValueError:
+            db.delete(pair)
+            invalidated += 1
+    if invalidated:
+        db.commit()
+    return invalidated
 
 
 def clear_auto_pairs(db: Session) -> int:

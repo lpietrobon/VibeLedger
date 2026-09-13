@@ -28,7 +28,7 @@ from app.services.duplicate_corrections import (
     transaction_currency,
 )
 from app.services.security import decrypt_token
-from app.services.transfer_detector import clear_auto_pairs, detect_candidates
+from app.services.transfer_detector import clear_auto_pairs, detect_candidates, revalidate_auto_confirmed_pairs
 from app.services.txn_fingerprint import compute_txn_hash
 
 logger = logging.getLogger(__name__)
@@ -127,10 +127,11 @@ class SyncService:
 
         db.commit()
 
-        if added_count or modified_count:
+        if added_count or modified_count or removed_count:
             # Candidates are provisional evidence. Rebuild them whenever the
             # source universe changes so later history can replace an earlier
             # guess; confirmed/manual decisions and rejection memory remain.
+            revalidate_auto_confirmed_pairs(db)
             clear_auto_pairs(db)
             new_pairs = detect_candidates(db)
             if new_pairs:
@@ -187,7 +188,8 @@ class SyncService:
 
         db.commit()
 
-        if added_count or modified_count:
+        if added_count or modified_count or removed_count:
+            revalidate_auto_confirmed_pairs(db)
             clear_auto_pairs(db)
             new_pairs = detect_candidates(db)
             if new_pairs:

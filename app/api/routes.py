@@ -2064,6 +2064,7 @@ def transfers_list(
             "id": p.id,
             "detected_by": p.detected_by,
             "confirmed": p.confirmed,
+            "decision_evidence": json.loads(p.decision_evidence or "{}"),
             "amount": out["amount"],
             "gap_days": gap,
             "out": out,

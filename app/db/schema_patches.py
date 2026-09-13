@@ -103,6 +103,13 @@ def _purge_orphan_transaction_rows(engine: Engine) -> None:
 
 
 def apply_patches(engine: Engine) -> None:
+    if not _has_column(engine, "transfer_pairs", "decision_evidence"):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE transfer_pairs "
+                "ADD COLUMN decision_evidence TEXT DEFAULT '{}' NOT NULL"
+            ))
+
     if not _has_column(engine, "transaction_annotations", "is_transfer_override"):
         with engine.begin() as conn:
             conn.execute(text(
