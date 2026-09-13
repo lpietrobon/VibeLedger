@@ -4,7 +4,7 @@ title: Product integrity and cleanup
 status: planned
 owner: null
 created: 2026-09-08
-revision: 2
+revision: 3
 ---
 
 ## Goal
@@ -32,6 +32,11 @@ intent.
 - Diagnose the observed credit-card-payment contribution to Sankey before changing
   accounting. Preserve epic 010's rule that confirmed linked-account repayments
   add no spending; make unresolved and missing-counterpart cases explicit.
+- Generalize the diagnosed transfer remedy across all linked accounts. Deterministic,
+  mutually unique pairs with strong two-sided evidence may be confirmed
+  automatically; ambiguous, incomplete, unequal, or one-sided movements remain
+  counted and reviewable. Account type may corroborate a match but must not define
+  the linked-account boundary or act as the sole auto-confirmation signal.
 - Improve Sankey label readability and simplify its common-case cashflow story,
   while representing refund-credit and deficit exceptions truthfully.
 - Standardize ordinary textual dates across React using the current-year-aware
@@ -44,6 +49,12 @@ intent.
   investment analysis, or a broad visual redesign.
 
 ## Revision Log
+
+- rev 3 (2026-09-13): Add a generic, high-precision automatic transfer-
+  reconciliation chain after live use showed that requiring manual confirmation
+  for every strong match leaves otherwise-correct cashflow views difficult to
+  trust. Preserve two-sided evidence, auditability, reversal, and abstention for
+  ambiguity; do not limit the solution to credit-card repayments.
 
 - rev 2 (2026-09-08): Decompose each code-changing slice into a test-first task,
   implementation task, and independent verifier. The verifier may fix product code

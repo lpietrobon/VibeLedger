@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-12T23:45:32+00:00_
+_Last scan: 2026-09-13T00:18:54+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -10,7 +10,7 @@ dependencies are done; a blank assignment means unassigned.
 | id | title | status | rev | owner |
 |---|---|---|---|---|
 | [010-trustworthy-cashflow](epics/010-trustworthy-cashflow/_epic.md) | Trustworthy cashflow across linked accounts | done | 3 |  |
-| [020-product-integrity](epics/020-product-integrity/_epic.md) | Product integrity and cleanup | planned | 2 |  |
+| [020-product-integrity](epics/020-product-integrity/_epic.md) | Product integrity and cleanup | planned | 3 |  |
 | [030-inspectable-aggregates](epics/030-inspectable-aggregates/_epic.md) | Inspectable aggregates | planned | 1 |  |
 
 ## Tasks
@@ -42,7 +42,7 @@ dependencies are done; a blank assignment means unassigned.
 | [PI-09](epics/020-product-integrity/tasks/PI-09.md) | 020-product-integrity | done | PI-06 |  | Explore a simpler common-case Sankey composition |
 | [PI-10](epics/020-product-integrity/tasks/PI-10.md) | 020-product-integrity | done | PI-07, PI-08, PI-09, PI-23 |  | Implement the simpler Sankey composition |
 | [PI-11](epics/020-product-integrity/tasks/PI-11.md) | 020-product-integrity | todo | PI-25 |  | Standardize ordinary textual date formatting |
-| [PI-12](epics/020-product-integrity/tasks/PI-12.md) | 020-product-integrity | todo | PI-01, PI-14, PI-16, PI-18, PI-20, PI-22, PI-24, PI-26 |  | Independently verify the integrated product-integrity work |
+| [PI-12](epics/020-product-integrity/tasks/PI-12.md) | 020-product-integrity | todo | PI-01, PI-14, PI-16, PI-18, PI-20, PI-22, PI-24, PI-26, PI-29 |  | Independently verify the integrated product-integrity work |
 | [PI-13](epics/020-product-integrity/tasks/PI-13.md) | 020-product-integrity | done |  |  | Pin category drilldown semantics with failing tests |
 | [PI-14](epics/020-product-integrity/tasks/PI-14.md) | 020-product-integrity | done | PI-02 |  | Independently verify category drilldown TDD compliance |
 | [PI-15](epics/020-product-integrity/tasks/PI-15.md) | 020-product-integrity | done | PI-03 |  | Pin duplicate-accounting and lifecycle behavior with failing tests |
@@ -57,6 +57,9 @@ dependencies are done; a blank assignment means unassigned.
 | [PI-24](epics/020-product-integrity/tasks/PI-24.md) | 020-product-integrity | todo | PI-10 |  | Independently verify Sankey composition TDD compliance |
 | [PI-25](epics/020-product-integrity/tasks/PI-25.md) | 020-product-integrity | todo |  |  | Pin current-year-aware date formatting with failing tests |
 | [PI-26](epics/020-product-integrity/tasks/PI-26.md) | 020-product-integrity | todo | PI-11 |  | Independently verify date-formatting TDD compliance |
+| [PI-27](epics/020-product-integrity/tasks/PI-27.md) | 020-product-integrity | todo | PI-20 |  | Pin generic high-confidence transfer reconciliation with failing tests |
+| [PI-28](epics/020-product-integrity/tasks/PI-28.md) | 020-product-integrity | todo | PI-27 |  | Automatically reconcile high-confidence linked-account transfers |
+| [PI-29](epics/020-product-integrity/tasks/PI-29.md) | 020-product-integrity | todo | PI-28 |  | Independently verify generic transfer auto-reconciliation |
 | [INSP-01](epics/030-inspectable-aggregates/tasks/INSP-01.md) | 030-inspectable-aggregates | todo | PI-14 |  | Establish the shared spending-category drilldown contract |
 | [INSP-02](epics/030-inspectable-aggregates/tasks/INSP-02.md) | 030-inspectable-aggregates | todo | INSP-01 |  | Drill from expanded Sankey categories into Activity |
 | [INSP-03](epics/030-inspectable-aggregates/tasks/INSP-03.md) | 030-inspectable-aggregates | todo | INSP-01 |  | Drill from month-over-month movers into current-period Activity |
