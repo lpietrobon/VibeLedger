@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
 from app.main import app
-from app.models.models import Account, Item, Transaction
+from app.models.models import Account, Item, Transaction, TransferPair
 from app.services import transfer_detector
 from app.services.security import encrypt_token
 from tests.conftest import AUTH_HEADERS
@@ -57,3 +57,23 @@ def test_transfer_api_exposes_structured_auto_confirmation_evidence():
     assert item["confirmed"] is True
     assert item["detected_by"] == "auto_confirmed"
     assert item["decision_evidence"]["kind"] == "two_sided_structured"
+
+
+def test_detect_rebuilds_existing_auto_candidates_and_promotes_strong_matches():
+    """A candidate made before PI-28 must not be stranded in review forever."""
+    db, out, inn = _seed()
+    try:
+        db.add(TransferPair(txn_out_id=out.id, txn_in_id=inn.id, detected_by="auto", confirmed=False))
+        db.commit()
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        detected = client.post("/transfers/detect", headers=AUTH_HEADERS)
+        assert detected.status_code == 200
+        assert detected.json()["created"] == 1
+        items = client.get("/transfers", headers=AUTH_HEADERS).json()["items"]
+
+    assert len(items) == 1
+    assert items[0]["confirmed"] is True
+    assert items[0]["detected_by"] == "auto_confirmed"

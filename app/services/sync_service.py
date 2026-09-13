@@ -127,16 +127,17 @@ class SyncService:
 
         db.commit()
 
-        if added_count or modified_count or removed_count:
-            # Candidates are provisional evidence. Rebuild them whenever the
-            # source universe changes so later history can replace an earlier
-            # guess; confirmed/manual decisions and rejection memory remain.
-            revalidate_auto_confirmed_pairs(db)
-            clear_auto_pairs(db)
-            new_pairs = detect_candidates(db)
-            if new_pairs:
-                db.commit()
-                logger.info("Transfer detection after sync: %d new pair(s) found", len(new_pairs))
+        # Candidates are provisional evidence. Rebuild them on every successful
+        # refresh, not only when this provider reports a row mutation: an older
+        # candidate may now qualify for automatic confirmation after detector
+        # logic changes or another linked account has been brought into scope.
+        # Confirmed manual decisions and rejection memory remain untouched.
+        revalidate_auto_confirmed_pairs(db)
+        clear_auto_pairs(db)
+        new_pairs = detect_candidates(db)
+        if new_pairs:
+            db.commit()
+            logger.info("Transfer detection after sync: %d new pair(s) found", len(new_pairs))
         classify_refunds(db)
 
         return {
@@ -188,13 +189,12 @@ class SyncService:
 
         db.commit()
 
-        if added_count or modified_count or removed_count:
-            revalidate_auto_confirmed_pairs(db)
-            clear_auto_pairs(db)
-            new_pairs = detect_candidates(db)
-            if new_pairs:
-                db.commit()
-                logger.info("Transfer detection after historical sync: %d new pair(s) found", len(new_pairs))
+        revalidate_auto_confirmed_pairs(db)
+        clear_auto_pairs(db)
+        new_pairs = detect_candidates(db)
+        if new_pairs:
+            db.commit()
+            logger.info("Transfer detection after historical sync: %d new pair(s) found", len(new_pairs))
         classify_refunds(db)
 
         return {

@@ -30,7 +30,7 @@ export default function TransfersPage() {
   const detect = useMutation({
     mutationFn: detectTransfers,
     onSuccess: (data) => {
-      setActionMsg(`Detection complete — ${data.created} new candidate${data.created === 1 ? "" : "s"}.`);
+      setActionMsg(`Detection complete — ${data.created} transfer match${data.created === 1 ? "" : "es"} re-evaluated.`);
       invalidate();
     },
     onError: (e) => setActionMsg(`Detection failed: ${(e as Error).message}`),

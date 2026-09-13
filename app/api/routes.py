@@ -2006,8 +2006,8 @@ def transfers_detect(
     db: Session = Depends(get_db),
     window_days: int = Query(default=3, ge=0, le=14),
     reset_auto: bool = Query(
-        default=False,
-        description="Discard unconfirmed auto pairs first (keeps confirmed/manual)",
+        default=True,
+        description="Rebuild unconfirmed automatic candidates first (keeps confirmed/manual)",
     ),
 ):
     cleared = transfer_detector.clear_auto_pairs(db) if reset_auto else 0
