@@ -52,6 +52,14 @@ CARD_PAYMENT_REVERSE_GAP_DAYS = 4
 CARD_PAYMENT_CATEGORY = "FINANCE/CREDIT_CARD_PAYMENT"
 _PAYMENT_WORD = re.compile(r"\bpayment\b|\bautopay\b", re.IGNORECASE)
 _SIGNATURE_WORD = re.compile(r"[^a-z0-9]+")
+# This is intentionally a grammar, not digit stripping.  A manually confirmed
+# route can reuse a changing provider reference only when the description is a
+# known payment form ending in exactly one four-digit ``REF`` token.  Account
+# suffixes, dates, arbitrary prose, and multiple/unbounded numeric tokens do
+# not satisfy this rule.
+_BOUNDED_ROUTE_REFERENCE = re.compile(
+    r"^(?P<prefix>[a-z][a-z ]{3,}) ref (?P<reference>\d{4})$"
+)
 
 
 def _provider_detail(txn: Transaction) -> str:
@@ -78,6 +86,18 @@ def _has_structured_transfer_evidence(txn: Transaction) -> bool:
 def _normalized_signature(txn: Transaction) -> str:
     """A deliberately exact, stable name signature for a user-confirmed route."""
     return _SIGNATURE_WORD.sub(" ", (txn.name or "").lower()).strip()
+
+
+def _bounded_reference_signature(txn: Transaction) -> str | None:
+    """Return the stable text around one explicit four-digit route reference.
+
+    This is deliberately more restrictive than normalizing all numbers: only a
+    named ``REF`` suffix on an otherwise alphabetic payment description can
+    vary.  The returned prefix is evidence of a specific manual route, not a
+    fuzzy merchant or account-name match.
+    """
+    match = _BOUNDED_ROUTE_REFERENCE.fullmatch(_normalized_signature(txn))
+    return match.group("prefix").strip() if match else None
 
 
 def _is_checking(account: Account | None) -> bool:
@@ -186,6 +206,56 @@ def _has_confirmed_route_signature(
     return False
 
 
+def _confirmed_route_stable_leg_evidence(
+    db: Session, out: Transaction, inn: Transaction, *, exclude_pair_id: int | None = None
+) -> dict[str, str] | None:
+    """Return narrow historical evidence for one stable and one ref-varying leg.
+
+    PI-30 permits this only for a directed route with manual confirmation,
+    explicit structured evidence on the variable outflow leg, no structured
+    claim on the counterpart, an exactly stable counterpart description, and a
+    single bounded ``REF ####`` change on the outflow description.
+    """
+    if not _has_structured_transfer_evidence(out) or _has_structured_transfer_evidence(inn):
+        return None
+    variable_signature = _bounded_reference_signature(out)
+    stable_signature = _normalized_signature(inn)
+    if not variable_signature or not stable_signature:
+        return None
+
+    pairs = db.query(TransferPair).filter(TransferPair.confirmed == True).all()  # noqa: E712
+    for pair in pairs:
+        if exclude_pair_id is not None and pair.id == exclude_pair_id:
+            continue
+        # Automatic decisions are reversible imported deductions, not route
+        # training data.  Only a person-confirmed history may establish this
+        # extra route-specific evidence.
+        if pair.detected_by != "manual":
+            continue
+        historical_out = db.get(Transaction, pair.txn_out_id)
+        historical_in = db.get(Transaction, pair.txn_in_id)
+        if not historical_out or not historical_in:
+            continue
+        if historical_out.account_id != out.account_id or historical_in.account_id != inn.account_id:
+            continue
+        if _normalized_signature(historical_in) != stable_signature:
+            continue
+        historical_variable_signature = _bounded_reference_signature(historical_out)
+        if historical_variable_signature != variable_signature:
+            continue
+        if _normalized_signature(historical_out) == _normalized_signature(out):
+            # The exact two-sided route rule owns identical signatures.
+            continue
+        return {
+            "kind": "confirmed_route_stable_leg",
+            "stable_leg": "in",
+            "variable_leg": "out",
+            "variable_format": "bounded_ref_4",
+            "out_provider_detail": _provider_detail(out),
+        }
+    return None
+
+
 def _auto_confirmation_evidence(
     db: Session, out: Transaction, inn: Transaction, *, exclude_pair_id: int | None = None
 ) -> dict[str, str] | None:
@@ -207,6 +277,11 @@ def _auto_confirmation_evidence(
             "out_signature": _normalized_signature(out),
             "in_signature": _normalized_signature(inn),
         }
+    stable_leg_evidence = _confirmed_route_stable_leg_evidence(
+        db, out, inn, exclude_pair_id=exclude_pair_id
+    )
+    if stable_leg_evidence:
+        return stable_leg_evidence
     return None
 
 
