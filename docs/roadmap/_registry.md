@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-18T17:07:11+00:00_
+_Last scan: 2026-09-18T17:08:58+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -54,12 +54,12 @@ dependencies are done; a blank assignment means unassigned.
 | [PI-21](epics/020-product-integrity/tasks/PI-21.md) | 020-product-integrity | done |  |  | Pin Sankey readability and accessibility cases before visual changes |
 | [PI-22](epics/020-product-integrity/tasks/PI-22.md) | 020-product-integrity | done | PI-08 |  | Independently verify Sankey readability TDD compliance |
 | [PI-23](epics/020-product-integrity/tasks/PI-23.md) | 020-product-integrity | done | PI-07, PI-09, PI-22 |  | Pin the accepted Sankey composition with failing tests |
-| [PI-24](epics/020-product-integrity/tasks/PI-24.md) | 020-product-integrity | todo | PI-10 |  | Independently verify Sankey composition TDD compliance |
+| [PI-24](epics/020-product-integrity/tasks/PI-24.md) | 020-product-integrity | done | PI-10 |  | Independently verify Sankey composition TDD compliance |
 | [PI-25](epics/020-product-integrity/tasks/PI-25.md) | 020-product-integrity | done |  |  | Pin current-year-aware date formatting with failing tests |
-| [PI-26](epics/020-product-integrity/tasks/PI-26.md) | 020-product-integrity | todo | PI-11 |  | Independently verify date-formatting TDD compliance |
+| [PI-26](epics/020-product-integrity/tasks/PI-26.md) | 020-product-integrity | done | PI-11 |  | Independently verify date-formatting TDD compliance |
 | [PI-27](epics/020-product-integrity/tasks/PI-27.md) | 020-product-integrity | done | PI-20 |  | Pin generic high-confidence transfer reconciliation with failing tests |
 | [PI-28](epics/020-product-integrity/tasks/PI-28.md) | 020-product-integrity | done | PI-27 |  | Automatically reconcile high-confidence linked-account transfers |
-| [PI-29](epics/020-product-integrity/tasks/PI-29.md) | 020-product-integrity | todo | PI-28 |  | Independently verify generic transfer auto-reconciliation |
+| [PI-29](epics/020-product-integrity/tasks/PI-29.md) | 020-product-integrity | done | PI-28 |  | Independently verify generic transfer auto-reconciliation |
 | [PI-30](epics/020-product-integrity/tasks/PI-30.md) | 020-product-integrity | done | PI-28 |  | Pin variable-description confirmed-route reconciliation with failing tests |
 | [INSP-01](epics/030-inspectable-aggregates/tasks/INSP-01.md) | 030-inspectable-aggregates | todo | PI-14 |  | Establish the shared spending-category drilldown contract |
 | [INSP-02](epics/030-inspectable-aggregates/tasks/INSP-02.md) | 030-inspectable-aggregates | todo | INSP-01 |  | Drill from expanded Sankey categories into Activity |
