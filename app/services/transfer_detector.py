@@ -52,6 +52,7 @@ CARD_PAYMENT_REVERSE_GAP_DAYS = 4
 CARD_PAYMENT_CATEGORY = "FINANCE/CREDIT_CARD_PAYMENT"
 _PAYMENT_WORD = re.compile(r"\bpayment\b|\bautopay\b", re.IGNORECASE)
 _SIGNATURE_WORD = re.compile(r"[^a-z0-9]+")
+_DATE_TOKEN = re.compile(r"(?<!\d)(?P<date>\d{8}|\d{6})(?!\d)")
 # This is intentionally a grammar, not digit stripping.  A manually confirmed
 # route can reuse a changing provider reference only when the description is a
 # known payment form ending in exactly one four-digit ``REF`` token.  Account
@@ -182,6 +183,55 @@ def _is_evidence_qualified_card_repayment(
     )
 
 
+def _one_sided_structured_card_repayment_evidence(
+    db: Session, out: Transaction, inn: Transaction
+) -> dict[str, str] | None:
+    """Recognize a card repayment when the issuer miscategorizes its receipt.
+
+    Some providers label the credit-card receipt as wages even though the
+    funding-account leg carries Plaid's explicit credit-card-payment detail.
+    That bad destination category must not veto stronger independent evidence,
+    but one structured leg alone is not enough.  The account direction must be
+    checking -> credit card, the receipt itself must contain payment evidence,
+    and a standalone provider date token must equal the card receipt date.
+    Exact amount, currency, date bounds, active accounts, and a mutually unique
+    counterpart are enforced by validation/candidate matching.
+    """
+    out_account = db.get(Account, out.account_id)
+    in_account = db.get(Account, inn.account_id)
+    if not (_is_checking(out_account) and _is_credit_card(in_account)):
+        return None
+    if not _provider_card_payment_detail(out):
+        return None
+
+    annotation = (
+        db.query(TransactionAnnotation)
+        .filter(TransactionAnnotation.transaction_id == inn.id)
+        .one_or_none()
+    )
+    if not _has_payment_evidence(inn, annotation):
+        return None
+    expected_dates = {inn.date.strftime("%y%m%d"), inn.date.strftime("%Y%m%d")}
+    date_token = next(
+        (
+            match.group("date")
+            for text in (out.name or "", out.merchant_name or "")
+            for match in _DATE_TOKEN.finditer(text)
+            if match.group("date") in expected_dates
+        ),
+        None,
+    )
+    if not date_token:
+        return None
+    return {
+        "kind": "one_sided_structured_card_repayment",
+        "out_provider_detail": _provider_detail(out),
+        "in_provider_detail": _provider_detail(inn),
+        "in_signature": _normalized_signature(inn),
+        "receipt_date_token": date_token,
+    }
+
+
 def _has_confirmed_route_signature(
     db: Session, out: Transaction, inn: Transaction, *, exclude_pair_id: int | None = None
 ) -> bool:
@@ -282,6 +332,9 @@ def _auto_confirmation_evidence(
     )
     if stable_leg_evidence:
         return stable_leg_evidence
+    card_repayment_evidence = _one_sided_structured_card_repayment_evidence(db, out, inn)
+    if card_repayment_evidence:
+        return card_repayment_evidence
     return None
 
 
