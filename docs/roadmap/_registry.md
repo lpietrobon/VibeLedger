@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-18T17:08:58+00:00_
+_Last scan: 2026-09-18T17:17:14+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -61,7 +61,7 @@ dependencies are done; a blank assignment means unassigned.
 | [PI-28](epics/020-product-integrity/tasks/PI-28.md) | 020-product-integrity | done | PI-27 |  | Automatically reconcile high-confidence linked-account transfers |
 | [PI-29](epics/020-product-integrity/tasks/PI-29.md) | 020-product-integrity | done | PI-28 |  | Independently verify generic transfer auto-reconciliation |
 | [PI-30](epics/020-product-integrity/tasks/PI-30.md) | 020-product-integrity | done | PI-28 |  | Pin variable-description confirmed-route reconciliation with failing tests |
-| [INSP-01](epics/030-inspectable-aggregates/tasks/INSP-01.md) | 030-inspectable-aggregates | todo | PI-14 |  | Establish the shared spending-category drilldown contract |
+| [INSP-01](epics/030-inspectable-aggregates/tasks/INSP-01.md) | 030-inspectable-aggregates | done | PI-14 |  | Establish the shared spending-category drilldown contract |
 | [INSP-02](epics/030-inspectable-aggregates/tasks/INSP-02.md) | 030-inspectable-aggregates | todo | INSP-01 |  | Drill from expanded Sankey categories into Activity |
 | [INSP-03](epics/030-inspectable-aggregates/tasks/INSP-03.md) | 030-inspectable-aggregates | todo | INSP-01 |  | Drill from month-over-month movers into current-period Activity |
 | [INSP-04](epics/030-inspectable-aggregates/tasks/INSP-04.md) | 030-inspectable-aggregates | todo | INSP-02, INSP-03 |  | Independently verify aggregate-to-Activity parity |

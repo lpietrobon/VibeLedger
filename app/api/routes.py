@@ -3,6 +3,7 @@ import calendar
 import re
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Literal
 import logging
 import json
 import os
@@ -714,6 +715,8 @@ def list_transactions(
     q: str | None = Query(default=None, description="Search name, merchant, or category"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    sort: Literal["date", "amount"] = Query(default="date"),
+    order: Literal["asc", "desc"] = Query(default="desc"),
 ):
     effective_category = _effective_category_expr().label("effective_category")
     category_source = _category_source_expr().label("category_source")
@@ -749,8 +752,10 @@ def list_transactions(
         base = _apply_search_query(base, parse_query(q))
 
     total = base.with_entities(func.count(Transaction.id)).scalar()
+    sort_column = Transaction.date if sort == "date" else func.abs(Transaction.amount)
+    direction = sort_column.asc if order == "asc" else sort_column.desc
     rows = (
-        base.order_by(Transaction.date.desc(), Transaction.id.desc())
+        base.order_by(direction(), Transaction.id.asc())
         .limit(limit)
         .offset(offset)
         .all()

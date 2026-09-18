@@ -82,6 +82,8 @@ export default function TransactionsPage() {
   const urlParams = new URLSearchParams(window.location.search);
   const rawFilter = urlParams.get("filter");
   const filter = isAttentionFilter(rawFilter) ? rawFilter : undefined;
+  const source = urlParams.get("source");
+  const comparison = urlParams.get("comparison");
   const [query, setQuery] = useState(urlParams.get("query") ?? "");
   const [category, setCategory] = useState(urlParams.get("category") ?? "All");
   const [startDate, setStartDate] = useState(urlParams.get("startDate") ?? "");
@@ -103,7 +105,11 @@ export default function TransactionsPage() {
 
   const tx = useQuery({
     queryKey: ["all-tx", serverQuery, category, startDate, endDate, limit],
-    queryFn: () => getTransactions({ query: serverQuery, category, startDate, endDate, limit }),
+    queryFn: () => getTransactions({
+      query: serverQuery, category, startDate, endDate, limit,
+      sort: sort === "amount" ? "amount" : "date",
+      order: order === "asc" ? "asc" : "desc",
+    }),
   });
 
   const duplicateCorrections = useQuery({
@@ -122,18 +128,8 @@ export default function TransactionsPage() {
       return true;
     });
 
-    return [...filtered].sort((a, b) => {
-      const direction = order === "asc" ? 1 : -1;
-      if (sort === "amount") {
-        return (Math.abs(a.amount) - Math.abs(b.amount)) * direction;
-      }
-      const dateDiff = a.date.localeCompare(b.date);
-      if (dateDiff !== 0) return dateDiff * direction;
-      // Keep equal-date rows in stable ledger/import order regardless of the
-      // date direction. This makes selecting a same-day pair predictable.
-      return a.id - b.id;
-    });
-  }, [onlyUnreviewed, order, sort, tx.data?.items]);
+    return filtered;
+  }, [onlyUnreviewed, tx.data?.items]);
 
   const clearFilter = () => {
     window.history.replaceState(null, "", `${basePath}/transactions`);
@@ -263,6 +259,12 @@ export default function TransactionsPage() {
             >
               <X className="h-3 w-3" />
             </button>
+          </div>
+        ) : null}
+        {source && category !== "All" && startDate && endDate ? (
+          <div className="mb-3 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs text-sky-900">
+            Inspecting exact spending category <strong>{category}</strong> from {startDate} through {endDate}
+            {comparison ? ` · ${comparison} period` : ""}{source ? ` · from ${source}` : ""}.
           </div>
         ) : null}
         <div className="mb-3 flex flex-wrap items-center gap-2">

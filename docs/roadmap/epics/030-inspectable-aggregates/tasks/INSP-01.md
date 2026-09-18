@@ -2,7 +2,7 @@
 id: INSP-01
 epic: 030-inspectable-aggregates
 title: Establish the shared spending-category drilldown contract
-status: todo
+status: done
 dependencies: [PI-14]
 superseded_by: null
 assigned_agent: null
@@ -48,3 +48,7 @@ Suggested role: frontend/API contract engineer with accounting-test review.
 ## Execution Log
 
 - 2026-09-08: Task created; blocked on PI-02's initial shared drilldown path.
+- 2026-09-18: Extended the existing PI-13 contract with optional source context
+  and server-owned sort parameters, while preserving the immutable PI-13 URL
+  contract. Evidence is recorded in
+  `artifacts/INSP-01-category-drilldown-contract.md`.

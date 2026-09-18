@@ -219,6 +219,8 @@ describe("PI-13 frozen category drilldown contract", () => {
       startDate: BOUNDS.startDate,
       endDate: BOUNDS.endDate,
       limit: 500,
+      sort: "date",
+      order: "desc",
     });
     expect(host.textContent).toContain("candidate-out");
     expect(host.textContent).toContain("food-refund");

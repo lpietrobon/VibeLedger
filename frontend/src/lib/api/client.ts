@@ -330,6 +330,8 @@ export async function getTransactions(params?: {
   limit?: number;
   offset?: number;
   query?: string;
+  sort?: "date" | "amount";
+  order?: "asc" | "desc";
 }): Promise<TransactionsResponse> {
   return jsonFetch<TransactionsResponse>("/transactions", {
     start_date: params?.startDate,
@@ -338,6 +340,8 @@ export async function getTransactions(params?: {
     q: params?.query || undefined,
     limit: params?.limit ?? 100,
     offset: params?.offset ?? 0,
+    sort: params?.sort,
+    order: params?.order,
   });
 }
 
