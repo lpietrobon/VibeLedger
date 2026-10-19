@@ -206,8 +206,8 @@ type SpendingSummaryResponse = {
   category_comparison: CategoryComparisonPoint[];
 };
 
-async function fetchSpendingSummary(granularity: "monthly" | "yearly") {
-  return jsonFetch<SpendingSummaryResponse>("/analytics/spending-summary", { granularity });
+async function fetchSpendingSummary(granularity: "monthly" | "yearly", window?: "calendar" | "rolling") {
+  return jsonFetch<SpendingSummaryResponse>("/analytics/spending-summary", { granularity, window });
 }
 
 export async function getSpendingSummary(params?: {
@@ -231,6 +231,17 @@ export async function getCategoryComparison(
 ): Promise<CategoryComparisonPoint[]> {
   const r = await fetchSpendingSummary(granularity);
   return r.category_comparison.slice().sort((a, b) => b.current - a.current);
+}
+
+export async function getCategoryComparisonPeriod(
+  granularity: "monthly" | "yearly",
+  window: "calendar" | "rolling",
+) {
+  const r = await fetchSpendingSummary(granularity, window);
+  return {
+    items: r.category_comparison.slice().sort((a, b) => b.current - a.current),
+    reporting: mapReporting(r.reporting),
+  };
 }
 
 export async function getCumulativeSpending(params?: {

@@ -218,3 +218,44 @@ def test_account_balance_currency_guard_is_independent_of_transaction_history():
         assert client.get("/analytics/monthly-spend", headers=AUTH_HEADERS).json() == []
         assert client.get("/analytics/accounts-summary", headers=AUTH_HEADERS).status_code == 422
         assert client.get("/analytics/overview", headers=AUTH_HEADERS).status_code == 422
+
+
+@pytest.mark.parametrize("anchor,granularity,expected", [
+    ("2024-03-01", "monthly", ("2024-02-01", "2024-03-01", "2024-01-02", "2024-01-31")),
+    ("2025-01-01", "monthly", ("2024-12-03", "2025-01-01", "2024-11-03", "2024-12-02")),
+    ("2024-12-31", "yearly", ("2024-01-02", "2024-12-31", "2023-01-02", "2024-01-01")),
+])
+def test_rolling_comparison_bounds(anchor, granularity, expected):
+    assert tuple(map(str, comparison_bounds(date.fromisoformat(anchor), granularity, "rolling"))) == expected
+
+
+def test_rolling_category_comparison_includes_exact_window_and_drilldown_population():
+    with SessionLocal() as db:
+        for key, when, amount in [
+            ("outside", date(2024, 1, 1), 999),
+            ("prior-start", date(2024, 1, 2), 10),
+            ("prior-end", date(2024, 1, 31), 20),
+            ("current-start", date(2024, 2, 1), 40),
+            ("current-end", date(2024, 3, 1), 80),
+            ("future", date(2024, 3, 2), 999),
+        ]:
+            add_row(db, key, amount=amount, when=when)
+        db.commit()
+    with TestClient(app) as client:
+        response = client.get("/analytics/spending-summary", params={
+            "reporting_date": "2024-03-01", "window": "rolling",
+        }, headers=AUTH_HEADERS)
+        assert response.status_code == 200
+        data = response.json()
+        assert (data["total"], data["previous_total"]) == (120, 30)
+        assert sum(row["current"] for row in data["category_comparison"]) == 120
+        bounds = data["reporting"]["current_period"]
+        evidence = client.get("/transactions", params={
+            "start_date": bounds["start_date"], "end_date": bounds["end_date"], "q": "is:spend",
+        }, headers=AUTH_HEADERS).json()
+        assert sum(row["amount"] for row in evidence["items"]) == 120
+        calendar = client.get("/analytics/spending-summary", params={
+            "reporting_date": "2024-03-01",
+        }, headers=AUTH_HEADERS).json()
+        assert calendar["total"] == 80
+        assert client.get("/analytics/spending-summary", params={"window": "invalid"}, headers=AUTH_HEADERS).status_code == 422

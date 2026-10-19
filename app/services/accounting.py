@@ -13,8 +13,12 @@ from sqlalchemy import case, exists, func, select
 from app.models.models import Account, DuplicateCorrection, Transaction, TransactionAnnotation, TransferPair
 
 
-def comparison_bounds(reporting_date: date, granularity: str = "monthly"):
-    """Inclusive MTD/YTD and calendar-aligned prior bounds (CF-02)."""
+def comparison_bounds(reporting_date: date, granularity: str = "monthly", window: str = "calendar"):
+    """Inclusive calendar MTD/YTD or adjacent equal 30/365-day rolling bounds."""
+    if window == "rolling":
+        days = 365 if granularity == "yearly" else 30
+        start = reporting_date - timedelta(days=days - 1)
+        return start, reporting_date, start - timedelta(days=days), start - timedelta(days=1)
     if granularity == "yearly":
         previous_year = reporting_date.year - 1
         previous_end = date(previous_year, reporting_date.month, min(

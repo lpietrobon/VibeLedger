@@ -10,7 +10,7 @@ import { TransactionRow } from "@/components/finance/TransactionRow";
 import { AnnotationSheet } from "@/components/finance/AnnotationSheet";
 import {
   CATEGORIES,
-  getCategoryComparison,
+  getCategoryComparisonPeriod,
   getCumulativeSpending,
   getSpendingSummary,
   getTransactions,
@@ -40,6 +40,7 @@ function activePeriodBounds(granularity: "monthly" | "yearly") {
 export default function SpendingPage() {
   const queryClient = useQueryClient();
   const [granularity, setGranularity] = useState<"monthly" | "yearly">("monthly");
+  const [comparisonWindow, setComparisonWindow] = useState<"calendar" | "rolling">("calendar");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
   const [selected, setSelected] = useState<Transaction | null>(null);
@@ -53,8 +54,8 @@ export default function SpendingPage() {
     queryFn: () => getCumulativeSpending({ granularity }),
   });
   const comparison = useQuery({
-    queryKey: ["comparison", granularity],
-    queryFn: () => getCategoryComparison(granularity),
+    queryKey: ["comparison", granularity, comparisonWindow],
+    queryFn: () => getCategoryComparisonPeriod(granularity, comparisonWindow),
   });
   const s = summary.data;
   const periodBounds = s
@@ -174,19 +175,48 @@ export default function SpendingPage() {
         </Section>
 
         <Section title="Category change · current vs previous">
+          <div className="mb-3 flex flex-wrap items-center gap-2" role="group" aria-label="Category comparison window">
+            {(["calendar", "rolling"] as const).map((window) => (
+              <button
+                key={window}
+                onClick={() => setComparisonWindow(window)}
+                aria-pressed={comparisonWindow === window}
+                className={"rounded-md px-3 py-2 text-xs font-medium " +
+                  (comparisonWindow === window ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground")}
+              >
+                {window === "calendar" ? "Calendar" : "Rolling"}
+              </button>
+            ))}
+            <span className="text-xs text-muted-foreground">
+              {comparisonWindow === "rolling"
+                ? `Last ${granularity === "yearly" ? 365 : 30} days vs preceding ${granularity === "yearly" ? 365 : 30} days`
+                : `${granularity === "yearly" ? "Jan 1" : "Month start"} through today vs prior comparable period`}
+            </span>
+          </div>
           {comparison.isError ? (
             <p role="alert" className="grid h-40 place-items-center text-sm text-red-600">Could not load category comparison: {comparison.error.message}</p>
           ) : comparison.data ? (
-            <CategoryComparison
-              data={comparison.data}
-              currentLabel={granularity === "yearly" ? "This year to date" : "This month to date"}
-              previousLabel="Prior comparable period"
-              getCategoryHref={(categoryName) => categoryDrilldownHref({
-                category: categoryName,
-                startDate: periodBounds.startDate,
-                endDate: periodBounds.endDate,
-              })}
-            />
+            <>
+              <p className="mb-2 text-xs text-muted-foreground">
+                Current: {comparison.data.reporting.currentPeriod.startDate} – {comparison.data.reporting.currentPeriod.endDate}
+                <br />
+                Previous: {comparison.data.reporting.previousPeriod.startDate} – {comparison.data.reporting.previousPeriod.endDate}
+                <br />
+                {comparison.data.reporting.comparisonAvailable
+                  ? comparison.data.reporting.comparisonQualification
+                  : "No comparable recorded prior period."}
+              </p>
+              <CategoryComparison
+                data={comparison.data.items}
+                currentLabel={comparisonWindow === "rolling" ? `Last ${granularity === "yearly" ? 365 : 30} days` : granularity === "yearly" ? "This year to date" : "This month to date"}
+                previousLabel="Prior comparable period"
+                getCategoryHref={(categoryName) => categoryDrilldownHref({
+                  category: categoryName,
+                  startDate: comparison.data.reporting.currentPeriod.startDate!,
+                  endDate: comparison.data.reporting.currentPeriod.endDate!,
+                })}
+              />
+            </>
           ) : (
             <div className="h-64 animate-pulse rounded bg-secondary" />
           )}

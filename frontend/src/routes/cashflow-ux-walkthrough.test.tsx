@@ -20,6 +20,7 @@ vi.mock("@/lib/api/client", () => ({
   getOverviewSummary: vi.fn(),
   getCashflowTrend: vi.fn(),
   getCategoryComparison: vi.fn(),
+  getCategoryComparisonPeriod: vi.fn(),
   getTransactions: vi.fn(),
   getSpendingSummary: vi.fn(),
   getCumulativeSpending: vi.fn(),
@@ -143,6 +144,9 @@ beforeEach(() => {
       topDriver: { category: "HOUSING", amount: 1500 },
     };
   });
+  vi.mocked(api.getCategoryComparisonPeriod).mockImplementation(async () => ({
+    items: await api.getCategoryComparison(), reporting,
+  }));
   vi.mocked(api.getCumulativeSpending).mockResolvedValue([]);
   vi.mocked(api.getCategoryCatalog).mockResolvedValue([]);
   vi.mocked(api.patchTransactionAnnotation).mockResolvedValue({ status: "ok", transaction_id: 42 });

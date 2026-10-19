@@ -1597,10 +1597,11 @@ def analytics_spending_summary(
     db: Session = Depends(get_db),
     granularity: str = Query(default="monthly"),
     reporting_date: date | None = Query(default=None),
+    window: Literal["calendar", "rolling"] = Query(default="calendar"),
 ):
     """Period spend total, comparison, projection, top driver, and per-category diff."""
     as_of = reporting_date if isinstance(reporting_date, date) else date.today()
-    bounds = comparison_bounds(as_of, granularity)
+    bounds = comparison_bounds(as_of, granularity, window)
     cur_start, cur_end, prev_start, prev_end = bounds
     reporting = comparison_reporting(db, bounds)
     cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
@@ -1613,6 +1614,11 @@ def analytics_spending_summary(
     projection = round(total / elapsed_days * full_days, 2)
     period_label = f"{as_of.year} YTD through {as_of.isoformat()}" if granularity == "yearly" else f"{_month_label(_month_key(as_of))} through {as_of.isoformat()}"
     reporting["projection_qualification"] = "Straight-line estimate from recorded activity, not observed spend; coverage is unverified."
+
+    if window == "rolling":
+        projection = total
+        period_label = f"Last {elapsed_days} days through {as_of.isoformat()}"
+        reporting["projection_qualification"] = "Complete rolling window; no projection applied."
 
     comparison = _merge_comparison(cur_cats, prev_cats)
     top_driver = None

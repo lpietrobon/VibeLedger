@@ -13,7 +13,7 @@ export function CategoryComparison({
   getCategoryHref?: (category: string) => string;
 }) {
   const max = Math.max(1, ...data.map((d) => Math.max(d.current, d.previous)));
-  const sorted = [...data].sort((a, b) => Math.max(b.current, b.previous) - Math.max(a.current, a.previous));
+  const sorted = [...data].sort((a, b) => b.current - a.current);
 
   return (
     <div>

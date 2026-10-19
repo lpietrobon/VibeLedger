@@ -21,6 +21,7 @@ vi.mock("@/lib/api/client", () => ({
   getOverviewSummary: vi.fn(),
   getCashflowTrend: vi.fn(),
   getCategoryComparison: vi.fn(),
+  getCategoryComparisonPeriod: vi.fn(),
   getTransactions: vi.fn(),
   getSpendingSummary: vi.fn(),
   getCumulativeSpending: vi.fn(),
@@ -174,6 +175,9 @@ beforeEach(() => {
     projection: 134,
     topDriver: { category: CATEGORY, amount: 67 },
   });
+  vi.mocked(api.getCategoryComparisonPeriod).mockImplementation(async () => ({
+    items: await api.getCategoryComparison(), reporting,
+  }));
   vi.mocked(api.getCumulativeSpending).mockResolvedValue([]);
   vi.mocked(api.getCategoryCatalog).mockResolvedValue([]);
   vi.mocked(api.getTransactions).mockResolvedValue({ total: activityRows.length, items: activityRows });
@@ -204,6 +208,34 @@ describe("PI-13 frozen category drilldown contract", () => {
     mount(<SpendingPage />);
     await settle();
     await settle();
+    expect(categoryLink()?.getAttribute("href")).toBe(EXPECTED_HREF);
+  });
+
+  it("switches rolling windows and drills into their server-reported dates", async () => {
+    vi.mocked(api.getCategoryComparisonPeriod).mockImplementation(async (_granularity, window) => ({
+      items: [{ category: CATEGORY, current: 67, previous: 30 }],
+      reporting: window === "rolling" ? {
+        ...reporting,
+        currentPeriod: { ...reporting.currentPeriod, startDate: "2032-03-18", endDate: "2032-04-16" },
+        previousPeriod: { ...reporting.previousPeriod, startDate: "2032-02-17", endDate: "2032-03-17" },
+      } : reporting,
+    }));
+    mount(<SpendingPage />);
+    await settle();
+    const button = (label: string) => [...host.querySelectorAll("button")].find(node => node.textContent === label)!;
+    await act(async () => button("Rolling").click());
+    await settle();
+    expect(button("Rolling").getAttribute("aria-pressed")).toBe("true");
+    expect(api.getCategoryComparisonPeriod).toHaveBeenCalledWith("monthly", "rolling");
+    expect(host.textContent).toContain("Last 30 days vs preceding 30 days");
+    expect(categoryLink()?.getAttribute("href")).toContain("startDate=2032-03-18&endDate=2032-04-16");
+    await act(async () => button("yearly").click());
+    await settle();
+    expect(api.getCategoryComparisonPeriod).toHaveBeenCalledWith("yearly", "rolling");
+    expect(host.textContent).toContain("Last 365 days vs preceding 365 days");
+    await act(async () => button("Calendar").click());
+    await settle();
+    expect(api.getCategoryComparisonPeriod).toHaveBeenCalledWith("yearly", "calendar");
     expect(categoryLink()?.getAttribute("href")).toBe(EXPECTED_HREF);
   });
 
