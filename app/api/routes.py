@@ -2078,7 +2078,7 @@ def analytics_timeline_spikes(
     if start_date > end_date or (end_date - start_date).days > 3660:
         raise HTTPException(status_code=422, detail="Invalid timeline date window (maximum 3661 days)")
     lookback = start_date - timedelta(days=35)
-    reporting_scope(db, lookback, end_date, expense_only=True)
+    reporting_scope(db, lookback, end_date)
     q = db.query(Transaction.id, Transaction.date, _effective_merchant_expr(), expense_amount()).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )

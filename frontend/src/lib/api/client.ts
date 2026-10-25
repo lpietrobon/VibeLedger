@@ -178,7 +178,7 @@ export async function getCashflowTrend(params?: DateWindowParams): Promise<Cashf
   const rows = await jsonFetch<Array<{ month: string; income: number; expenses: number; net: number }>>(
     "/analytics/cashflow-trend", { start_date: params?.startDate, end_date: params?.endDate },
   );
-  return rows.slice(-12).map((row) => ({
+  return (params?.startDate ? rows : rows.slice(-12)).map((row) => ({
     month: row.month,
     income: row.income,
     expenses: -Math.abs(row.expenses),
