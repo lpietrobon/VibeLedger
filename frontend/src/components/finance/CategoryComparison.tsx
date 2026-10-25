@@ -6,11 +6,13 @@ export function CategoryComparison({
   currentLabel = "This month",
   previousLabel = "Last month",
   getCategoryHref,
+  showPrevious = true,
 }: {
   data: CategoryComparisonPoint[];
   currentLabel?: string;
   previousLabel?: string;
   getCategoryHref?: (category: string) => string;
+  showPrevious?: boolean;
 }) {
   const max = Math.max(1, ...data.map((d) => Math.max(d.current, d.previous)));
   const sorted = [...data].sort((a, b) => b.current - a.current);
@@ -22,10 +24,10 @@ export function CategoryComparison({
           <span className="h-2 w-2 rounded-sm bg-foreground" />
           {currentLabel}
         </span>
-        <span className="inline-flex items-center gap-1.5">
+        {showPrevious ? <span className="inline-flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-sm bg-muted-foreground/40" />
           {previousLabel}
-        </span>
+        </span> : null}
       </div>
       <ul className="space-y-3">
         {sorted.map((row) => {
@@ -51,9 +53,9 @@ export function CategoryComparison({
                 )}
                 <div className="flex shrink-0 items-center gap-2 tabular-nums">
                   <span>{formatCurrency(row.current, { compact: true })}</span>
-                  <span className={"text-xs " + diffTone}>
+                  {showPrevious ? <span className={"text-xs " + diffTone}>
                     {diff === 0 ? "±0" : (diff > 0 ? "+" : "-") + formatCurrency(Math.abs(diff), { compact: true })}
-                  </span>
+                  </span> : null}
                 </div>
               </div>
               <div className="space-y-1">
@@ -63,12 +65,12 @@ export function CategoryComparison({
                     style={{ width: `${(row.current / max) * 100}%` }}
                   />
                 </div>
-                <div className="h-2 overflow-hidden rounded-sm bg-secondary">
+                {showPrevious ? <div className="h-2 overflow-hidden rounded-sm bg-secondary">
                   <div
                     className="h-full rounded-sm bg-muted-foreground/40"
                     style={{ width: `${(row.previous / max) * 100}%` }}
                   />
-                </div>
+                </div> : null}
               </div>
             </li>
           );
