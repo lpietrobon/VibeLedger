@@ -1,7 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { ArrowDownUp, CalendarDays, Edit3, X } from "lucide-react";
+import { ArrowDownUp, Edit3, X } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
+import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
+import { initialDateSelection, validateRange } from "@/lib/dateRange";
+import type { DateRangeSelection } from "@/lib/dateRange";
 import { Section } from "@/components/finance/Section";
 import { SearchBar, SearchChips } from "@/components/finance/SearchBar";
 import { TransactionRow } from "@/components/finance/TransactionRow";
@@ -46,37 +49,6 @@ const SOURCE_LABEL: Record<string, string> = {
   default: "Auto",
 };
 
-type DatePreset = "all" | "this-month" | "last-month" | "last-30" | "this-year" | "custom";
-
-const DATE_PRESETS: Array<{ value: DatePreset; label: string }> = [
-  { value: "all", label: "All time" },
-  { value: "this-month", label: "This month" },
-  { value: "last-month", label: "Last month" },
-  { value: "last-30", label: "Last 30 days" },
-  { value: "this-year", label: "This year" },
-  { value: "custom", label: "Custom" },
-];
-
-function toDateInput(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function presetBounds(preset: DatePreset) {
-  const today = new Date();
-  const startOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const endOfThisMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-  const startOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  const endOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
-  const last30 = new Date(today);
-  last30.setDate(today.getDate() - 29);
-
-  if (preset === "this-month") return { startDate: toDateInput(startOfThisMonth), endDate: toDateInput(endOfThisMonth) };
-  if (preset === "last-month") return { startDate: toDateInput(startOfLastMonth), endDate: toDateInput(endOfLastMonth) };
-  if (preset === "last-30") return { startDate: toDateInput(last30), endDate: toDateInput(today) };
-  if (preset === "this-year") return { startDate: `${today.getFullYear()}-01-01`, endDate: toDateInput(today) };
-  return { startDate: "", endDate: "" };
-}
-
 export default function TransactionsPage() {
   const queryClient = useQueryClient();
   const urlParams = new URLSearchParams(window.location.search);
@@ -86,9 +58,16 @@ export default function TransactionsPage() {
   const comparison = urlParams.get("comparison");
   const [query, setQuery] = useState(urlParams.get("query") ?? "");
   const [category, setCategory] = useState(urlParams.get("category") ?? "All");
-  const [startDate, setStartDate] = useState(urlParams.get("startDate") ?? "");
-  const [endDate, setEndDate] = useState(urlParams.get("endDate") ?? "");
-  const [datePreset, setDatePreset] = useState<DatePreset>(startDate || endDate ? "custom" : "all");
+  const [dateRange, setDateRange] = useState<DateRangeSelection>(() => {
+    const startDate = urlParams.get("startDate");
+    const endDate = urlParams.get("endDate");
+    if (startDate !== null || endDate !== null) {
+      return { preset: "custom", comparison: "none", startDate: startDate ?? "", endDate: endDate ?? "" };
+    }
+    return initialDateSelection("all");
+  });
+  const startDate = dateRange.startDate;
+  const endDate = dateRange.endDate;
   const [sort, setSort] = useState(urlParams.get("sort") ?? "date");
   const [order, setOrder] = useState(urlParams.get("order") ?? "desc");
   const [selected, setSelected] = useState<Transaction | null>(null);
@@ -104,7 +83,8 @@ export default function TransactionsPage() {
   const serverQuery = [filter ? FILTER_QUERY[filter] : "", query].filter(Boolean).join(" ");
 
   const tx = useQuery({
-    queryKey: ["all-tx", serverQuery, category, startDate, endDate, limit],
+    enabled: validateRange(dateRange, dateRange.preset === "all"),
+    queryKey: ["all-tx", serverQuery, category, startDate, endDate, limit, sort, order],
     queryFn: () => getTransactions({
       query: serverQuery, category, startDate, endDate, limit,
       sort: sort === "amount" ? "amount" : "date",
@@ -134,14 +114,6 @@ export default function TransactionsPage() {
   const clearFilter = () => {
     window.history.replaceState(null, "", `${basePath}/transactions`);
     window.location.reload();
-  };
-
-  const selectDatePreset = (nextPreset: DatePreset) => {
-    setDatePreset(nextPreset);
-    if (nextPreset === "custom") return;
-    const bounds = presetBounds(nextPreset);
-    setStartDate(bounds.startDate);
-    setEndDate(bounds.endDate);
   };
 
   const handleSave = async (
@@ -261,9 +233,9 @@ export default function TransactionsPage() {
             </button>
           </div>
         ) : null}
-        {source && category !== "All" && startDate && endDate ? (
+        {source && startDate && endDate ? (
           <div className="mb-3 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs text-sky-900">
-            Inspecting exact spending category <strong>{category}</strong> from {startDate} through {endDate}
+            Inspecting {category === "All" ? "posted spending" : <>exact spending category <strong>{category}</strong></>} from {startDate} through {endDate}
             {comparison ? ` · ${comparison} period` : ""}{source ? ` · from ${source}` : ""}.
           </div>
         ) : null}
@@ -288,39 +260,7 @@ export default function TransactionsPage() {
               </optgroup>
             ))}
           </select>
-          <div className="inline-flex h-10 min-w-0 flex-1 items-center rounded-md border border-input bg-background text-sm md:h-9 md:flex-none">
-            <CalendarDays className="ml-2 h-4 w-4 text-muted-foreground" />
-            <select
-              value={datePreset}
-              onChange={(e) => selectDatePreset(e.target.value as DatePreset)}
-              aria-label="Date range"
-              className="h-full bg-transparent px-2 text-sm outline-none"
-            >
-              {DATE_PRESETS.map((preset) => (
-                <option key={preset.value} value={preset.value}>
-                  {preset.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          {datePreset === "custom" ? (
-            <>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                aria-label="Start date"
-                className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm md:h-9 md:flex-none"
-              />
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                aria-label="End date"
-                className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm md:h-9 md:flex-none"
-              />
-            </>
-          ) : null}
+          <div className="w-full"><DateRangeSelector value={dateRange} onChange={setDateRange} allowAll /></div>
           <div className="inline-flex h-10 min-w-0 flex-1 items-center rounded-md border border-input bg-background text-sm md:h-9 md:flex-none">
             <ArrowDownUp className="ml-2 h-4 w-4 text-muted-foreground" />
             <select

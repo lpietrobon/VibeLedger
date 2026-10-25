@@ -19,7 +19,7 @@ def detect_spikes(rows, start: date, end: date):
     charges = defaultdict(list)
     first_recorded = None
     for ident, day, merchant, amount in rows:
-        if not start - timedelta(days=28) <= day <= end:
+        if not start - timedelta(days=35) <= day <= end:
             continue
         first_recorded = min(first_recorded, day) if first_recorded else day
         amount = round(float(amount or 0), 2)

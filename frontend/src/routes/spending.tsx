@@ -11,6 +11,7 @@ import { SearchBar } from "@/components/finance/SearchBar";
 import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
 import { SpendingTimelineChart } from "@/components/finance/charts/SpendingTimelineChart";
 import { initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
+import type { DateRangeSelection } from "@/lib/dateRange";
 import {
   CATEGORIES, getCategoryComparisonPeriod, getCumulativeSpending, getSpendingSummary,
   getSpendingTimeline, getTransactions, patchTransactionAnnotation,
@@ -25,8 +26,8 @@ const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
 
 export default function SpendingPage() {
   const queryClient = useQueryClient();
-  const [selectedRange, setSelectedRange] = useState(() => ({
-    ...initialDateSelection("current-month"), comparison: "previous-month" as const,
+  const [selectedRange, setSelectedRange] = useState<DateRangeSelection>(() => ({
+    ...initialDateSelection("current-month"), comparison: "previous-month",
   }));
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
