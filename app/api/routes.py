@@ -2084,7 +2084,7 @@ def analytics_timeline_spikes(
     )
     q = posted_activity(q, include_transfers=False)
     q = q.filter(Transaction.date >= lookback, Transaction.date <= end_date)
-    rows = [(ident, day, merchant, amount) for ident, day, merchant, amount in q.all() if amount != 0]
+    rows = [(ident, day, merchant, float(amount)) for ident, day, merchant, amount in q.all() if amount != 0]
     totals = {}
     for _, day, _, amount in rows:
         if start_date <= day <= end_date:
