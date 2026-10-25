@@ -12,6 +12,7 @@ import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
 import { SpendingTimelineChart } from "@/components/finance/charts/SpendingTimelineChart";
 import { initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
+import type { DateWindowParams } from "@/lib/api/client";
 import {
   CATEGORIES, getCategoryComparisonPeriod, getCumulativeSpending, getSpendingSummary,
   getSpendingTimeline, getTransactions, patchTransactionAnnotation,
@@ -35,7 +36,7 @@ export default function SpendingPage() {
   const [selectedPoint, setSelectedPoint] = useState<string | null>(null);
   const valid = validateRange(selectedRange);
   const dates = rangeQuery(selectedRange);
-  const params = dates ?? {};
+  const params: DateWindowParams = dates ?? {};
   const dataKey = [params.startDate, params.endDate, params.compareStartDate, params.compareEndDate];
   const summary = useQuery({
     queryKey: ["spending-summary", ...dataKey],

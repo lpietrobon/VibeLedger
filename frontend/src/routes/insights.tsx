@@ -6,6 +6,7 @@ import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
 import { getCashflowSankey, getCategoryMovers, getSpendingTimeline } from "@/lib/api/client";
 import { initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
+import type { DateWindowParams } from "@/lib/api/client";
 
 const SankeyChart = lazy(() => import("@/components/finance/charts/SankeyChart"));
 const MoversChart = lazy(() => import("@/components/finance/charts/MoversChart"));
@@ -18,7 +19,7 @@ export default function InsightsPage() {
   const [expandedFlow, setExpandedFlow] = useState<string | null>(null);
   const valid = validateRange(selectedRange);
   const bounds = { startDate: selectedRange.startDate, endDate: selectedRange.endDate };
-  const params = rangeQuery(selectedRange) ?? {};
+  const params: DateWindowParams = rangeQuery(selectedRange) ?? {};
   const key = [params.startDate, params.endDate, params.compareStartDate, params.compareEndDate];
   const sankey = useQuery({
     queryKey: ["cashflow-sankey", bounds.startDate, bounds.endDate],

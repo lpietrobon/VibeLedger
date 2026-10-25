@@ -5,6 +5,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
 import { initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
+import type { DateWindowParams } from "@/lib/api/client";
 import { KpiCard } from "@/components/finance/KpiCard";
 import { Delta } from "@/components/finance/Delta";
 import { Section } from "@/components/finance/Section";
@@ -33,7 +34,7 @@ export default function OverviewPage() {
   const [dateRange, setDateRange] = useState<DateRangeSelection>(() => ({
     ...initialDateSelection("current-month"), comparison: "previous-month",
   }));
-  const dates = rangeQuery(dateRange) ?? {};
+  const dates: DateWindowParams = rangeQuery(dateRange) ?? {};
   const key = [dates.startDate, dates.endDate, dates.compareStartDate, dates.compareEndDate];
   const valid = validateRange(dateRange);
   const summary = useQuery({ queryKey: ["overview", ...key], queryFn: () => getOverviewSummary(dates), enabled: valid });
