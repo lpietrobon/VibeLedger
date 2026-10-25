@@ -1525,18 +1525,46 @@ def _merge_comparison(current: dict[str, float], previous: dict[str, float]) -> 
     return rows
 
 
+def _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date):
+    """Validate optional inclusive date windows. A custom range may have no prior."""
+    if start_date is None and end_date is None:
+        if compare_start_date is not None or compare_end_date is not None:
+            raise HTTPException(status_code=422, detail="Comparison requires a selected date range")
+        return None
+    if start_date is None or end_date is None or start_date > end_date:
+        raise HTTPException(status_code=422, detail="Both From and To must be valid and ordered")
+    if (end_date - start_date).days > 3660:
+        raise HTTPException(status_code=422, detail="Date window exceeds ten years")
+    if (compare_start_date is None) != (compare_end_date is None):
+        raise HTTPException(status_code=422, detail="Both comparison boundaries are required")
+    if compare_start_date is not None and compare_start_date > compare_end_date:
+        raise HTTPException(status_code=422, detail="Invalid comparison window")
+    return (start_date, end_date, compare_start_date or start_date, compare_end_date or end_date)
+
+
 @router.get("/analytics/overview")
-def analytics_overview(db: Session = Depends(get_db), reporting_date: date | None = Query(default=None)):
+def analytics_overview(
+    db: Session = Depends(get_db),
+    reporting_date: date | None = Query(default=None),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    compare_start_date: date | None = Query(default=None),
+    compare_end_date: date | None = Query(default=None),
+):
     """One-shot summary for the mobile Overview screen (KPIs + needs-attention)."""
     accounts = accounts_summary(db)
     as_of = reporting_date if isinstance(reporting_date, date) else date.today()
-    bounds = comparison_bounds(as_of)
+    explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
+    bounds = explicit or comparison_bounds(as_of)
     start, end, previous_start, previous_end = bounds
     reporting = comparison_reporting(db, bounds)
+    if explicit and compare_start_date is None:
+        reporting["comparison_available"] = False
+        reporting["comparison_qualification"] = "No comparison selected."
     current_rows = cashflow_trend(db, start, end, include_transfers=False)
-    prior_rows = cashflow_trend(db, previous_start, previous_end, include_transfers=False)
-    cur = current_rows[0] if current_rows else {}
-    pre = prior_rows[0] if prior_rows else {}
+    prior_rows = cashflow_trend(db, previous_start, previous_end, include_transfers=False) if not explicit or compare_start_date else []
+    cur = {key: round(sum(r[key] for r in current_rows), 2) for key in ("expenses", "income", "net")}
+    pre = {key: round(sum(r[key] for r in prior_rows), 2) for key in ("expenses", "income", "net")}
 
     # Counted over transactions, not annotations: an annotation whose transaction
     # is gone is invisible everywhere else, so counting it here would advertise
@@ -1599,14 +1627,23 @@ def analytics_spending_summary(
     granularity: str = Query(default="monthly"),
     reporting_date: date | None = Query(default=None),
     window: Literal["calendar", "rolling"] = Query(default="calendar"),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    compare_start_date: date | None = Query(default=None),
+    compare_end_date: date | None = Query(default=None),
 ):
     """Period spend total, comparison, projection, top driver, and per-category diff."""
     as_of = reporting_date if isinstance(reporting_date, date) else date.today()
-    bounds = comparison_bounds(as_of, granularity, window)
+    explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
+    bounds = explicit or comparison_bounds(as_of, granularity, window)
     cur_start, cur_end, prev_start, prev_end = bounds
     reporting = comparison_reporting(db, bounds)
+    if explicit and compare_start_date is None:
+        reporting["comparison_available"] = False
+        reporting["comparison_qualification"] = "No comparison selected."
     cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
-    prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
+    prev_cats = ({r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
+                 if not explicit or compare_start_date else {})
     total = round(sum(cur_cats.values()), 2)
     previous_total = round(sum(prev_cats.values()), 2)
     elapsed_days = (cur_end - cur_start).days + 1
@@ -1616,7 +1653,11 @@ def analytics_spending_summary(
     period_label = f"{as_of.year} YTD through {as_of.isoformat()}" if granularity == "yearly" else f"{_month_label(_month_key(as_of))} through {as_of.isoformat()}"
     reporting["projection_qualification"] = "Straight-line estimate from recorded activity, not observed spend; coverage is unverified."
 
-    if window == "rolling":
+    if explicit:
+        projection = total
+        period_label = f"{cur_start.isoformat()} through {cur_end.isoformat()}"
+        reporting["projection_qualification"] = "Explicit selected range; no projection applied."
+    elif window == "rolling":
         projection = total
         period_label = f"Last {elapsed_days} days through {as_of.isoformat()}"
         reporting["projection_qualification"] = "Complete rolling window; no projection applied."
@@ -1672,9 +1713,41 @@ def analytics_cumulative_spend(
     db: Session = Depends(get_db),
     granularity: str = Query(default="monthly"),
     reporting_date: date | None = Query(default=None),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    compare_start_date: date | None = Query(default=None),
+    compare_end_date: date | None = Query(default=None),
 ):
     """Cumulative spend pace for the current period vs the prior three."""
     anchor = reporting_date if isinstance(reporting_date, date) else date.today()
+    explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
+    if explicit:
+        start, end, prior_start, prior_end = explicit
+        def daily_values(a, b):
+            reporting_scope(db, a, b)
+            day_col = func.strftime("%Y-%m-%d", Transaction.date)
+            q = db.query(day_col, func.sum(expense_amount())).outerjoin(
+                TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+            )
+            q = posted_activity(q, include_transfers=False)
+            rows = q.filter(Transaction.date >= a, Transaction.date <= b).group_by(day_col).all()
+            return {key: round(float(amount or 0), 2) for key, amount in rows}
+
+        present = daily_values(start, end)
+        before = daily_values(prior_start, prior_end) if compare_start_date else {}
+        length = (end - start).days + 1
+        prev_length = (prior_end - prior_start).days + 1 if compare_start_date else 0
+        total = old_total = 0.0
+        result = []
+        for i in range(length):
+            day = start + timedelta(days=i)
+            total += present.get(day.isoformat(), 0.0)
+            if i < prev_length:
+                old_total += before.get((prior_start + timedelta(days=i)).isoformat(), 0.0)
+            result.append({"x": i + 1, "date": day.isoformat(), "current": round(total, 2),
+                           "previous1": round(old_total, 2) if i < prev_length else None,
+                           "previous2": None, "previous3": None})
+        return result
     keys = ("current", "previous1", "previous2", "previous3")
 
     if granularity == "yearly":
@@ -1951,6 +2024,10 @@ def analytics_category_movers(
     month: str | None = Query(default=None, description="YYYY-MM historical month; defaults to current month-to-date"),
     limit: int = Query(default=12, ge=1, le=50),
     reporting_date: date | None = Query(default=None),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    compare_start_date: date | None = Query(default=None),
+    compare_end_date: date | None = Query(default=None),
 ):
     """Top categories by absolute change in spend vs the previous month."""
     as_of = reporting_date if isinstance(reporting_date, date) else date.today()
@@ -1961,13 +2038,17 @@ def analytics_category_movers(
             raise HTTPException(status_code=422, detail="month must be YYYY-MM")
     anchor = _month_key(as_of)
     previous = _prev_month_key(anchor)
-    bounds = comparison_bounds(as_of)
+    explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
+    bounds = explicit or comparison_bounds(as_of)
     cur_start, cur_end, prev_start, prev_end = bounds
     reporting = comparison_reporting(db, bounds)
+    if explicit and compare_start_date is None:
+        reporting["comparison_available"] = False
+        reporting["comparison_qualification"] = "No comparison selected."
     current = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
-    previous_totals = {
+    previous_totals = ({
         r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)
-    }
+    } if not explicit or compare_start_date else {})
 
     rows = [
         {
@@ -2004,9 +2085,20 @@ def analytics_timeline_spikes(
     q = posted_activity(q, include_transfers=False)
     q = q.filter(Transaction.date >= lookback, Transaction.date <= end_date)
     rows = [(ident, day, merchant, amount) for ident, day, merchant, amount in q.all() if amount != 0]
+    totals = {}
+    for _, day, _, amount in rows:
+        if start_date <= day <= end_date:
+            key = day.isoformat()
+            totals[key] = round(totals.get(key, 0.0) + amount, 2)
+    days = []
+    day = start_date
+    while day <= end_date:
+        days.append({"date": day.isoformat(), "amount": totals.get(day.isoformat(), 0.0)})
+        day += timedelta(days=1)
     return {
         "start_date": str(start_date),
         "end_date": str(end_date),
+        "days": days,
         "spikes": detect_spikes(rows, start_date, end_date),
         "qualification": "Recorded posted spending only; historic account coverage is not verified.",
     }
