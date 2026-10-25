@@ -34,3 +34,13 @@ The prior gate allowed just 7 positive-spend days out of a 28-day window; 21 mis
 ## Validation protocol
 
 Run `python -m pytest tests/test_spending_accuracy_invariants.py tests/test_spike_interpretation_invariants.py tests/test_spk02_timeline_spikes_tdd.py -q`, then `python -m pytest -q`; also run `npm run typecheck && npm test && npm run build` under `frontend/`. Confirm the new tests pass **without editing the initial oracle**. Record passing CI runs and any residual correctness risks before recommending merging. Do not mark the roadmap's independent verification tasks complete unless an actual independent review is executed.
+
+## Green verification after fixes
+
+- Corrective commit: `014fef3ac01a4677462dac3ecf08881ea3e5b50a`.
+- [CI run 40234433136](https://github.com/lpietrobon/VibeLedger/actions/runs/40234433136): Python, frontend typecheck/test/build succeeded.
+- [Tests run 40234433159](https://github.com/lpietrobon/VibeLedger/actions/runs/40234433159): **316 Python tests passed** (one third-party deprecation warning), frontend tests/build and roadmap scanner succeeded.
+- Duplicate PR-triggered jobs [40234437536](https://github.com/lpietrobon/VibeLedger/actions/runs/40234437536) and [40234437649](https://github.com/lpietrobon/VibeLedger/actions/runs/40234437649) also passed at the corrective commit.
+- All initially failed test oracles remained unchanged. Two additional regression tests now pin that frequently occurring merchants must not masquerade as monthly bills, and ordinary rent alone must not be flagged.
+- Remaining limitation: heuristic spike quality requires labeled real-world cases; passing independent numerical and control-flow invariants does **not** estimate detection precision/recall or guarantee that any causal contribution statement is true.
+- No production migration, deployment, or independent human review is claimed.
