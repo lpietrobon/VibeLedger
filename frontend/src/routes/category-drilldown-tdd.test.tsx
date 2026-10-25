@@ -235,15 +235,20 @@ describe("PI-13 frozen category drilldown contract", () => {
       endDate: "2032-04-15",
     }));
     await change("custom");
-    const from = host.querySelector('input[aria-label="From date"]') as HTMLInputElement;
-    const to = host.querySelector('input[aria-label="To date"]') as HTMLInputElement;
-    await act(async () => {
-      from.value = "2032-04-01";
-      from.dispatchEvent(new Event("change", { bubbles: true }));
-      to.value = "2032-04-30";
-      to.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    await settle();
+    // Date input changes are separate browser events; use native setter so React's
+    // controlled-input value tracker observes the update (rather than a direct assignment).
+    const changeDate = async (ariaLabel: string, value: string) => {
+      const field = host.querySelector(`input[aria-label="${ariaLabel}"]`) as HTMLInputElement;
+      const setNative = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      await act(async () => {
+        setNative.call(field, value);
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await settle();
+    };
+    await changeDate("From date", "2032-04-01");
+    await changeDate("To date", "2032-04-30");
     expect(categoryLink()?.getAttribute("href")).toContain("startDate=2032-04-01&endDate=2032-04-30");
   });
 
