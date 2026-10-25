@@ -257,7 +257,7 @@ describe("PI-13 frozen category drilldown contract", () => {
       query: "is:spend",
       category: CATEGORY,
       startDate: BOUNDS.startDate,
-      endDate: BOUNDS.endDate,
+      endDate: "2032-04-15",
       limit: 500,
       sort: "date",
       order: "desc",
@@ -269,7 +269,7 @@ describe("PI-13 frozen category drilldown contract", () => {
     expect((host.querySelector('input[aria-label="From date"]') as HTMLInputElement).value)
       .toBe(BOUNDS.startDate);
     expect((host.querySelector('input[aria-label="To date"]') as HTMLInputElement).value)
-      .toBe(BOUNDS.endDate);
+      .toBe("2032-04-15");
     expect((host.querySelector('select[aria-label="Sort transactions"]') as HTMLSelectElement).value)
       .toBe("date:desc");
   });

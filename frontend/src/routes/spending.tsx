@@ -103,7 +103,9 @@ export default function SpendingPage() {
       <Section title="Daily spending · investigate peaks" className="mt-4">
         {timeline.isError ? <p role="alert" className="text-sm text-red-600">Could not load daily spending.</p> : null}
         {timeline.data ? <>
-          <div className="h-60"><SpendingTimelineChart days={timeline.data.days} spikes={timeline.data.spikes} onSelect={setSelectedPoint} /></div>
+          {timeline.data.days.length > 0
+            ? <div className="h-60"><SpendingTimelineChart days={timeline.data.days} spikes={timeline.data.spikes} onSelect={setSelectedPoint} /></div>
+            : <p className="text-xs text-muted-foreground">No daily points in this range.</p>}
           {selectedPoint ? (
             <div className="mt-2 rounded-md bg-secondary p-3 text-sm" aria-live="polite">
               <div className="font-semibold">{selectedPoint}</div>
