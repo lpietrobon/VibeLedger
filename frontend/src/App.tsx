@@ -24,8 +24,9 @@ function currentPath() {
 }
 
 const ROUTES: Record<string, React.ComponentType> = {
-  "/": OverviewPage,
+  "/": SpendingPage,
   "/spending": SpendingPage,
+  "/overview": OverviewPage,
   "/transactions": TransactionsPage,
   "/accounts": AccountsPage,
   "/more": MorePage,
