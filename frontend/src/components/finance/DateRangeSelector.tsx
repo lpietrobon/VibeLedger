@@ -11,7 +11,14 @@ export function DateRangeSelector({ value, onChange, allowAll = false, allowComp
     const dates = preset === "custom"
       ? { startDate: value.startDate || localToday(), endDate: value.endDate || localToday() }
       : presetBounds(preset);
-    onChange({ ...value, preset, ...dates, comparison: preset === "all" ? "none" : value.comparison });
+    // Preset switches choose the natural comparison window; users can override
+    // it independently afterwards. Custom dates retain the existing choice.
+    const comparison = preset === "all" ? "none"
+      : preset === "current-month" ? "previous-month"
+      : preset === "current-year" ? "previous-year"
+      : preset === "last-30" || preset === "last-365" ? "previous-period"
+      : value.comparison;
+    onChange({ ...value, preset, ...dates, comparison });
   };
   const valid = validateRange(value, allowAll && value.preset === "all");
   const previous = comparisonBounds(value, value.comparison);
