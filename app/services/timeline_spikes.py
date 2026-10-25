@@ -31,8 +31,10 @@ def detect_spikes(rows, start: date, end: date):
     while day <= end:
         observed = round(amounts[day], 2)
         # Do not interpret absence of recorded activity as verified zero history.
-        enough = first_recorded is not None and first_recorded <= day - timedelta(days=21)
         historic = [amounts[day - timedelta(days=n)] for n in range(1, 29)]
+        # Sparse posted histories are not verified zero-spend days: abstain.
+        enough = (first_recorded is not None and first_recorded <= day - timedelta(days=21)
+                  and sum(value > 0 for value in historic) >= 7)
         baseline = round(median(historic), 2) if enough else None
         excess = round(observed - baseline, 2) if baseline is not None else None
         is_spike = bool(baseline is not None and excess is not None
