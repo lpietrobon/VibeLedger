@@ -27,7 +27,7 @@ export default function InsightsPage() {
   });
   const movers = useQuery({
     queryKey: ["category-movers", ...key],
-    queryFn: () => getCategoryMovers(params), enabled: valid,
+    queryFn: () => getCategoryMovers(params), enabled: valid && Boolean(params.compareStartDate),
   });
   // Reuse the exact canonical daily expense window rather than a second calendar-year algorithm.
   const daily = useQuery({
@@ -52,7 +52,8 @@ export default function InsightsPage() {
         {sankey.isError ? <p role="alert" className="text-xs text-red-600">{sankey.error.message}</p> : null}
       </Section>
       <Section title="Category movers" className="mt-4">
-        {movers.data ? movers.data.items.length ? <>
+        {!params.compareStartDate ? <p className="text-sm text-muted-foreground">Select a comparison to see category changes.</p>
+        : movers.data ? movers.data.items.length ? <>
           <p className="mb-2 text-xs text-muted-foreground">
             {selectedRange.startDate} – {selectedRange.endDate}
             {params.compareStartDate ? ` vs ${params.compareStartDate} – ${params.compareEndDate}` : " (no comparison)"}

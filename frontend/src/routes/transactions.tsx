@@ -260,7 +260,7 @@ export default function TransactionsPage() {
               </optgroup>
             ))}
           </select>
-          <div className="w-full"><DateRangeSelector value={dateRange} onChange={setDateRange} allowAll /></div>
+          <div className="w-full"><DateRangeSelector value={dateRange} onChange={setDateRange} allowAll allowComparison={false} /></div>
           <div className="inline-flex h-10 min-w-0 flex-1 items-center rounded-md border border-input bg-background text-sm md:h-9 md:flex-none">
             <ArrowDownUp className="ml-2 h-4 w-4 text-muted-foreground" />
             <select
