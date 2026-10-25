@@ -2,7 +2,7 @@
 
 Start with [_registry.md](_registry.md), then open the relevant epic and task.
 [Trustworthy cashflow](epics/010-trustworthy-cashflow/_epic.md) is complete. The
-planned epics are [product integrity and cleanup](epics/020-product-integrity/_epic.md)
+planned epics are [product integrity and cleanup](epics/020-product-integrity/_epic.md),
 [inspectable aggregates](epics/030-inspectable-aggregates/_epic.md),
 [timeline spike attribution](epics/040-timeline-spike-attribution/_epic.md),
 and [shared date range semantics](epics/050-shared-date-range-semantics/_epic.md), with the
