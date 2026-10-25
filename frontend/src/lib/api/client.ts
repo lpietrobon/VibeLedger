@@ -252,13 +252,13 @@ export async function getCategoryComparisonPeriod(
 
 export async function getCumulativeSpending(params?: {
   granularity: "monthly" | "yearly";
-} & DateWindowParams): Promise<CumulativeSpendingPoint[]> {
+} & DateWindowParams & { reportingDate?: string }): Promise<CumulativeSpendingPoint[]> {
   const rows = await jsonFetch<
     Array<{ x: number; date?: string; current: number | null; previous1: number | null; previous2: number | null; previous3: number | null }>
-  >("/analytics/cumulative-spend", { granularity: params?.granularity ?? "monthly", ...dateWindowParams(params) });
+  >("/analytics/cumulative-spend", { granularity: params?.granularity ?? "monthly", reporting_date: params?.reportingDate, ...dateWindowParams(params) });
   return rows.map((row) => ({
     day: row.x,
-    date: row.date,
+    ...(row.date ? { date: row.date } : {}),
     current: row.current,
     previous1: row.previous1,
     previous2: row.previous2,

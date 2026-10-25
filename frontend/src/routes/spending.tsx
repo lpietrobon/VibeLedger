@@ -36,6 +36,10 @@ export default function SpendingPage() {
   const [selectedPoint, setSelectedPoint] = useState<string | null>(null);
   const valid = validateRange(selectedRange);
   const granularity = selectedRange.preset === "current-year" || selectedRange.preset === "last-365" ? "yearly" : "monthly";
+  // Preserve the established 3 prior calendar-pace overlays when comparing
+  // an active fixed period, while other custom windows use explicit date bounds.
+  const calendarPace = (selectedRange.preset === "current-month" && selectedRange.comparison === "previous-month")
+    || (selectedRange.preset === "current-year" && selectedRange.comparison === "previous-year");
   const dates = rangeQuery(selectedRange);
   const params: DateWindowParams = dates ?? {};
   const dataKey = [params.startDate, params.endDate, params.compareStartDate, params.compareEndDate];
@@ -45,8 +49,10 @@ export default function SpendingPage() {
     enabled: valid,
   });
   const cumulative = useQuery({
-    queryKey: ["cumulative", granularity, ...dataKey],
-    queryFn: () => getCumulativeSpending({ granularity, ...params }),
+    queryKey: ["cumulative", granularity, calendarPace, ...dataKey],
+    queryFn: () => getCumulativeSpending(calendarPace
+      ? { granularity, reportingDate: selectedRange.endDate }
+      : { granularity, ...params }),
     enabled: valid,
   });
   const comparison = useQuery({
