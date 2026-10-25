@@ -3,8 +3,13 @@
 Start with [_registry.md](_registry.md), then open the relevant epic and task.
 [Trustworthy cashflow](epics/010-trustworthy-cashflow/_epic.md) is complete. The
 planned epics are [product integrity and cleanup](epics/020-product-integrity/_epic.md)
-and [inspectable aggregates](epics/030-inspectable-aggregates/_epic.md), with the
-explicit cross-epic dependency recorded in their task metadata. Read an
+[inspectable aggregates](epics/030-inspectable-aggregates/_epic.md),
+[timeline spike attribution](epics/040-timeline-spike-attribution/_epic.md),
+and [shared date range semantics](epics/050-shared-date-range-semantics/_epic.md), with the
+explicit cross-epic dependencies recorded in task metadata. The two new spending
+UX epics decompose the [October 2026 priorities](spending-ux-priorities-2026-10-25.md)
+into separately assigned test-first, implementation and independent-verification
+slices. They are planned, not implemented. Read an
 epic's `spirit.md` before choosing an implementation. The
 [earlier feature backlog](../finance-intelligence-roadmap.md) is preserved and
 deferred; it is not the current execution queue.

@@ -1,6 +1,6 @@
 # Blocked / Issues (generated — do not edit by hand)
 
-_Last scan: 2026-09-18T17:17:14+00:00_
+_Last scan: 2026-10-25 (metadata regeneration)_
 
 None.
 

@@ -34,3 +34,12 @@ The Spending view is the default place to establish situational awareness. Prese
 4. Create the formal epic/tasks with dependencies, acceptance criteria and append-only execution logs. Respect existing `docs/roadmap/README.md` convention: **do not hand-edit generated `_registry.md` or `_blocked.md`**; run `python docs/roadmap/scan.py` after task changes and before committing the formally scheduled roadmap.
 
 Non-goals: LLM/OpenClaw integration, general-purpose agent, arbitrary configurable rolling-duration presets, changing deterministic categorization, investment tracking within these spending tasks.
+
+## Decomposition update (2026-10-25)
+
+The proposed objectives are now execution tasks in separate epics:
+[040 timeline spike attribution](epics/040-timeline-spike-attribution/_epic.md)
+(**time-series charts only; no Sankey spikes**) and
+[050 shared date range semantics](epics/050-shared-date-range-semantics/_epic.md).
+Each epic separates red-test contract, implementation and independent verification;
+this document remains historical product context, not an execution task.
