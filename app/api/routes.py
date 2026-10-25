@@ -75,6 +75,7 @@ from app.services.duplicate_corrections import (
 from app.services.refund_detector import classify_refunds
 from app.services.category_catalog import merge_catalog
 from app.services.recurring_detector import detect_recurring
+from app.services.timeline_spikes import detect_spikes
 from app.services.search_query import (
     IS_VALUES,
     SEARCH_FIELDS,
@@ -1983,6 +1984,31 @@ def analytics_category_movers(
         "month": anchor,
         "previous_month": previous,
         "items": rows[:limit],
+    }
+
+
+@router.get("/analytics/timeline-spikes")
+def analytics_timeline_spikes(
+    db: Session = Depends(get_db),
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+):
+    """Timeline-only spike annotations; no inference or Sankey behavior changes."""
+    if start_date > end_date or (end_date - start_date).days > 3660:
+        raise HTTPException(status_code=422, detail="Invalid timeline date window (maximum 3661 days)")
+    lookback = start_date - timedelta(days=35)
+    reporting_scope(db, lookback, end_date, expense_only=True)
+    q = db.query(Transaction.id, Transaction.date, _effective_merchant_expr(), expense_amount()).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+    )
+    q = posted_activity(q, include_transfers=False)
+    q = q.filter(Transaction.date >= lookback, Transaction.date <= end_date)
+    rows = [(ident, day, merchant, amount) for ident, day, merchant, amount in q.all() if amount != 0]
+    return {
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+        "spikes": detect_spikes(rows, start_date, end_date),
+        "qualification": "Recorded posted spending only; historic account coverage is not verified.",
     }
 
 
