@@ -35,22 +35,23 @@ export default function SpendingPage() {
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<string | null>(null);
   const valid = validateRange(selectedRange);
+  const granularity = selectedRange.preset === "current-year" || selectedRange.preset === "last-365" ? "yearly" : "monthly";
   const dates = rangeQuery(selectedRange);
   const params: DateWindowParams = dates ?? {};
   const dataKey = [params.startDate, params.endDate, params.compareStartDate, params.compareEndDate];
   const summary = useQuery({
-    queryKey: ["spending-summary", ...dataKey],
-    queryFn: () => getSpendingSummary({ granularity: "monthly", ...params }),
+    queryKey: ["spending-summary", granularity, ...dataKey],
+    queryFn: () => getSpendingSummary({ granularity, ...params }),
     enabled: valid,
   });
   const cumulative = useQuery({
-    queryKey: ["cumulative", ...dataKey],
-    queryFn: () => getCumulativeSpending({ granularity: "monthly", ...params }),
+    queryKey: ["cumulative", granularity, ...dataKey],
+    queryFn: () => getCumulativeSpending({ granularity, ...params }),
     enabled: valid,
   });
   const comparison = useQuery({
-    queryKey: ["category-comparison", ...dataKey],
-    queryFn: () => getCategoryComparisonPeriod("monthly", "calendar", params),
+    queryKey: ["category-comparison", granularity, ...dataKey],
+    queryFn: () => getCategoryComparisonPeriod(granularity, "calendar", params),
     enabled: valid,
   });
   const timeline = useQuery({

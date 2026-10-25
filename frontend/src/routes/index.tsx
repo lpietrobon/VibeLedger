@@ -48,10 +48,7 @@ export default function OverviewPage() {
 
   const s = summary.data;
   const comparisonAvailable = s?.reporting.comparisonAvailable ?? false;
-  const currentPeriod = s?.reporting.currentPeriod;
-  const drilldownBounds = currentPeriod?.startDate && currentPeriod.endDate
-    ? { startDate: currentPeriod.startDate, endDate: currentPeriod.endDate }
-    : null;
+  const drilldownBounds = valid ? { startDate: dateRange.startDate, endDate: dateRange.endDate } : null;
 
   return (
     <AppShell>
