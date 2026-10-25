@@ -12,7 +12,6 @@ dependencies are done; a blank assignment means unassigned.
 | [010-trustworthy-cashflow](epics/010-trustworthy-cashflow/_epic.md) | Trustworthy cashflow across linked accounts | done | 3 |  |
 | [020-product-integrity](epics/020-product-integrity/_epic.md) | Product integrity and cleanup | planned | 3 |  |
 | [030-inspectable-aggregates](epics/030-inspectable-aggregates/_epic.md) | Inspectable aggregates | planned | 1 |  |
-
 | [040-timeline-spike-attribution](epics/040-timeline-spike-attribution/_epic.md) | Timeline spike attribution and direct investigation | planned | 1 |  |
 | [050-shared-date-range-semantics](epics/050-shared-date-range-semantics/_epic.md) | Shared date selection and deterministic comparison semantics | planned | 1 |  |
 ## Tasks
