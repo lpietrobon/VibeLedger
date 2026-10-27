@@ -13,7 +13,7 @@ vi.mock("@/lib/api/client", () => ({
   getSpendingSummary: vi.fn(), getCategoryComparisonPeriod: vi.fn(),
   getCumulativeSpending: vi.fn(), getSpendingTimeline: vi.fn(), getSpendingDay: vi.fn(),
   getTransactions: vi.fn(), patchTransactionAnnotation: vi.fn(),
-  getCategoryCatalog: vi.fn(),
+  getCategoryCatalog: vi.fn(), syncAllAccounts: vi.fn(),
 }));
 vi.mock("@/lib/api/cache", () => ({ invalidateLedger: vi.fn(async () => undefined) }));
 import * as api from "@/lib/api/client";
