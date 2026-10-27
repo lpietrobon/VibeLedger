@@ -1401,29 +1401,39 @@ def cashflow_trend(
     include_transfers: bool = Query(default=False),
 ):
     reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
-    month_col = func.strftime("%Y-%m", Transaction.date).label("month")
-    q = (
-        db.query(
-            month_col,
-            func.sum(expense_amount()).label("expenses"),
-            func.sum(income_amount()).label("income"),
-        )
-        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="From date must precede To date")
+    daily = bool(start_date and end_date and (end_date - start_date).days < 45)
+    bucket = func.strftime("%Y-%m-%d" if daily else "%Y-%m", Transaction.date).label("period")
+    q = db.query(bucket, func.sum(expense_amount()), func.sum(income_amount())).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
     q = posted_activity(q, include_transfers=include_transfers)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
         q = q.filter(Transaction.date <= end_date)
-    rows = q.group_by(month_col).order_by(month_col).all()
+    rows = q.group_by(bucket).order_by(bucket).all()
+    totals = {
+        period: (round(float(expenses or 0), 2), round(float(income or 0), 2))
+        for period, expenses, income in rows
+    }
+    # For a short selected window, show EVERY calendar day, not just the days
+    # on which the bank reported activity. A current month is not one point.
+    keys = []
+    if daily:
+        d = start_date
+        while d <= end_date:
+            keys.append(d.isoformat())
+            d += timedelta(days=1)
+    else:
+        keys = sorted(totals)
     return [
-        {
-            "month": month,
-            "expenses": round(float(expenses or 0), 2),
-            "income": round(float(income or 0), 2),
-            "net": round(float((income or 0) - (expenses or 0)), 2),
-        }
-        for month, expenses, income in rows
+        {"month": key, "granularity": "daily" if daily else "monthly",
+         "expenses": totals.get(key, (0.0, 0.0))[0],
+         "income": totals.get(key, (0.0, 0.0))[1],
+         "net": round(totals.get(key, (0.0, 0.0))[1] - totals.get(key, (0.0, 0.0))[0], 2)}
+        for key in keys
     ]
 
 
@@ -1673,6 +1683,7 @@ def analytics_spending_summary(
         "reporting": reporting,
         "period_label": period_label,
         "total": total,
+        "daily_average": round(total / elapsed_days, 2),
         "previous_total": previous_total,
         "change": round(total - previous_total, 2) if reporting["comparison_available"] else None,
         "change_pct": change_pct,
@@ -1717,12 +1728,34 @@ def analytics_cumulative_spend(
     end_date: date | None = Query(default=None),
     compare_start_date: date | None = Query(default=None),
     compare_end_date: date | None = Query(default=None),
+    compare2_start_date: date | None = Query(default=None),
+    compare2_end_date: date | None = Query(default=None),
+    compare3_start_date: date | None = Query(default=None),
+    compare3_end_date: date | None = Query(default=None),
 ):
-    """Cumulative spend pace for the current period vs the prior three."""
+    """Date-aligned cumulative pace using explicit comparison bounds for 0–3 past windows."""
     anchor = reporting_date if isinstance(reporting_date, date) else date.today()
     explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
     if explicit:
         start, end, prior_start, prior_end = explicit
+        if (compare2_start_date is None) != (compare2_end_date is None) or (
+            (compare3_start_date is None) != (compare3_end_date is None)
+        ):
+            raise HTTPException(status_code=422, detail="Comparison window must have both dates")
+        if compare3_start_date and not compare2_start_date:
+            raise HTTPException(status_code=422, detail="Comparison windows must be sequential")
+        if compare2_start_date and not compare_start_date:
+            raise HTTPException(status_code=422, detail="Comparison windows must be sequential")
+        windows = [(start, end)]
+        if compare_start_date:
+            windows.append((prior_start, prior_end))
+        if compare2_start_date:
+            windows.append((compare2_start_date, compare2_end_date))
+        if compare3_start_date:
+            windows.append((compare3_start_date, compare3_end_date))
+        for begin, finish in windows:
+            if begin > finish or (finish - begin).days > 3660:
+                raise HTTPException(status_code=422, detail="Invalid comparison period")
         def daily_values(a, b):
             reporting_scope(db, a, b)
             day_col = func.strftime("%Y-%m-%d", Transaction.date)
@@ -1733,20 +1766,23 @@ def analytics_cumulative_spend(
             rows = q.filter(Transaction.date >= a, Transaction.date <= b).group_by(day_col).all()
             return {key: round(float(amount or 0), 2) for key, amount in rows}
 
-        present = daily_values(start, end)
-        before = daily_values(prior_start, prior_end) if compare_start_date else {}
-        length = (end - start).days + 1
-        prev_length = (prior_end - prior_start).days + 1 if compare_start_date else 0
-        total = old_total = 0.0
+        day_maps = [daily_values(begin, finish) for begin, finish in windows]
+        cumulative = [0.0 for _ in windows]
         result = []
-        for i in range(length):
-            day = start + timedelta(days=i)
-            total += present.get(day.isoformat(), 0.0)
-            if i < prev_length:
-                old_total += before.get((prior_start + timedelta(days=i)).isoformat(), 0.0)
-            result.append({"x": i + 1, "date": day.isoformat(), "current": round(total, 2),
-                           "previous1": round(old_total, 2) if i < prev_length else None,
-                           "previous2": None, "previous3": None})
+        for i in range((end - start).days + 1):
+            point = {"x": i + 1, "date": (start + timedelta(days=i)).isoformat()}
+            for j, name in enumerate(("current", "previous1", "previous2", "previous3")):
+                if j >= len(windows):
+                    point[name] = None
+                    continue
+                begin, finish = windows[j]
+                day = begin + timedelta(days=i)
+                if day > finish:
+                    point[name] = None
+                else:
+                    cumulative[j] += day_maps[j].get(day.isoformat(), 0.0)
+                    point[name] = round(cumulative[j], 2)
+            result.append(point)
         return result
     keys = ("current", "previous1", "previous2", "previous3")
 
@@ -2065,6 +2101,41 @@ def analytics_category_movers(
         "month": anchor,
         "previous_month": previous,
         "items": rows[:limit],
+    }
+
+
+@router.get("/analytics/spending-day")
+def analytics_spending_day(
+    db: Session = Depends(get_db),
+    selected_date: date = Query(...),
+    limit: int = Query(default=5, ge=1, le=20),
+):
+    """Top signed spending entries for a timeline point, using the exact ledger expression."""
+    reporting_scope(db, selected_date, selected_date)
+    q = db.query(Transaction.id, _effective_merchant_expr(), expense_amount()).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+    )
+    q = posted_activity(q, include_transfers=False)
+    q = q.filter(Transaction.date == selected_date)
+    rows = [(ident, merchant, round(float(amount or 0), 2))
+            for ident, merchant, amount in q.all() if amount != 0]
+    total = round(sum(amount for _, _, amount in rows), 2)
+    ranked = sorted(rows, key=lambda row: (-row[2], row[0]))
+    running = 0.0
+    items = []
+    for ident, merchant, amount in ranked[:limit]:
+        running = round(running + amount, 2)
+        items.append({
+            "id": ident, "merchant": merchant or "Unknown merchant",
+            "amount": amount,
+            "percent_of_day": round(100 * amount / total, 1) if total > 0 else None,
+            "cumulative_percent": round(100 * running / total, 1) if total > 0 else None,
+        })
+    return {
+        "date": selected_date.isoformat(), "total": total,
+        "transaction_count": len(rows), "items": items,
+        "qualification": ("Signed net spending includes refunds. Percentages may exceed 100% when "
+                          "refunds offset charges; unavailable for zero or negative net spend."),
     }
 
 
