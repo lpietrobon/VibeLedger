@@ -18,10 +18,10 @@ describe("date-only range contract (TIME-02)", () => {
     expect(comparisonBounds({ startDate: "2026-01-02", endDate: "2026-01-04" }, "previous-period"))
       .toEqual({ startDate: "2025-12-30", endDate: "2026-01-01" });
   });
-  it("does not force a comparison or permit invalid day ranges", () => {
+  it("provides the preset's implicit comparison and rejects invalid day ranges", () => {
     expect(rangeQuery(initialDateSelection("last-30", "2026-10-25"))).toEqual({
       startDate: "2026-09-26", endDate: "2026-10-25",
-      compareStartDate: undefined, compareEndDate: undefined,
+      compareStartDate: "2026-08-27", compareEndDate: "2026-09-25",
     });
     expect(validateRange({ startDate: "2026-02-30", endDate: "2026-03-01" })).toBe(false);
     expect(validateRange({ startDate: "2026-10-15", endDate: "2026-10-05" })).toBe(false);
