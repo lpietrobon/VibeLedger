@@ -8,6 +8,7 @@ import { TransactionRow } from "@/components/finance/TransactionRow";
 import { CategoryComparison } from "@/components/finance/CategoryComparison";
 import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
 import { PriorPeriodsControl } from "@/components/finance/PriorPeriodsControl";
+import { usePriorPeriodCount } from "@/lib/usePriorPeriodCount";
 import { comparisonAlignment, comparisonPeriods, initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
 import type { DateWindowParams } from "@/lib/api/client";
@@ -38,7 +39,7 @@ export default function SpendingPage() {
   const [selectedRange, setSelectedRange] = useState<DateRangeSelection>(() => ({
     ...initialDateSelection("current-month"), comparison: "previous-month",
   }));
-  const [priorCount, setPriorCount] = useState(2);
+  const [priorCount, setPriorCount] = usePriorPeriodCount();
   const [selectedPoint, setSelectedPoint] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");

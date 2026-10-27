@@ -26,6 +26,7 @@ beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-10-25T12:00:00Z"));
+  window.localStorage.removeItem("vibeledger.prior-period-count");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -97,4 +98,5 @@ it("keeps four one-row KPIs, fixed default prior lines and a compact five-transa
     comparisonPeriods: [], compareStartDate: undefined,
   }));
   expect(container.textContent).toContain("+10.8%");
+  expect(window.localStorage.getItem("vibeledger.prior-period-count")).toBe("0");
 });
