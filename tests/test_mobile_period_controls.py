@@ -109,3 +109,46 @@ def test_invalid_comparison_pairs_are_rejected():
             response = client.get("/analytics/cumulative-spend", headers=AUTH_HEADERS,
                 params={"start_date": "2020-03-01", "end_date": "2020-03-10", **extra})
             assert response.status_code == 422, (extra, response.text)
+
+
+def test_yearly_comparison_uses_same_calendar_date_after_leap_day():
+    _seed()
+    with SessionLocal() as db:
+        account = db.query(Account).first()
+        for suffix, d, amount in (
+            ("prior-feb28", date(2019, 2, 28), 40),
+            ("prior-mar01", date(2019, 3, 1), 100),
+        ):
+            db.add(Transaction(
+                plaid_transaction_id=suffix, account_id=account.id, item_id=account.item_id,
+                date=d, amount=amount, name=suffix, merchant_name=suffix,
+                plaid_category_primary="FOOD_AND_DRINK", pending=False,
+            ))
+        db.commit()
+    with TestClient(app) as client:
+        response = client.get("/analytics/cumulative-spend", headers=AUTH_HEADERS, params={
+            "start_date": "2020-02-27", "end_date": "2020-03-02",
+            "compare_start_date": "2019-02-27", "compare_end_date": "2019-03-02",
+            "alignment": "calendar-year",
+        })
+    assert response.status_code == 200, response.text
+    rows = response.json()
+    assert [r["date"] for r in rows] == [
+        "2020-02-27", "2020-02-28", "2020-02-29", "2020-03-01", "2020-03-02"
+    ]
+    assert [r["previous1"] for r in rows] == [0.0, 40.0, 40.0, 140.0, 140.0]
+
+
+def test_calendar_month_comparison_stops_when_prior_month_has_no_more_dates():
+    _seed()
+    with TestClient(app) as client:
+        response = client.get("/analytics/cumulative-spend", headers=AUTH_HEADERS, params={
+            "start_date": "2020-03-01", "end_date": "2020-03-31",
+            "compare_start_date": "2020-02-01", "compare_end_date": "2020-02-29",
+            "alignment": "calendar-month",
+        })
+    assert response.status_code == 200, response.text
+    rows = response.json()
+    assert rows[28]["previous1"] == 400.0
+    assert rows[29]["previous1"] is None
+    assert rows[30]["previous1"] is None
