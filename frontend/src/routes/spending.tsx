@@ -136,7 +136,7 @@ export default function SpendingPage() {
         </div>
         {cumulative.isError || timeline.isError ? <p role="alert" className="text-xs text-red-600">Unable to load spending chart.</p> : null}
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
-          <span><span className="mr-1 inline-block h-0.5 w-3 bg-blue-600 align-middle" />Current period</span>
+          <span><span className="mr-1 inline-block h-0.5 w-3 bg-blue-600 align-middle" />{selectedRange.startDate} – {selectedRange.endDate}</span>
           {historic.map((window, i) => (
             <span key={window.startDate}>
               <span className="mr-1 inline-block h-0.5 w-3 align-middle"
