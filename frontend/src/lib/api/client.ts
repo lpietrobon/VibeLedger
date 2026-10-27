@@ -204,6 +204,7 @@ type SpendingSummaryResponse = {
   reporting?: ReportingResponse;
   period_label: string;
   total: number;
+  daily_average?: number;
   previous_total: number;
   change: number;
   change_pct: number | null;
@@ -224,6 +225,7 @@ export async function getSpendingSummary(params?: {
     reporting: mapReporting(r.reporting),
     periodLabel: r.period_label,
     total: r.total,
+    dailyAverage: r.daily_average ?? 0,
     previousTotal: r.previous_total,
     change: r.change,
     changePct: r.change_pct,
@@ -252,10 +254,20 @@ export async function getCategoryComparisonPeriod(
 
 export async function getCumulativeSpending(params?: {
   granularity: "monthly" | "yearly";
-} & DateWindowParams & { reportingDate?: string }): Promise<CumulativeSpendingPoint[]> {
+} & DateWindowParams & { reportingDate?: string; comparisonPeriods?: Array<{ startDate: string; endDate: string }> }): Promise<CumulativeSpendingPoint[]> {
   const rows = await jsonFetch<
     Array<{ x: number; date?: string; current: number | null; previous1: number | null; previous2: number | null; previous3: number | null }>
-  >("/analytics/cumulative-spend", { granularity: params?.granularity ?? "monthly", reporting_date: params?.reportingDate, ...dateWindowParams(params) });
+  >("/analytics/cumulative-spend", {
+    granularity: params?.granularity ?? "monthly",
+    reporting_date: params?.reportingDate,
+    ...dateWindowParams(params),
+    compare_start_date: params?.comparisonPeriods?.[0]?.startDate ?? params?.compareStartDate,
+    compare_end_date: params?.comparisonPeriods?.[0]?.endDate ?? params?.compareEndDate,
+    compare2_start_date: params?.comparisonPeriods?.[1]?.startDate,
+    compare2_end_date: params?.comparisonPeriods?.[1]?.endDate,
+    compare3_start_date: params?.comparisonPeriods?.[2]?.startDate,
+    compare3_end_date: params?.comparisonPeriods?.[2]?.endDate,
+  });
   return rows.map((row) => ({
     day: row.x,
     ...(row.date ? { date: row.date } : {}),
@@ -338,6 +350,15 @@ export type SpendingTimeline = {
 };
 export async function getSpendingTimeline(params: { startDate: string; endDate: string }): Promise<SpendingTimeline> {
   return jsonFetch("/analytics/timeline-spikes", { start_date: params.startDate, end_date: params.endDate });
+}
+
+export type SpendingDay = {
+  date: string; total: number; transaction_count: number; qualification: string;
+  items: { id: number; merchant: string; amount: number;
+    percent_of_day: number | null; cumulative_percent: number | null; }[];
+};
+export async function getSpendingDay(date: string): Promise<SpendingDay> {
+  return jsonFetch("/analytics/spending-day", { selected_date: date, limit: 5 });
 }
 
 // --- Accounts ---
