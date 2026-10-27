@@ -168,6 +168,9 @@ describe("CF-03 synthetic cashflow walkthrough", () => {
     mount(<OverviewPage />);
     await settle();
 
+    expect(api.getCashflowTrend).toHaveBeenCalledWith(expect.objectContaining({
+      startDate: "2024-03-01", endDate: "2024-03-15", granularity: "daily",
+    }));
     expect(host.textContent).toContain("Period spend");
     expect(host.textContent).toContain("$2,397.0");
     expect(host.textContent).toContain("Spending by category · selected periods");

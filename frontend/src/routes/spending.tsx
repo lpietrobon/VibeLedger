@@ -180,7 +180,7 @@ export default function SpendingPage() {
               </tbody>
             </table>
           </div>
-          {day.data.items.some((row) => row.percent_of_day !== null && row.percent_of_day > 100)
+          {day.data.items.some((row) => (row.percent_of_day !== null && row.percent_of_day > 100) || (row.cumulative_percent !== null && row.cumulative_percent > 100))
             ? <p className="mt-1 text-[10px] text-muted-foreground">Refund offsets can make shares exceed 100% of net spending.</p> : null}
           {day.data.transaction_count === 0 ? <p className="py-2 text-xs text-muted-foreground">No spending transactions for this day.</p> : null}
           <a href={detailHref(activeDate)} className="mt-2 inline-block text-xs font-semibold text-primary underline">
