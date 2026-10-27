@@ -26,6 +26,7 @@ vi.mock("@/lib/api/client", () => ({
   getSpendingSummary: vi.fn(),
   getCumulativeSpending: vi.fn(),
   getSpendingTimeline: vi.fn(),
+  getSpendingDay: vi.fn(),
   getCategoryCatalog: vi.fn(),
   syncAllAccounts: vi.fn(),
   patchTransactionAnnotation: vi.fn(),
@@ -216,39 +217,32 @@ describe("PI-13 frozen category drilldown contract", () => {
   it("maps shared presets and custom dates into precise activity links", async () => {
     mount(<SpendingPage />);
     await settle();
-    const select = host.querySelector('select[aria-label="Period preset"]') as HTMLSelectElement;
-    const change = async (value: string) => {
-      await act(async () => {
-        select.value = value;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-      });
+    const choose = async (label: string) => {
+      const btn = host.querySelector('button[aria-label="' + label + ' period"]') as HTMLButtonElement;
+      expect(btn).not.toBeNull();
+      await act(async () => btn.click());
       await settle();
     };
-    await change("last-30");
-    expect(host.textContent).toContain("2032-03-17 – 2032-04-15");
+    await choose("30D");
     expect(categoryLink()?.getAttribute("href")).toContain("startDate=2032-03-17&endDate=2032-04-15");
     expect(api.getCategoryComparisonPeriod).toHaveBeenCalledWith("monthly", "calendar", expect.objectContaining({
       startDate: "2032-03-17", endDate: "2032-04-15",
     }));
-    await change("last-365");
+    await choose("1Y");
     expect(api.getCategoryComparisonPeriod).toHaveBeenCalledWith("yearly", "calendar", expect.objectContaining({
       endDate: "2032-04-15",
     }));
-    await change("custom");
-    // Date input changes are separate browser events; use native setter so React's
-    // controlled-input value tracker observes the update (rather than a direct assignment).
-    const changeDate = async (ariaLabel: string, value: string) => {
-      const field = host.querySelector(`input[aria-label="${ariaLabel}"]`) as HTMLInputElement;
-      const setNative = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-      await act(async () => {
-        setNative.call(field, value);
-        field.dispatchEvent(new Event("input", { bubbles: true }));
-        field.dispatchEvent(new Event("change", { bubbles: true }));
-      });
-      await settle();
+    await choose("Custom");
+    expect(host.querySelector('[role="dialog"][aria-label="Select custom date range"]')).not.toBeNull();
+    const pick = async (day: string) => {
+      const btn = host.querySelector('button[aria-label="' + day + '"]') as HTMLButtonElement;
+      await act(async () => btn.click());
     };
-    await changeDate("From date", "2032-04-01");
-    await changeDate("To date", "2032-04-30");
+    await pick("2032-04-01");
+    await pick("2032-04-30");
+    const apply = [...host.querySelectorAll("button")].find((node) => node.textContent?.trim() === "Apply")!;
+    await act(async () => apply.click());
+    await settle();
     expect(categoryLink()?.getAttribute("href")).toContain("startDate=2032-04-01&endDate=2032-04-30");
   });
 
@@ -271,10 +265,7 @@ describe("PI-13 frozen category drilldown contract", () => {
     expect(host.textContent).toContain("food-refund");
     expect(host.textContent).toContain("food-charge-2");
     expect(host.textContent).toContain("food-charge-1");
-    expect((host.querySelector('input[aria-label="From date"]') as HTMLInputElement).value)
-      .toBe(BOUNDS.startDate);
-    expect((host.querySelector('input[aria-label="To date"]') as HTMLInputElement).value)
-      .toBe("2032-04-15");
+    expect(host.querySelector('button[aria-label="Custom period"]')?.getAttribute("aria-pressed")).toBe("true");
     expect((host.querySelector('select[aria-label="Sort transactions"]') as HTMLSelectElement).value)
       .toBe("date:desc");
   });

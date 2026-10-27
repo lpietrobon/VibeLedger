@@ -25,6 +25,7 @@ vi.mock("@/lib/api/client", () => ({
   getSpendingSummary: vi.fn(),
   getCumulativeSpending: vi.fn(),
   getSpendingTimeline: vi.fn(),
+  getSpendingDay: vi.fn(),
   getCategoryCatalog: vi.fn(),
   syncAllAccounts: vi.fn(),
   patchTransactionAnnotation: vi.fn(),
@@ -179,18 +180,15 @@ describe("CF-03 synthetic cashflow walkthrough", () => {
     mount(<SpendingPage />);
     await settle();
 
-    expect(host.textContent).toContain("March 2024");
-    const preset = host.querySelector('select[aria-label="Period preset"]') as HTMLSelectElement;
-    expect(preset).not.toBeNull();
-    await act(async () => {
-      preset.value = "current-year";
-      preset.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    expect(host.textContent).toContain("Spending");
+    const year = host.querySelector('button[aria-label="Year period"]') as HTMLButtonElement;
+    expect(year).not.toBeNull();
+    await act(async () => year.click());
     await settle();
     expect(api.getSpendingSummary).toHaveBeenCalledWith(expect.objectContaining({
       granularity: "yearly", startDate: "2024-01-01", endDate: "2024-03-15",
     }));
-    expect(host.textContent).toContain("2024 YTD");
+    expect(host.querySelector('button[aria-label="Year period"]')?.getAttribute("aria-pressed")).toBe("true");
 
     const row = [...host.querySelectorAll("button")].find((node) =>
       node.textContent?.includes("Odd Charge"),
