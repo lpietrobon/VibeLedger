@@ -5,11 +5,11 @@ export type DateRange = { startDate: string; endDate: string };
 export type DateRangeSelection = DateRange & { preset: DatePreset; comparison: ComparisonRule };
 
 export const RANGE_PRESETS: ReadonlyArray<{ value: DatePreset; label: string }> = [
-  { value: "current-month", label: "Current month" },
-  { value: "current-year", label: "Current year" },
-  { value: "last-30", label: "Last 30 days" },
-  { value: "last-365", label: "Last 365 days" },
-  { value: "custom", label: "Custom From–To" },
+  { value: "last-30", label: "30D" },
+  { value: "last-365", label: "1Y" },
+  { value: "current-month", label: "Month" },
+  { value: "current-year", label: "Year" },
+  { value: "custom", label: "Custom" },
 ];
 
 export const COMPARISON_RULES: ReadonlyArray<{ value: ComparisonRule; label: string }> = [
@@ -85,7 +85,47 @@ export function comparisonBounds(range: DateRange, rule: ComparisonRule): DateRa
 
 export function rangeQuery(selection: DateRangeSelection) {
   if (!validateRange(selection, selection.preset === "all")) return null;
-  const prior = comparisonBounds(selection, selection.comparison);
+  const prior = defaultComparison(selection);
   return { startDate: selection.startDate || undefined, endDate: selection.endDate || undefined,
     compareStartDate: prior?.startDate, compareEndDate: prior?.endDate };
+}
+
+/** One source of truth for the exact comparison dates used by every chart. */
+export function comparisonPeriods(selection: DateRangeSelection, count: number): DateRange[] {
+  if (!validateRange(selection) || !Number.isInteger(count) || count < 0 || count > 3) {
+    if (count === 0) return [];
+    throw new Error("Invalid comparison period request");
+  }
+  const periods: DateRange[] = [];
+  for (let i = 1; i <= count; i++) {
+    if (selection.preset === "current-month") {
+      periods.push({
+        startDate: shiftCalendar(selection.startDate, -i, "month"),
+        endDate: shiftCalendar(selection.endDate, -i, "month"),
+      });
+    } else if (selection.preset === "current-year") {
+      periods.push({
+        startDate: shiftCalendar(selection.startDate, -i, "year"),
+        endDate: shiftCalendar(selection.endDate, -i, "year"),
+      });
+    } else {
+      const length = Math.round((parseDay(selection.endDate).getTime() - parseDay(selection.startDate).getTime()) / 86400000) + 1;
+      periods.push({
+        startDate: offsetDays(selection.startDate, -i * length),
+        endDate: offsetDays(selection.endDate, -i * length),
+      });
+    }
+  }
+  return periods;
+}
+
+/** KPI comparison always uses one prior window, even if no historical lines are drawn. */
+export function defaultComparison(selection: DateRangeSelection): DateRange | null {
+  return selection.preset === "all" ? null : comparisonPeriods(selection, 1)[0];
+}
+
+export function presetComparison(preset: DatePreset): ComparisonRule {
+  if (preset === "current-month") return "previous-month";
+  if (preset === "current-year") return "previous-year";
+  return preset === "all" ? "none" : "previous-period";
 }
