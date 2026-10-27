@@ -6,7 +6,7 @@ from datetime import date
 from fastapi.testclient import TestClient
 from app.db.session import SessionLocal
 from app.main import app
-from app.models.models import Account, Transaction
+from app.models.models import Account, Transaction, TransactionAnnotation
 from tests.conftest import AUTH_HEADERS
 from tests.test_mobile_analytics import _seed
 
@@ -66,13 +66,18 @@ def test_selected_day_returns_signed_top_five_and_full_net_day_parity():
     with SessionLocal() as db:
         account = db.query(Account).first()
         for i, amount in enumerate((200, 150, 100, 75, 50, 25, -100)):
-            db.add(Transaction(
+            row = Transaction(
                 plaid_transaction_id="rank-%d" % i,
                 account_id=account.id, item_id=account.item_id,
                 date=date(2020, 3, 5), amount=amount,
                 name="Merchant %d" % i, merchant_name="Merchant %d" % i,
                 plaid_category_primary="FOOD_AND_DRINK", pending=False,
-            ))
+            )
+            db.add(row)
+            db.flush()
+            if amount < 0:
+                db.add(TransactionAnnotation(transaction_id=row.id,
+                                             refund_status="confirmed", user_category="FOOD/OTHER"))
         db.commit()
     with TestClient(app) as client:
         detail = client.get("/analytics/spending-day", headers=AUTH_HEADERS,
