@@ -49,17 +49,17 @@ export default function CumulativeChart({ data, days = [], spikes = [], selected
             stroke={line.color} strokeWidth={1.8} strokeDasharray="5 3"
             dot={false} isAnimationActive={false} connectNulls={false} />
         )}
-        <Line type="linear" dataKey="current" name="Current" stroke="var(--primary, #2563eb)"
+        <Line type="linear" dataKey="current" name="Current" stroke="#2563eb"
           strokeWidth={2.8} dot={false} activeDot={{ r: 5 }}
           isAnimationActive={false} connectNulls={false} />
         {data.filter((p) => p.date && spikeDates.has(p.date) && p.current !== null).map((p) =>
           <ReferenceDot key={p.date} x={p.day} y={p.current!} r={4}
-            fill="#f59e0b" stroke="var(--background, #fff)" strokeWidth={1.5}
+            fill="#f59e0b" stroke="#fff" strokeWidth={1.5}
             onClick={() => onSelect?.(p.date!)} />
         )}
         {data.filter((p) => p.date === selectedDate && p.current !== null).map((p) =>
           <ReferenceDot key={"selected-" + p.date} x={p.day} y={p.current!} r={6}
-            fill="var(--primary, #2563eb)" stroke="var(--background, #fff)" strokeWidth={2} />
+            fill="#2563eb" stroke="#fff" strokeWidth={2} />
         )}
       </LineChart>
     </ResponsiveContainer>
