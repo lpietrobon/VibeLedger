@@ -1780,7 +1780,8 @@ def analytics_cumulative_spend(
                     continue
                 begin, finish = windows[j]
                 day = begin + timedelta(days=i)
-                if day > finish:
+                if day > finish or (j > 0 and not day_maps[j]):
+                    # An entirely absent prior history is unknown, not a $0 line.
                     point[name] = None
                 else:
                     cumulative[j] += day_maps[j].get(day.isoformat(), 0.0)
