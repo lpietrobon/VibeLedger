@@ -1735,6 +1735,7 @@ def analytics_cumulative_spend(
     compare2_end_date: date | None = Query(default=None),
     compare3_start_date: date | None = Query(default=None),
     compare3_end_date: date | None = Query(default=None),
+    alignment: Literal["ordinal", "calendar-month", "calendar-year"] = Query(default="ordinal"),
 ):
     """Date-aligned cumulative pace using explicit comparison bounds for 0–3 past windows."""
     anchor = reporting_date if isinstance(reporting_date, date) else date.today()
@@ -1770,22 +1771,41 @@ def analytics_cumulative_spend(
             return {key: round(float(amount or 0), 2) for key, amount in rows}
 
         day_maps = [daily_values(begin, finish) for begin, finish in windows]
-        cumulative = [0.0 for _ in windows]
+        prefixes = []
+        for (begin, finish), amounts in zip(windows, day_maps):
+            running = 0.0
+            prefix = {}
+            day = begin
+            while day <= finish:
+                running = round(running + amounts.get(day.isoformat(), 0.0), 2)
+                prefix[day.isoformat()] = running
+                day += timedelta(days=1)
+            prefixes.append(prefix)
+
         result = []
         for i in range((end - start).days + 1):
-            point = {"x": i + 1, "date": (start + timedelta(days=i)).isoformat()}
+            current_day = start + timedelta(days=i)
+            point = {"x": i + 1, "date": current_day.isoformat()}
             for j, name in enumerate(("current", "previous1", "previous2", "previous3")):
                 if j >= len(windows):
                     point[name] = None
                     continue
                 begin, finish = windows[j]
                 day = begin + timedelta(days=i)
-                if day > finish or (j > 0 and not day_maps[j]):
-                    # An entirely absent prior history is unknown, not a $0 line.
+                if j and alignment == "calendar-year":
+                    # Leap years: Mar 1 must align to Mar 1, not Feb 29.
+                    matched_day = min(current_day.day, calendar.monthrange(begin.year, current_day.month)[1])
+                    day = date(begin.year, current_day.month, matched_day)
+                elif j and alignment == "calendar-month":
+                    # A prior February has no 29th/30th/31st; don't duplicate Feb 28.
+                    if current_day.day > calendar.monthrange(begin.year, begin.month)[1]:
+                        point[name] = None
+                        continue
+                    day = date(begin.year, begin.month, current_day.day)
+                if day < begin or day > finish or (j > 0 and not day_maps[j]):
                     point[name] = None
                 else:
-                    cumulative[j] += day_maps[j].get(day.isoformat(), 0.0)
-                    point[name] = round(cumulative[j], 2)
+                    point[name] = prefixes[j][day.isoformat()]
             result.append(point)
         return result
     keys = ("current", "previous1", "previous2", "previous3")

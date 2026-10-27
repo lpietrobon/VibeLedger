@@ -136,3 +136,9 @@ export function trendGranularity(range: DateRange): "daily" | "monthly" {
   const days = Math.round((parseDay(range.endDate).getTime() - parseDay(range.startDate).getTime()) / 86400000) + 1;
   return days <= 45 ? "daily" : "monthly";
 }
+
+export type ComparisonAlignment = "ordinal" | "calendar-month" | "calendar-year";
+export function comparisonAlignment(preset: DatePreset): ComparisonAlignment {
+  return preset === "current-month" ? "calendar-month"
+    : preset === "current-year" ? "calendar-year" : "ordinal";
+}

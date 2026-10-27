@@ -8,7 +8,7 @@ import { TransactionRow } from "@/components/finance/TransactionRow";
 import { CategoryComparison } from "@/components/finance/CategoryComparison";
 import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
 import { PriorPeriodsControl } from "@/components/finance/PriorPeriodsControl";
-import { comparisonPeriods, initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
+import { comparisonAlignment, comparisonPeriods, initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
 import type { DateWindowParams } from "@/lib/api/client";
 import {
@@ -56,7 +56,7 @@ export default function SpendingPage() {
   const cumulative = useQuery({
     queryKey: ["cumulative", granularity, priorCount, ...dataKey],
     queryFn: () => getCumulativeSpending({
-      granularity, ...params, comparisonPeriods: historic,
+      granularity, ...params, comparisonPeriods: historic, alignment: comparisonAlignment(selectedRange.preset),
       // 0 historical lines does NOT remove the always-on KPI comparison.
       compareStartDate: priorCount ? params.compareStartDate : undefined,
       compareEndDate: priorCount ? params.compareEndDate : undefined,
