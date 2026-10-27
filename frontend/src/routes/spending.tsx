@@ -120,7 +120,7 @@ export default function SpendingPage() {
               ? formatCurrency(s.change, { sign: true, compact: true }) : "Not available"} />
           <CompactMetric label="Top category" value={topCategory?.category ?? "—"}
             note={topCategory ? formatCurrency(topCategory.current, { compact: true }) : "No spending"} />
-          <CompactMetric label="Daily avg" value={formatCurrency(s.dailyAverage, { compact: true })}
+          <CompactMetric label="Daily avg" value={s.dailyAverage == null ? "—" : formatCurrency(s.dailyAverage, { compact: true })}
             note="Per selected day" />
         </> : Array.from({ length: 4 }, (_, i) =>
           <div key={i} className="h-16 animate-pulse rounded-lg bg-secondary" />)}

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
-import { initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
+import { initialDateSelection, rangeQuery, trendGranularity, validateRange } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
 import type { DateWindowParams } from "@/lib/api/client";
 import { KpiCard } from "@/components/finance/KpiCard";
@@ -37,8 +37,9 @@ export default function OverviewPage() {
   const dates: DateWindowParams = rangeQuery(dateRange) ?? {};
   const key = [dates.startDate, dates.endDate, dates.compareStartDate, dates.compareEndDate];
   const valid = validateRange(dateRange);
+  const cashflowResolution = trendGranularity(dateRange);
   const summary = useQuery({ queryKey: ["overview", ...key], queryFn: () => getOverviewSummary(dates), enabled: valid });
-  const cashflow = useQuery({ queryKey: ["cashflow", ...key], queryFn: () => getCashflowTrend(dates), enabled: valid });
+  const cashflow = useQuery({ queryKey: ["cashflow", cashflowResolution, ...key], queryFn: () => getCashflowTrend({ ...dates, granularity: cashflowResolution }), enabled: valid });
   const comparison = useQuery({ queryKey: ["comparison", ...key], queryFn: () => getCategoryComparison("monthly", dates), enabled: valid });
   const recent = useQuery({
     queryKey: ["recent-tx", ...key],

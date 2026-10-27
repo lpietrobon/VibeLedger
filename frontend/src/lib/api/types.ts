@@ -141,7 +141,7 @@ export type SpendingSummary = {
   reporting: ComparisonReporting;
   periodLabel: string;
   total: Money;
-  dailyAverage: Money;
+  dailyAverage?: Money;
   previousTotal: Money;
   change: Money | null;
   changePct: number | null;

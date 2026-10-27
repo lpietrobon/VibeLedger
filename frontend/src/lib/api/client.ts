@@ -174,9 +174,9 @@ export async function getOverviewSummary(params?: DateWindowParams): Promise<Ove
   };
 }
 
-export async function getCashflowTrend(params?: DateWindowParams): Promise<CashflowPoint[]> {
+export async function getCashflowTrend(params?: DateWindowParams & { granularity?: "daily" | "monthly" }): Promise<CashflowPoint[]> {
   const rows = await jsonFetch<Array<{ month: string; income: number; expenses: number; net: number }>>(
-    "/analytics/cashflow-trend", { start_date: params?.startDate, end_date: params?.endDate },
+    "/analytics/cashflow-trend", { start_date: params?.startDate, end_date: params?.endDate, granularity: params?.granularity },
   );
   return (params?.startDate ? rows : rows.slice(-12)).map((row) => ({
     month: row.month,

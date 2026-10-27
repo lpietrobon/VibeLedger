@@ -129,3 +129,10 @@ export function presetComparison(preset: DatePreset): ComparisonRule {
   if (preset === "current-year") return "previous-year";
   return preset === "all" ? "none" : "previous-period";
 }
+
+/** Centralized chart resolution. A selected month plots daily rather than a single month bucket. */
+export function trendGranularity(range: DateRange): "daily" | "monthly" {
+  if (!validateRange(range)) return "monthly";
+  const days = Math.round((parseDay(range.endDate).getTime() - parseDay(range.startDate).getTime()) / 86400000) + 1;
+  return days <= 45 ? "daily" : "monthly";
+}

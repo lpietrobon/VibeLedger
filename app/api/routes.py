@@ -1399,11 +1399,14 @@ def cashflow_trend(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
+    granularity: Literal["daily", "monthly"] = "monthly",
 ):
     reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=422, detail="From date must precede To date")
-    daily = bool(start_date and end_date and (end_date - start_date).days < 45)
+    if granularity == "daily" and (not start_date or not end_date or (end_date - start_date).days > 3660):
+        raise HTTPException(status_code=422, detail="Daily trend needs a bounded date range")
+    daily = granularity == "daily"
     bucket = func.strftime("%Y-%m-%d" if daily else "%Y-%m", Transaction.date).label("period")
     q = db.query(bucket, func.sum(expense_amount()), func.sum(income_amount())).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
@@ -1429,7 +1432,7 @@ def cashflow_trend(
     else:
         keys = sorted(totals)
     return [
-        {"month": key, "granularity": "daily" if daily else "monthly",
+        {"month": key,
          "expenses": totals.get(key, (0.0, 0.0))[0],
          "income": totals.get(key, (0.0, 0.0))[1],
          "net": round(totals.get(key, (0.0, 0.0))[1] - totals.get(key, (0.0, 0.0))[0], 2)}
