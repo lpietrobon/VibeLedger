@@ -98,13 +98,23 @@ def comparison_reporting(db, bounds):
     start, end, prior_start, prior_end = bounds
     current = reporting_scope(db, start, end)
     previous = reporting_scope(db, prior_start, prior_end)
+    current_days = (end - start).days + 1
+    prior_days = (prior_end - prior_start).days + 1
+    duration_warning = (
+        f" Unequal period lengths: current {current_days} days versus previous "
+        f"{prior_days} days. Raw totals are not normalized for duration."
+        if current_days != prior_days else ""
+    )
     return {
         **current,
         "reporting_date": str(end),
         "current_period": current,
         "previous_period": previous,
         "comparison_available": bool(current["recorded_row_count"] and previous["recorded_row_count"]),
-        "comparison_qualification": "Comparison of recorded activity only; historical coverage is unverified.",
+        "comparison_qualification": (
+            "Comparison of recorded activity only; historical coverage is unverified."
+            + duration_warning
+        ),
     }
 
 
