@@ -64,6 +64,12 @@ function apiOrigin() {
 }
 
 // --- Analytics (all computed server-side; the client only fetches + maps) ---
+export type DateWindowParams = { startDate?: string; endDate?: string; compareStartDate?: string; compareEndDate?: string };
+function dateWindowParams(p?: DateWindowParams) {
+  return { start_date: p?.startDate, end_date: p?.endDate,
+    compare_start_date: p?.compareStartDate, compare_end_date: p?.compareEndDate };
+}
+
 
 type OverviewResponse = {
   reporting?: ReportingResponse;
@@ -145,8 +151,8 @@ function mapReporting(r?: Partial<ReportingResponse>): ComparisonReporting {
   };
 }
 
-export async function getOverviewSummary(): Promise<OverviewSummary> {
-  const r = await jsonFetch<OverviewResponse>("/analytics/overview");
+export async function getOverviewSummary(params?: DateWindowParams): Promise<OverviewSummary> {
+  const r = await jsonFetch<OverviewResponse>("/analytics/overview", dateWindowParams(params));
   return {
     asOfDate: r.as_of_date,
     reporting: mapReporting(r.reporting),
@@ -168,11 +174,11 @@ export async function getOverviewSummary(): Promise<OverviewSummary> {
   };
 }
 
-export async function getCashflowTrend(): Promise<CashflowPoint[]> {
+export async function getCashflowTrend(params?: DateWindowParams & { granularity?: "daily" | "monthly" }): Promise<CashflowPoint[]> {
   const rows = await jsonFetch<Array<{ month: string; income: number; expenses: number; net: number }>>(
-    "/analytics/cashflow-trend",
+    "/analytics/cashflow-trend", { start_date: params?.startDate, end_date: params?.endDate, granularity: params?.granularity },
   );
-  return rows.slice(-12).map((row) => ({
+  return (params?.startDate ? rows : rows.slice(-12)).map((row) => ({
     month: row.month,
     income: row.income,
     expenses: -Math.abs(row.expenses),
@@ -198,6 +204,7 @@ type SpendingSummaryResponse = {
   reporting?: ReportingResponse;
   period_label: string;
   total: number;
+  daily_average?: number;
   previous_total: number;
   change: number;
   change_pct: number | null;
@@ -206,18 +213,19 @@ type SpendingSummaryResponse = {
   category_comparison: CategoryComparisonPoint[];
 };
 
-async function fetchSpendingSummary(granularity: "monthly" | "yearly", window?: "calendar" | "rolling") {
-  return jsonFetch<SpendingSummaryResponse>("/analytics/spending-summary", { granularity, window });
+async function fetchSpendingSummary(granularity: "monthly" | "yearly", window?: "calendar" | "rolling", dates?: DateWindowParams) {
+  return jsonFetch<SpendingSummaryResponse>("/analytics/spending-summary", { granularity, window, ...dateWindowParams(dates) });
 }
 
 export async function getSpendingSummary(params?: {
   granularity: "monthly" | "yearly";
-}): Promise<SpendingSummary> {
-  const r = await fetchSpendingSummary(params?.granularity ?? "monthly");
+} & DateWindowParams): Promise<SpendingSummary> {
+  const r = await fetchSpendingSummary(params?.granularity ?? "monthly", undefined, params);
   return {
     reporting: mapReporting(r.reporting),
     periodLabel: r.period_label,
     total: r.total,
+    dailyAverage: r.daily_average ?? 0,
     previousTotal: r.previous_total,
     change: r.change,
     changePct: r.change_pct,
@@ -227,17 +235,17 @@ export async function getSpendingSummary(params?: {
 }
 
 export async function getCategoryComparison(
-  granularity: "monthly" | "yearly" = "monthly",
+  granularity: "monthly" | "yearly" = "monthly", params?: DateWindowParams,
 ): Promise<CategoryComparisonPoint[]> {
-  const r = await fetchSpendingSummary(granularity);
+  const r = await fetchSpendingSummary(granularity, undefined, params);
   return r.category_comparison.slice().sort((a, b) => b.current - a.current);
 }
 
 export async function getCategoryComparisonPeriod(
   granularity: "monthly" | "yearly",
-  window: "calendar" | "rolling",
+  window: "calendar" | "rolling", dates?: DateWindowParams,
 ) {
-  const r = await fetchSpendingSummary(granularity, window);
+  const r = await fetchSpendingSummary(granularity, window, dates);
   return {
     items: r.category_comparison.slice().sort((a, b) => b.current - a.current),
     reporting: mapReporting(r.reporting),
@@ -246,12 +254,24 @@ export async function getCategoryComparisonPeriod(
 
 export async function getCumulativeSpending(params?: {
   granularity: "monthly" | "yearly";
-}): Promise<CumulativeSpendingPoint[]> {
+} & DateWindowParams & { reportingDate?: string; comparisonPeriods?: Array<{ startDate: string; endDate: string }>; alignment?: "ordinal" | "calendar-month" | "calendar-year" }): Promise<CumulativeSpendingPoint[]> {
   const rows = await jsonFetch<
-    Array<{ x: number; current: number | null; previous1: number | null; previous2: number | null; previous3: number | null }>
-  >("/analytics/cumulative-spend", { granularity: params?.granularity ?? "monthly" });
+    Array<{ x: number; date?: string; current: number | null; previous1: number | null; previous2: number | null; previous3: number | null }>
+  >("/analytics/cumulative-spend", {
+    granularity: params?.granularity ?? "monthly",
+    reporting_date: params?.reportingDate,
+    alignment: params?.alignment,
+    ...dateWindowParams(params),
+    compare_start_date: params?.comparisonPeriods?.[0]?.startDate ?? params?.compareStartDate,
+    compare_end_date: params?.comparisonPeriods?.[0]?.endDate ?? params?.compareEndDate,
+    compare2_start_date: params?.comparisonPeriods?.[1]?.startDate,
+    compare2_end_date: params?.comparisonPeriods?.[1]?.endDate,
+    compare3_start_date: params?.comparisonPeriods?.[2]?.startDate,
+    compare3_end_date: params?.comparisonPeriods?.[2]?.endDate,
+  });
   return rows.map((row) => ({
     day: row.x,
+    ...(row.date ? { date: row.date } : {}),
     current: row.current,
     previous1: row.previous1,
     previous2: row.previous2,
@@ -301,12 +321,12 @@ export async function getCashflowSankey(params?: {
 export async function getCategoryMovers(params?: {
   month?: string;
   limit?: number;
-}): Promise<CategoryMovers> {
+} & DateWindowParams): Promise<CategoryMovers> {
   const r = await jsonFetch<{
     month: string;
     previous_month: string;
     items: { category: string; current: number; previous: number; change: number }[];
-  }>("/analytics/category-movers", { month: params?.month, limit: params?.limit });
+  }>("/analytics/category-movers", { month: params?.month, limit: params?.limit, ...dateWindowParams(params) });
   return { month: r.month, previousMonth: r.previous_month, items: r.items };
 }
 
@@ -317,6 +337,29 @@ export async function getDailySpend(params?: { year?: number }): Promise<DailySp
     days: { date: string; amount: number }[];
   }>("/analytics/daily-spend", { year: params?.year });
   return { year: r.year, availableYears: r.available_years, days: r.days };
+}
+
+export type TimelineSpike = {
+  date: string; observed: number; baseline: number; excess: number;
+  top_transaction_id: number | null; top_merchant: string | null; top_amount: number | null;
+  max_attributable_amount: number; max_attributable_pct: number | null;
+  qualification: string;
+};
+export type SpendingTimeline = {
+  start_date: string; end_date: string; days: { date: string; amount: number }[];
+  spikes: TimelineSpike[]; qualification: string;
+};
+export async function getSpendingTimeline(params: { startDate: string; endDate: string }): Promise<SpendingTimeline> {
+  return jsonFetch("/analytics/timeline-spikes", { start_date: params.startDate, end_date: params.endDate });
+}
+
+export type SpendingDay = {
+  date: string; total: number; transaction_count: number; qualification: string;
+  items: { id: number; merchant: string; amount: number;
+    percent_of_day: number | null; cumulative_percent: number | null; }[];
+};
+export async function getSpendingDay(date: string): Promise<SpendingDay> {
+  return jsonFetch("/analytics/spending-day", { selected_date: date, limit: 5 });
 }
 
 // --- Accounts ---

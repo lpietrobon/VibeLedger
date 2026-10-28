@@ -8,6 +8,15 @@ permissions:
   contents: read
 
 jobs:
+  roadmap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r docs/roadmap/requirements.txt
+      - run: python docs/roadmap/scan.py
   backend:
     runs-on: ubuntu-latest
     steps:

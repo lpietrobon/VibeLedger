@@ -13,6 +13,9 @@ import type { CashflowPoint } from "@/lib/api/types";
 import { formatCurrency, formatMonth } from "@/lib/format";
 
 export default function CashflowChart({ data }: { data: CashflowPoint[] }) {
+  const daily = data.some((point) => point.month.length === 10);
+  const axisLabel = (period: string) => daily ? period.slice(5) : formatMonth(period);
+  const tooltipLabel = (period: string) => daily ? period : formatMonth(period) + " " + period.slice(0, 4);
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={data} margin={{ left: -10, right: 8, top: 8, bottom: 0 }}>
@@ -31,7 +34,7 @@ export default function CashflowChart({ data }: { data: CashflowPoint[] }) {
           </linearGradient>
         </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 90%)" vertical={false} />
-        <XAxis dataKey="month" tickFormatter={formatMonth} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <XAxis dataKey="month" tickFormatter={axisLabel} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
         <YAxis
           tick={{ fontSize: 11 }}
           axisLine={false}
@@ -41,7 +44,7 @@ export default function CashflowChart({ data }: { data: CashflowPoint[] }) {
         />
         <Tooltip
           formatter={(v: number) => formatCurrency(v)}
-          labelFormatter={(l: string) => formatMonth(l) + " " + l.slice(0, 4)}
+          labelFormatter={(l: string) => tooltipLabel(l)}
           contentStyle={{ fontSize: 12, borderRadius: 6 }}
         />
         <Legend wrapperStyle={{ fontSize: 12 }} />

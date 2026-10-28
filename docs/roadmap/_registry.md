@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-09-18T17:17:14+00:00_
+_Last scan: 2026-10-25 (metadata regeneration)_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -12,7 +12,8 @@ dependencies are done; a blank assignment means unassigned.
 | [010-trustworthy-cashflow](epics/010-trustworthy-cashflow/_epic.md) | Trustworthy cashflow across linked accounts | done | 3 |  |
 | [020-product-integrity](epics/020-product-integrity/_epic.md) | Product integrity and cleanup | planned | 3 |  |
 | [030-inspectable-aggregates](epics/030-inspectable-aggregates/_epic.md) | Inspectable aggregates | planned | 1 |  |
-
+| [040-timeline-spike-attribution](epics/040-timeline-spike-attribution/_epic.md) | Timeline spike attribution and direct investigation | planned | 1 |  |
+| [050-shared-date-range-semantics](epics/050-shared-date-range-semantics/_epic.md) | Shared date selection and deterministic comparison semantics | planned | 1 |  |
 ## Tasks
 
 | id | epic | status | deps | assigned | title |
@@ -65,3 +66,15 @@ dependencies are done; a blank assignment means unassigned.
 | [INSP-02](epics/030-inspectable-aggregates/tasks/INSP-02.md) | 030-inspectable-aggregates | todo | INSP-01 |  | Drill from expanded Sankey categories into Activity |
 | [INSP-03](epics/030-inspectable-aggregates/tasks/INSP-03.md) | 030-inspectable-aggregates | todo | INSP-01 |  | Drill from month-over-month movers into current-period Activity |
 | [INSP-04](epics/030-inspectable-aggregates/tasks/INSP-04.md) | 030-inspectable-aggregates | todo | INSP-02, INSP-03 |  | Independently verify aggregate-to-Activity parity |
+| [SPK-01](epics/040-timeline-spike-attribution/tasks/SPK-01.md) | 040-timeline-spike-attribution | todo | INSP-01 |  | Inventory time-series evidence and freeze anomaly semantics |
+| [SPK-02](epics/040-timeline-spike-attribution/tasks/SPK-02.md) | 040-timeline-spike-attribution | todo | SPK-01 |  | Pin spike detection and attribution with failing backend contract tests |
+| [SPK-03](epics/040-timeline-spike-attribution/tasks/SPK-03.md) | 040-timeline-spike-attribution | todo | SPK-02 |  | Implement deterministic timeline spike analysis from canonical ledger |
+| [SPK-04](epics/040-timeline-spike-attribution/tasks/SPK-04.md) | 040-timeline-spike-attribution | todo | SPK-01 |  | Pin timeline tooltip and transaction drilldown with failing frontend tests |
+| [SPK-05](epics/040-timeline-spike-attribution/tasks/SPK-05.md) | 040-timeline-spike-attribution | todo | SPK-03, SPK-04 |  | Connect timeline annotations and one-action exact-evidence investigation |
+| [SPK-06](epics/040-timeline-spike-attribution/tasks/SPK-06.md) | 040-timeline-spike-attribution | todo | SPK-05 |  | Independently verify spike mathematics, usability and source-point parity |
+| [TIME-01](epics/050-shared-date-range-semantics/tasks/TIME-01.md) | 050-shared-date-range-semantics | todo |  |  | Inventory date-filtered surfaces and settle an explicit date/comparison contract |
+| [TIME-02](epics/050-shared-date-range-semantics/tasks/TIME-02.md) | 050-shared-date-range-semantics | todo | TIME-01 |  | Pin shared date bounds and comparison mapping with failing unit/API tests |
+| [TIME-03](epics/050-shared-date-range-semantics/tasks/TIME-03.md) | 050-shared-date-range-semantics | todo | TIME-02 |  | Implement shared date engine, typed selector and comparison adapter |
+| [TIME-04](epics/050-shared-date-range-semantics/tasks/TIME-04.md) | 050-shared-date-range-semantics | todo | TIME-01, TIME-02 |  | Pin cross-screen period-selection and monetary-parity behavior with failing integration tests |
+| [TIME-05](epics/050-shared-date-range-semantics/tasks/TIME-05.md) | 050-shared-date-range-semantics | todo | TIME-03, TIME-04 |  | Integrate unified range selection across all applicable views |
+| [TIME-06](epics/050-shared-date-range-semantics/tasks/TIME-06.md) | 050-shared-date-range-semantics | todo | TIME-05 |  | Independently verify date-selection consistency and source evidence |

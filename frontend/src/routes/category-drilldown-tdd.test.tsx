@@ -25,6 +25,8 @@ vi.mock("@/lib/api/client", () => ({
   getTransactions: vi.fn(),
   getSpendingSummary: vi.fn(),
   getCumulativeSpending: vi.fn(),
+  getSpendingTimeline: vi.fn(),
+  getSpendingDay: vi.fn(),
   getCategoryCatalog: vi.fn(),
   syncAllAccounts: vi.fn(),
   patchTransactionAnnotation: vi.fn(),
@@ -46,7 +48,7 @@ import TransactionsPage from "./transactions";
 const BASE = import.meta.env.BASE_URL.replace(/\/+$/, "");
 const BOUNDS = { startDate: "2032-04-01", endDate: "2032-04-30" };
 const CATEGORY = "FOOD/OTHER";
-const EXPECTED_HREF = `${BASE}/transactions?category=FOOD%2FOTHER&query=is%3Aspend&startDate=2032-04-01&endDate=2032-04-30&sort=date&order=desc`;
+const EXPECTED_HREF = `${BASE}/transactions?category=FOOD%2FOTHER&query=is%3Aspend&startDate=2032-04-01&endDate=2032-04-15&sort=date&order=desc`;
 
 const reporting = {
   currency: "USD" as const,
@@ -179,6 +181,7 @@ beforeEach(() => {
     items: await api.getCategoryComparison(), reporting,
   }));
   vi.mocked(api.getCumulativeSpending).mockResolvedValue([]);
+  vi.mocked(api.getSpendingTimeline).mockResolvedValue({start_date:"2032-04-01",end_date:"2032-04-15",days:[],spikes:[],qualification:""});
   vi.mocked(api.getCategoryCatalog).mockResolvedValue([]);
   vi.mocked(api.getTransactions).mockResolvedValue({ total: activityRows.length, items: activityRows });
   vi.mocked(api.getDuplicateCorrections).mockResolvedValue({ items: [] });
@@ -211,32 +214,36 @@ describe("PI-13 frozen category drilldown contract", () => {
     expect(categoryLink()?.getAttribute("href")).toBe(EXPECTED_HREF);
   });
 
-  it("switches rolling windows and drills into their server-reported dates", async () => {
-    vi.mocked(api.getCategoryComparisonPeriod).mockImplementation(async (_granularity, window) => ({
-      items: [{ category: CATEGORY, current: 67, previous: 30 }],
-      reporting: window === "rolling" ? {
-        ...reporting,
-        currentPeriod: { ...reporting.currentPeriod, startDate: "2032-03-18", endDate: "2032-04-16" },
-        previousPeriod: { ...reporting.previousPeriod, startDate: "2032-02-17", endDate: "2032-03-17" },
-      } : reporting,
-    }));
+  it("maps shared presets and custom dates into precise activity links", async () => {
     mount(<SpendingPage />);
     await settle();
-    const button = (label: string) => [...host.querySelectorAll("button")].find(node => node.textContent === label)!;
-    await act(async () => button("Rolling").click());
+    const choose = async (label: string) => {
+      const btn = host.querySelector('button[aria-label="' + label + ' period"]') as HTMLButtonElement;
+      expect(btn).not.toBeNull();
+      await act(async () => btn.click());
+      await settle();
+    };
+    await choose("30D");
+    expect(categoryLink()?.getAttribute("href")).toContain("startDate=2032-03-17&endDate=2032-04-15");
+    expect(api.getCategoryComparisonPeriod).toHaveBeenCalledWith("monthly", "calendar", expect.objectContaining({
+      startDate: "2032-03-17", endDate: "2032-04-15",
+    }));
+    await choose("1Y");
+    expect(api.getCategoryComparisonPeriod).toHaveBeenCalledWith("yearly", "calendar", expect.objectContaining({
+      endDate: "2032-04-15",
+    }));
+    await choose("Custom");
+    expect(host.querySelector('[role="dialog"][aria-label="Select custom date range"]')).not.toBeNull();
+    const pick = async (day: string) => {
+      const btn = host.querySelector('button[aria-label="' + day + '"]') as HTMLButtonElement;
+      await act(async () => btn.click());
+    };
+    await pick("2032-04-01");
+    await pick("2032-04-30");
+    const apply = [...host.querySelectorAll("button")].find((node) => node.textContent?.trim() === "Apply")!;
+    await act(async () => apply.click());
     await settle();
-    expect(button("Rolling").getAttribute("aria-pressed")).toBe("true");
-    expect(api.getCategoryComparisonPeriod).toHaveBeenCalledWith("monthly", "rolling");
-    expect(host.textContent).toContain("Last 30 days vs preceding 30 days");
-    expect(categoryLink()?.getAttribute("href")).toContain("startDate=2032-03-18&endDate=2032-04-16");
-    await act(async () => button("yearly").click());
-    await settle();
-    expect(api.getCategoryComparisonPeriod).toHaveBeenCalledWith("yearly", "rolling");
-    expect(host.textContent).toContain("Last 365 days vs preceding 365 days");
-    await act(async () => button("Calendar").click());
-    await settle();
-    expect(api.getCategoryComparisonPeriod).toHaveBeenCalledWith("yearly", "calendar");
-    expect(categoryLink()?.getAttribute("href")).toBe(EXPECTED_HREF);
+    expect(categoryLink()?.getAttribute("href")).toContain("startDate=2032-04-01&endDate=2032-04-30");
   });
 
   it("hydrates Activity through the destination and requests the exact spend population", async () => {
@@ -249,7 +256,7 @@ describe("PI-13 frozen category drilldown contract", () => {
       query: "is:spend",
       category: CATEGORY,
       startDate: BOUNDS.startDate,
-      endDate: BOUNDS.endDate,
+      endDate: "2032-04-15",
       limit: 500,
       sort: "date",
       order: "desc",
@@ -258,10 +265,7 @@ describe("PI-13 frozen category drilldown contract", () => {
     expect(host.textContent).toContain("food-refund");
     expect(host.textContent).toContain("food-charge-2");
     expect(host.textContent).toContain("food-charge-1");
-    expect((host.querySelector('input[aria-label="Start date"]') as HTMLInputElement).value)
-      .toBe(BOUNDS.startDate);
-    expect((host.querySelector('input[aria-label="End date"]') as HTMLInputElement).value)
-      .toBe(BOUNDS.endDate);
+    expect(host.querySelector('button[aria-label="Custom period"]')?.getAttribute("aria-pressed")).toBe("true");
     expect((host.querySelector('select[aria-label="Sort transactions"]') as HTMLSelectElement).value)
       .toBe("date:desc");
   });

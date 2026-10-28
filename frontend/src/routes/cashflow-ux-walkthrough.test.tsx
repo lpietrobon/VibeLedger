@@ -24,6 +24,8 @@ vi.mock("@/lib/api/client", () => ({
   getTransactions: vi.fn(),
   getSpendingSummary: vi.fn(),
   getCumulativeSpending: vi.fn(),
+  getSpendingTimeline: vi.fn(),
+  getSpendingDay: vi.fn(),
   getCategoryCatalog: vi.fn(),
   syncAllAccounts: vi.fn(),
   patchTransactionAnnotation: vi.fn(),
@@ -148,6 +150,7 @@ beforeEach(() => {
     items: await api.getCategoryComparison(), reporting,
   }));
   vi.mocked(api.getCumulativeSpending).mockResolvedValue([]);
+  vi.mocked(api.getSpendingTimeline).mockResolvedValue({start_date:"2024-03-01",end_date:"2024-03-15",days:[],spikes:[],qualification:""});
   vi.mocked(api.getCategoryCatalog).mockResolvedValue([]);
   vi.mocked(api.patchTransactionAnnotation).mockResolvedValue({ status: "ok", transaction_id: 42 });
   vi.mocked(api.syncAllAccounts).mockResolvedValue({ results: [], summary: "1/1 item synced" });
@@ -165,9 +168,12 @@ describe("CF-03 synthetic cashflow walkthrough", () => {
     mount(<OverviewPage />);
     await settle();
 
-    expect(host.textContent).toContain("Month spend");
+    expect(api.getCashflowTrend).toHaveBeenCalledWith(expect.objectContaining({
+      startDate: "2024-03-01", endDate: "2024-03-15", granularity: "daily",
+    }));
+    expect(host.textContent).toContain("Period spend");
     expect(host.textContent).toContain("$2,397.0");
-    expect(host.textContent).toContain("This month vs last month by category");
+    expect(host.textContent).toContain("Spending by category · selected periods");
     expect(host.textContent).toContain("Uncategorized");
     expect(host.querySelector('a[href$="/transactions?filter=uncategorized"]')).not.toBeNull();
   });
@@ -177,13 +183,15 @@ describe("CF-03 synthetic cashflow walkthrough", () => {
     mount(<SpendingPage />);
     await settle();
 
-    expect(host.textContent).toContain("March 2024");
-    const yearly = [...host.querySelectorAll("button")].find((node) => node.textContent === "yearly");
-    expect(yearly).toBeDefined();
-    await act(async () => yearly!.click());
+    expect(host.textContent).toContain("Spending");
+    const year = host.querySelector('button[aria-label="Year period"]') as HTMLButtonElement;
+    expect(year).not.toBeNull();
+    await act(async () => year.click());
     await settle();
-    expect(api.getSpendingSummary).toHaveBeenCalledWith({ granularity: "yearly" });
-    expect(host.textContent).toContain("2024 YTD");
+    expect(api.getSpendingSummary).toHaveBeenCalledWith(expect.objectContaining({
+      granularity: "yearly", startDate: "2024-01-01", endDate: "2024-03-15",
+    }));
+    expect(host.querySelector('button[aria-label="Year period"]')?.getAttribute("aria-pressed")).toBe("true");
 
     const row = [...host.querySelectorAll("button")].find((node) =>
       node.textContent?.includes("Odd Charge"),
