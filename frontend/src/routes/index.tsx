@@ -1,7 +1,11 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
+import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
+import { initialDateSelection, rangeQuery, trendGranularity, validateRange } from "@/lib/dateRange";
+import type { DateRangeSelection } from "@/lib/dateRange";
+import type { DateWindowParams } from "@/lib/api/client";
 import { KpiCard } from "@/components/finance/KpiCard";
 import { Delta } from "@/components/finance/Delta";
 import { Section } from "@/components/finance/Section";
@@ -16,6 +20,7 @@ import {
 import { CATEGORY_COLORS } from "@/lib/api/theme";
 import { formatCurrency } from "@/lib/format";
 import { useAccountScope, useAccountScopeQuery } from "@/lib/accountScope";
+import { categoryDrilldownHref } from "@/lib/categoryDrilldown";
 
 const CashflowChart = lazy(() => import("@/components/finance/charts/CashflowChart"));
 const CategoryBarChart = lazy(() => import("@/components/finance/charts/CategoryBarChart"));
@@ -28,34 +33,36 @@ function appHref(path: string) {
 
 export default function OverviewPage() {
   const [accountIds] = useAccountScope();
-  const summary = useQuery({
-    queryKey: ["overview", accountIds],
-    queryFn: () => getOverviewSummary({ accountIds }),
-  });
-  const cashflow = useQuery({
-    queryKey: ["cashflow", accountIds],
-    queryFn: () => getCashflowTrend({ accountIds }),
-  });
-  const comparison = useQuery({
-    queryKey: ["comparison", accountIds],
-    queryFn: () => getCategoryComparison({ accountIds }),
-  });
   const accountScopeQuery = useAccountScopeQuery();
+  const [dateRange, setDateRange] = useState<DateRangeSelection>(() => ({
+    ...initialDateSelection("current-month"), comparison: "previous-month",
+  }));
+  const dates: DateWindowParams = { ...rangeQuery(dateRange), accountIds };
+  const key = [accountIds, dates.startDate, dates.endDate, dates.compareStartDate, dates.compareEndDate];
+  const valid = validateRange(dateRange);
+  const cashflowResolution = trendGranularity(dateRange);
+  const summary = useQuery({ queryKey: ["overview", ...key], queryFn: () => getOverviewSummary(dates), enabled: valid });
+  const cashflow = useQuery({ queryKey: ["cashflow", cashflowResolution, ...key], queryFn: () => getCashflowTrend({ ...dates, granularity: cashflowResolution }), enabled: valid });
+  const comparison = useQuery({ queryKey: ["comparison", ...key], queryFn: () => getCategoryComparison("monthly", dates), enabled: valid });
   const recent = useQuery({
-    queryKey: ["recent-tx", accountScopeQuery],
-    queryFn: () => getTransactions({ query: accountScopeQuery, limit: 8 }),
+    queryKey: ["recent-tx", accountScopeQuery, ...key],
+    queryFn: () => getTransactions({ query: accountScopeQuery, limit: 8, startDate: dateRange.startDate, endDate: dateRange.endDate }),
+    enabled: valid,
   });
 
   const s = summary.data;
+  const comparisonAvailable = s?.reporting.comparisonAvailable ?? false;
+  const drilldownBounds = valid ? { startDate: dateRange.startDate, endDate: dateRange.endDate } : null;
 
   return (
     <AppShell>
+      <DateRangeSelector value={dateRange} onChange={setDateRange} />
       {/* Mobile sticky summary */}
       {s ? (
         <div className="-mx-4 mb-3 flex items-center justify-between border-b border-border bg-background/95 px-4 py-2 md:hidden">
           <div>
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              Month spend
+              Period spend
             </div>
             <div className="text-base font-semibold tabular-nums">
               {formatCurrency(s.monthSpend)}
@@ -76,7 +83,7 @@ export default function OverviewPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Overview</h1>
           <p className="text-sm text-muted-foreground">
-            As of {s?.asOfDate ?? "—"} · single household
+            {dateRange.startDate} – {dateRange.endDate} · single household
           </p>
         </div>
       </div>
@@ -88,41 +95,58 @@ export default function OverviewPage() {
         ) : (
           <>
             <KpiCard
-              label="Net worth"
-              value={formatCurrency(s.netWorth, { compact: true })}
-              sublabel={`${formatCurrency(s.assets, { compact: true })} assets · ${formatCurrency(s.liabilities, { compact: true })} debt`}
-              tone="net"
-            />
-            <KpiCard
-              label="Month spend"
+              label="Period spend"
               value={formatCurrency(s.monthSpend, { compact: true })}
-              sublabel={`vs ${formatCurrency(s.previousMonthSpend, { compact: true })} last mo`}
+              sublabel={comparisonAvailable
+                ? `vs ${formatCurrency(s.previousMonthSpend, { compact: true })} selected comparison`
+                : "No comparable recorded prior period"}
               tone="spend"
-              delta={<Delta current={s.monthSpend} previous={s.previousMonthSpend} goodDirection="down" />}
+              delta={comparisonAvailable ? <Delta current={s.monthSpend} previous={s.previousMonthSpend} goodDirection="down" /> : undefined}
             />
             <KpiCard
-              label="Month income"
+              label="Period income"
               value={formatCurrency(s.monthIncome, { compact: true })}
-              sublabel={`vs ${formatCurrency(s.previousMonthIncome, { compact: true })} last mo`}
+              sublabel={comparisonAvailable
+                ? `vs ${formatCurrency(s.previousMonthIncome, { compact: true })} selected comparison`
+                : "Recorded posted income"}
               tone="income"
-              delta={<Delta current={s.monthIncome} previous={s.previousMonthIncome} goodDirection="up" />}
+              delta={comparisonAvailable ? <Delta current={s.monthIncome} previous={s.previousMonthIncome} goodDirection="up" /> : undefined}
             />
             <KpiCard
               label="Net cashflow"
               value={formatCurrency(s.netCashflow, { compact: true, sign: true })}
-              sublabel={`vs ${formatCurrency(s.previousNetCashflow, { compact: true, sign: true })} last mo`}
+              sublabel={comparisonAvailable
+                ? `vs ${formatCurrency(s.previousNetCashflow, { compact: true, sign: true })} prior MTD`
+                : "Recorded posted activity"}
               tone="net"
-              delta={<Delta current={s.netCashflow} previous={s.previousNetCashflow} goodDirection="up" />}
+              delta={comparisonAvailable ? <Delta current={s.netCashflow} previous={s.previousNetCashflow} goodDirection="up" /> : undefined}
+            />
+            <KpiCard
+              label="Current net worth"
+              value={formatCurrency(s.netWorth, { compact: true })}
+              sublabel={`${formatCurrency(s.assets, { compact: true })} assets · ${formatCurrency(s.liabilities, { compact: true })} debt`}
+              tone="net"
             />
           </>
         )}
       </div>
 
+      {summary.isError ? (
+        <p role="alert" className="mt-3 text-sm text-red-600">Could not load the spending summary: {summary.error.message}</p>
+      ) : s ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {s.reporting.comparisonQualification}
+          {s.needsAttention.transferPairsPending > 0 ? " Possible transfers remain counted until reviewed." : ""}
+        </p>
+      ) : null}
+
       {/* Charts */}
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <Section title="Cashflow · last 12 months" className="lg:col-span-2">
+        <Section title="Cashflow · selected date range" className="lg:col-span-2">
           <div className="h-64">
-            {cashflow.data ? (
+            {cashflow.isError ? (
+              <p role="alert" className="grid h-full place-items-center text-sm text-red-600">Could not load cashflow: {cashflow.error.message}</p>
+            ) : cashflow.data ? (
               <Suspense fallback={<ChartSkeleton />}>
                 <CashflowChart data={cashflow.data} />
               </Suspense>
@@ -164,7 +188,7 @@ export default function OverviewPage() {
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Section
-          title="This month vs last month by category"
+          title="Spending by category · selected periods"
           action={
             <a
               href={appHref("/spending")}
@@ -174,16 +198,28 @@ export default function OverviewPage() {
             </a>
           }
         >
-          {comparison.data ? (
-            <CategoryComparison data={comparison.data} />
+          {comparison.isError ? (
+            <p role="alert" className="grid h-40 place-items-center text-sm text-red-600">Could not load category comparison: {comparison.error.message}</p>
+          ) : comparison.data ? (
+            <CategoryComparison
+              data={comparison.data}
+              currentLabel={dateRange.startDate + " – " + dateRange.endDate}
+              previousLabel={dates.compareStartDate ? dates.compareStartDate + " – " + dates.compareEndDate : "No comparison"}
+              showPrevious={Boolean(dates.compareStartDate)}
+              getCategoryHref={drilldownBounds
+                ? (category) => categoryDrilldownHref({ category, ...drilldownBounds })
+                : undefined}
+            />
           ) : (
             <ChartSkeleton />
           )}
         </Section>
 
-        <Section title="Current month by category">
+        <Section title="Selected spending by category">
           <div className="h-64">
-            {comparison.data ? (
+            {comparison.isError ? (
+              <p role="alert" className="grid h-full place-items-center text-sm text-red-600">Category chart unavailable.</p>
+            ) : comparison.data ? (
               <Suspense fallback={<ChartSkeleton />}>
                 <CategoryBarChart data={comparison.data} />
               </Suspense>
@@ -203,7 +239,7 @@ export default function OverviewPage() {
       </div>
 
       <Section
-        title="Recent transactions"
+        title="Transactions in selected period"
         className="mt-4"
         action={
           <a

@@ -1,0 +1,200 @@
+{
+  "currency": "USD",
+  "accounts": {
+    "checking": "depository",
+    "card": "credit",
+    "payment": "depository",
+    "partner": "depository",
+    "investment": "investment"
+  },
+  "rows": [
+    {
+      "id": "salary-jan",
+      "date": "2024-01-05",
+      "account": "checking",
+      "amount": -3000,
+      "kind": "income",
+      "category": "INCOME"
+    },
+    {
+      "id": "purchase-jan",
+      "date": "2024-01-10",
+      "account": "card",
+      "amount": 120,
+      "kind": "expense",
+      "category": "SHOPPING",
+      "authorized_date": "2024-01-08"
+    },
+    {
+      "id": "card-payment-out",
+      "date": "2024-01-15",
+      "account": "checking",
+      "amount": 120,
+      "kind": "internal",
+      "category": null,
+      "pair": "card-payment"
+    },
+    {
+      "id": "card-payment-in",
+      "date": "2024-01-15",
+      "account": "card",
+      "amount": -120,
+      "kind": "internal",
+      "category": null,
+      "pair": "card-payment"
+    },
+    {
+      "id": "funding-out",
+      "date": "2024-01-16",
+      "account": "checking",
+      "amount": 80,
+      "kind": "internal",
+      "category": null,
+      "pair": "funding"
+    },
+    {
+      "id": "funding-in",
+      "date": "2024-01-16",
+      "account": "payment",
+      "amount": -80,
+      "kind": "internal",
+      "category": null,
+      "pair": "funding"
+    },
+    {
+      "id": "partner-out",
+      "date": "2024-01-17",
+      "account": "checking",
+      "amount": 200,
+      "kind": "internal",
+      "category": null,
+      "pair": "partner"
+    },
+    {
+      "id": "partner-in",
+      "date": "2024-01-17",
+      "account": "partner",
+      "amount": -200,
+      "kind": "internal",
+      "category": null,
+      "pair": "partner"
+    },
+    {
+      "id": "invest-out",
+      "date": "2024-01-18",
+      "account": "checking",
+      "amount": 100,
+      "kind": "internal",
+      "category": null,
+      "pair": "invest"
+    },
+    {
+      "id": "invest-in",
+      "date": "2024-01-18",
+      "account": "investment",
+      "amount": -100,
+      "kind": "internal",
+      "category": null,
+      "pair": "invest"
+    },
+    {
+      "id": "payment-purchase",
+      "date": "2024-01-19",
+      "account": "payment",
+      "amount": 35,
+      "kind": "expense",
+      "category": "FOOD"
+    },
+    {
+      "id": "coffee-1",
+      "date": "2024-01-20",
+      "account": "card",
+      "amount": 10,
+      "kind": "expense",
+      "category": "FOOD"
+    },
+    {
+      "id": "coffee-2",
+      "date": "2024-01-20",
+      "account": "card",
+      "amount": 10,
+      "kind": "expense",
+      "category": "FOOD"
+    },
+    {
+      "id": "external-gift",
+      "date": "2024-01-21",
+      "account": "checking",
+      "amount": 50,
+      "kind": "expense",
+      "category": "GIFTS"
+    },
+    {
+      "id": "unmatched-reimbursement",
+      "date": "2024-01-22",
+      "account": "payment",
+      "amount": -40,
+      "kind": "income",
+      "category": "OTHER_INCOME"
+    },
+    {
+      "id": "pending",
+      "date": "2024-01-25",
+      "account": "card",
+      "amount": 999,
+      "kind": "pending",
+      "category": "FOOD"
+    },
+    {
+      "id": "purchase-feb",
+      "date": "2024-02-01",
+      "account": "card",
+      "amount": 80,
+      "kind": "expense",
+      "category": "FOOD",
+      "authorized_date": "2024-01-31"
+    },
+    {
+      "id": "refund-jan",
+      "date": "2024-02-03",
+      "account": "card",
+      "amount": -120,
+      "kind": "refund",
+      "category": "SHOPPING",
+      "refund_of": "purchase-jan"
+    },
+    {
+      "id": "salary-feb",
+      "date": "2024-02-05",
+      "account": "checking",
+      "amount": -3000,
+      "kind": "income",
+      "category": "INCOME"
+    },
+    {
+      "id": "fee",
+      "date": "2024-02-06",
+      "account": "checking",
+      "amount": 10,
+      "kind": "expense",
+      "category": "FEES"
+    }
+  ],
+  "expected": {
+    "2024-01": {
+      "income": 3040,
+      "expenses": 225,
+      "net": 2815
+    },
+    "2024-02": {
+      "income": 3000,
+      "expenses": -30,
+      "net": 3030
+    },
+    "2024-YTD-02-29": {
+      "income": 6040,
+      "expenses": 195,
+      "net": 5845
+    }
+  }
+}

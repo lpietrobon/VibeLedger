@@ -1,0 +1,72 @@
+# Roadmap
+
+Start with [_registry.md](_registry.md), then open the relevant epic and task.
+[Trustworthy cashflow](epics/010-trustworthy-cashflow/_epic.md) is complete. The
+planned epics are [product integrity and cleanup](epics/020-product-integrity/_epic.md),
+[inspectable aggregates](epics/030-inspectable-aggregates/_epic.md),
+[timeline spike attribution](epics/040-timeline-spike-attribution/_epic.md),
+and [shared date range semantics](epics/050-shared-date-range-semantics/_epic.md), with the
+explicit cross-epic dependencies recorded in task metadata. The two new spending
+UX epics decompose the [October 2026 priorities](spending-ux-priorities-2026-10-25.md)
+into separately assigned test-first, implementation and independent-verification
+slices. They are planned, not implemented. Read an
+epic's `spirit.md` before choosing an implementation. The
+[earlier feature backlog](../finance-intelligence-roadmap.md) is preserved and
+deferred; it is not the current execution queue.
+
+Earlier partial work is inventoried in the epic's
+[recovered progress report](epics/010-trustworthy-cashflow/artifacts/CF-01-recovered-progress.md).
+Read it before redoing an audit or starting a draft implementation.
+
+## Deliverable locations
+
+- Progress, decisions, commands, verdicts, and evidence links live in the task's
+  append-only `Execution Log`.
+- Substantive audit reports, accounting examples, UX findings, and synthetic-data
+  screenshots live in the epic's `artifacts/`, prefixed with the task ID. Link
+  each deliverable from its task. Draft snapshots must say whether they are applied
+  to the branch and identify their source revision.
+- Executable tests/fixtures belong in existing test directories. Lasting product
+  instructions belong in existing project documentation.
+- A recoverable patch in `artifacts/` is evidence, not accepted application code.
+  Keep earlier snapshots intact; give later versions distinct filenames.
+
+## Refresh and validate
+
+From the repository root, using the project's Python environment:
+
+```bash
+python -m pip install -r docs/roadmap/requirements.txt
+python docs/roadmap/scan.py
+```
+
+The scanner regenerates `_registry.md` and `_blocked.md` and exits nonzero on
+invalid metadata or dependency/status issues. Run it at session start, after
+task changes, and before committing roadmap changes. Never hand-edit its output.
+It reads `_epic.md` and `tasks/*.md`; supporting prose such as `spirit.md` and
+documents in `artifacts/` are not tasks.
+
+## Coordination
+
+- A `todo` task is ready only when every dependency is `done`. A null
+  `assigned_agent` means unassigned; suggested roles live in the task body.
+- Assign a task and set it `in-progress` when work actually starts. Do not mark
+  dependencies done merely to unblock work. Record evidence and the commit tested
+  before completion; append dated entries to the execution log.
+- One coordinator owns changes to the registry and epic scope. Independent
+  verification is performed by someone other than the implementer of that slice.
+- PR #22 has been merged. Base new work on the repository's current canonical
+  branch, rechecking remote state before creating an implementation branch. Future
+  parallel implementation should use isolated task branches/worktrees and
+  coordinated integration.
+- On a task pivot, retain the old file in place, mark it `superseded`, set
+  `superseded_by` where applicable, and create a new ID. Never reuse IDs or delete
+  history. Superseding an epic also requires a revision-log explanation.
+- Material scope changes require an epic revision bump and a dated revision-log
+  entry. Keep the spirit true to the user's intent rather than to a chosen design.
+- `_archive/epics` and `_archive/tasks` are reserved for later archival. For now,
+  keep superseded records in place so dependency references remain inspectable.
+
+The first setup commit contains the structure and intent. The following commit
+adds the task breakdown. Roadmap status does not imply that draft implementation
+has been accepted, pushed, or deployed.

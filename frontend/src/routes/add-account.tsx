@@ -44,6 +44,11 @@ export default function AddAccountPage() {
       </div>
 
       <Section title="Connect">
+        <p className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          Before relinking an existing account, remove its old linked connection. Different provider IDs can
+          describe the same account, so VibeLedger cannot safely merge them and totals may otherwise double-count.
+          Availability is determined by Plaid; this does not establish Venmo support.
+        </p>
         <ol className="mb-4 space-y-1 text-sm text-muted-foreground">
           <li>1. Generate a secure link (valid 20 minutes).</li>
           <li>2. Open Plaid Link and connect your bank.</li>

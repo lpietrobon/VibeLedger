@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const AccountsPage = lazy(() => import("@/routes/accounts"));
 const AddAccountPage = lazy(() => import("@/routes/add-account"));
+const InsightsPage = lazy(() => import("@/routes/insights"));
 const MorePage = lazy(() => import("@/routes/more"));
 const OverviewPage = lazy(() => import("@/routes/index"));
 const RecurringPage = lazy(() => import("@/routes/recurring"));
@@ -23,8 +24,9 @@ function currentPath() {
 }
 
 const ROUTES: Record<string, React.ComponentType> = {
-  "/": OverviewPage,
+  "/": SpendingPage,
   "/spending": SpendingPage,
+  "/overview": OverviewPage,
   "/transactions": TransactionsPage,
   "/accounts": AccountsPage,
   "/more": MorePage,
@@ -32,6 +34,7 @@ const ROUTES: Record<string, React.ComponentType> = {
   "/transfers": TransfersPage,
   "/recurring": RecurringPage,
   "/add-account": AddAccountPage,
+  "/insights": InsightsPage,
 };
 
 export default function App() {

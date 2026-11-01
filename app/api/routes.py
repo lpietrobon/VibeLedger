@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, timedelta
 import calendar
 import re
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Annotated, Literal
 import logging
 import json
 import os
@@ -25,7 +26,9 @@ from app.models.models import (
     CategoryDecisionEvent,
     CategoryRule,
     ConnectSession,
+    DuplicateCorrection,
     Item,
+    RejectedTransferPair,
     RecurringOverride,
     SyncRun,
     SyncState,
@@ -42,6 +45,7 @@ from app.schemas.plaid import (
     CategoryRuleRecomputeRequest,
     ConnectCompleteRequest,
     CreateConnectSessionRequest,
+    DuplicateCorrectionCreateRequest,
     PatchAccountRequest,
     PatchAnnotationRequest,
     RecurringStatusRequest,
@@ -51,9 +55,27 @@ from app.services.security import decrypt_token, encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
+from app.services.accounting import (
+    comparison_bounds,
+    comparison_reporting,
+    currency_reporting,
+    exclude_confirmed_transfers,
+    expense_amount,
+    income_amount,
+    is_refund,
+    posted_activity,
+    reporting_scope,
+)
+from app.services.duplicate_corrections import (
+    create_correction,
+    invalidate_missing_endpoints,
+    mark_invalidated,
+    response as duplicate_response,
+)
 from app.services.refund_detector import classify_refunds
 from app.services.category_catalog import merge_catalog
 from app.services.recurring_detector import detect_recurring
+from app.services.timeline_spikes import detect_spikes
 from app.services.search_query import (
     IS_VALUES,
     SEARCH_FIELDS,
@@ -222,8 +244,11 @@ def connect_start(session: str, db: Session = Depends(get_db)):
     <script src='https://cdn.plaid.com/link/v2/stable/link-initialize.js'></script>
     <script>
       const sessionToken = {json.dumps(session)};
+      const linkToken = {json.dumps(link_token)};
+      window.localStorage.setItem('vibeledger_connect_session', sessionToken);
+      window.localStorage.setItem('vibeledger_link_token', linkToken);
       const handler = Plaid.create({{
-        token: {json.dumps(link_token)},
+        token: linkToken,
         onSuccess: async (public_token, metadata) => {{
           const completePath = window.location.pathname.replace(/\\/start$/, '/complete');
           const resp = await fetch(completePath, {{
@@ -239,6 +264,49 @@ def connect_start(session: str, db: Session = Depends(get_db)):
         }}
       }});
       document.getElementById('link-button').onclick = () => handler.open();
+    </script>
+  </body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
+@router.get("/connect/oauth", response_class=HTMLResponse)
+def connect_oauth():
+    html = """
+<!doctype html>
+<html>
+  <head><title>VibeLedger Connect</title></head>
+  <body>
+    <h3>Returning to Plaid...</h3>
+    <script src='https://cdn.plaid.com/link/v2/stable/link-initialize.js'></script>
+    <script>
+      const sessionToken = window.localStorage.getItem('vibeledger_connect_session');
+      const linkToken = window.localStorage.getItem('vibeledger_link_token');
+      if (!sessionToken || !linkToken) {
+        document.body.innerHTML = '<h3>Connection session not found. Please generate a new secure link.</h3>';
+      } else {
+        const completePath = window.location.pathname.replace(/\\/oauth$/, '/complete');
+        const handler = Plaid.create({
+          token: linkToken,
+          receivedRedirectUri: window.location.href,
+          onSuccess: async (public_token, metadata) => {
+            const resp = await fetch(completePath, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session_token: sessionToken, public_token })
+            });
+            if (resp.ok) {
+              window.localStorage.removeItem('vibeledger_connect_session');
+              window.localStorage.removeItem('vibeledger_link_token');
+              document.body.innerHTML = '<h3>Account connected. You can return to VibeLedger.</h3>';
+            } else {
+              document.body.innerHTML = '<h3>Failed to connect. Please retry.</h3>';
+            }
+          }
+        });
+        handler.open();
+      }
     </script>
   </body>
 </html>
@@ -314,6 +382,8 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
     txn_ids = [t.id for t in db.query(Transaction.id).filter(Transaction.item_id == item_id)]
 
     if txn_ids:
+        for txn_id in txn_ids:
+            mark_invalidated(db, txn_id, "source item removed")
         db.query(TransactionAnnotation).filter(
             TransactionAnnotation.refund_match_transaction_id.in_(txn_ids)
         ).update(
@@ -326,6 +396,21 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
         db.query(TransferPair).filter(
             or_(TransferPair.txn_out_id.in_(txn_ids), TransferPair.txn_in_id.in_(txn_ids))
         ).delete(synchronize_session=False)
+        db.query(RejectedTransferPair).filter(
+            or_(RejectedTransferPair.txn_out_id.in_(txn_ids), RejectedTransferPair.txn_in_id.in_(txn_ids))
+        ).delete(synchronize_session=False)
+        # Fingerprints intentionally survive item removal so a later relink can
+        # restore a user decision.  They must not remain marked as applied to
+        # the transaction row that is about to disappear.
+        db.query(AnnotationFingerprint).filter(
+            AnnotationFingerprint.applied_transaction_id.in_(txn_ids)
+        ).update(
+            {
+                AnnotationFingerprint.applied_transaction_id: None,
+                AnnotationFingerprint.applied_at: None,
+            },
+            synchronize_session=False,
+        )
         db.query(CategoryDecisionEvent).filter(CategoryDecisionEvent.transaction_id.in_(txn_ids)).delete(
             synchronize_session=False
         )
@@ -346,6 +431,41 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "removed", "item_id": item_id}
+
+
+@router.get("/duplicate-corrections")
+def list_duplicate_corrections(db: Session = Depends(get_db)):
+    invalidate_missing_endpoints(db)
+    db.commit()
+    corrections = db.query(DuplicateCorrection).order_by(DuplicateCorrection.id).all()
+    return {"items": [duplicate_response(correction) for correction in corrections]}
+
+
+@router.post("/duplicate-corrections")
+def create_duplicate_correction(
+    payload: DuplicateCorrectionCreateRequest,
+    db: Session = Depends(get_db),
+):
+    correction = create_correction(
+        db,
+        payload.canonical_transaction_id,
+        payload.duplicate_transaction_id,
+    )
+    db.commit()
+    return duplicate_response(correction)
+
+
+@router.delete("/duplicate-corrections/{correction_id}")
+def reverse_duplicate_correction(correction_id: int, db: Session = Depends(get_db)):
+    correction = db.get(DuplicateCorrection, correction_id)
+    if not correction:
+        raise HTTPException(status_code=404, detail="duplicate correction not found")
+    if correction.status != "active":
+        raise HTTPException(status_code=400, detail="duplicate correction is not active")
+    correction.status = "reversed"
+    correction.invalidation_reason = None
+    db.commit()
+    return {"id": correction.id, "status": correction.status}
 
 
 @router.post("/sync/item/{item_id}/historical")
@@ -454,13 +574,15 @@ def _apply_search_query(query, parsed):
     if "uncategorized" in parsed.flags:
         query = query.filter(func.lower(_effective_category_expr()) == "uncategorized")
     if "refund" in parsed.flags:
-        query = query.filter(_is_refund_expr())
+        query = query.filter(is_refund())
     if "likely-refund" in parsed.flags:
         query = query.filter(TransactionAnnotation.refund_status == "likely")
     if "not-transfer" in parsed.flags:
         # Same exclusion the analytics counts use, so a count and the search
         # that drills into it can describe the same set.
         query = _apply_transfer_exclusion(query, include_transfers=False)
+    if "spend" in parsed.flags:
+        query = posted_activity(query, include_transfers=False).filter(expense_amount() != 0)
     if "pending" in parsed.flags:
         query = query.filter(Transaction.pending == True)  # noqa: E712
 
@@ -594,6 +716,8 @@ def list_transactions(
     q: str | None = Query(default=None, description="Search name, merchant, or category"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    sort: Literal["date", "amount"] = Query(default="date"),
+    order: Literal["asc", "desc"] = Query(default="desc"),
 ):
     effective_category = _effective_category_expr().label("effective_category")
     category_source = _category_source_expr().label("category_source")
@@ -629,8 +753,10 @@ def list_transactions(
         base = _apply_search_query(base, parse_query(q))
 
     total = base.with_entities(func.count(Transaction.id)).scalar()
+    sort_column = Transaction.date if sort == "date" else func.abs(Transaction.amount)
+    direction = sort_column.asc if order == "asc" else sort_column.desc
     rows = (
-        base.order_by(Transaction.date.desc(), Transaction.id.desc())
+        base.order_by(direction(), Transaction.id.asc())
         .limit(limit)
         .offset(offset)
         .all()
@@ -640,19 +766,33 @@ def list_transactions(
     # excluded from spend/income analytics should say so, otherwise money
     # silently goes missing from the totals with no visible cause.
     page_ids = [row[0].id for row in rows]
-    pair_by_txn: dict[int, int] = {}
+    pair_by_txn: dict[int, tuple[int, bool]] = {}
+    duplicate_by_txn: dict[int, str] = {}
     if page_ids:
         pair_rows = db.query(
-            TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id
+            TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id, TransferPair.confirmed
         ).filter(
             or_(
                 TransferPair.txn_out_id.in_(page_ids),
                 TransferPair.txn_in_id.in_(page_ids),
             )
         ).all()
-        for pair_id, out_id, in_id in pair_rows:
-            pair_by_txn[out_id] = pair_id
-            pair_by_txn[in_id] = pair_id
+        for pair_id, out_id, in_id, confirmed in pair_rows:
+            pair_by_txn[out_id] = (pair_id, confirmed)
+            pair_by_txn[in_id] = (pair_id, confirmed)
+        duplicate_rows = db.query(
+            DuplicateCorrection.canonical_transaction_id,
+            DuplicateCorrection.duplicate_transaction_id,
+        ).filter(
+            DuplicateCorrection.status == "active",
+            or_(
+                DuplicateCorrection.canonical_transaction_id.in_(page_ids),
+                DuplicateCorrection.duplicate_transaction_id.in_(page_ids),
+            ),
+        ).all()
+        for canonical_id, duplicate_id in duplicate_rows:
+            duplicate_by_txn[canonical_id] = "canonical"
+            duplicate_by_txn[duplicate_id] = "duplicate"
 
     return {
         "total": total,
@@ -673,8 +813,10 @@ def list_transactions(
                 "effective_category": resolved_category,
                 "category_source": resolved_source,
                 "rule_id": a.rule_id if (a and resolved_source == "rule") else None,
-                "transfer_pair_id": pair_by_txn.get(t.id),
-                "is_transfer": t.id in pair_by_txn,
+                "transfer_pair_id": pair_by_txn.get(t.id, (None, None))[0],
+                "is_transfer": pair_by_txn.get(t.id, (None, False))[1] is True,
+                "is_transfer_candidate": pair_by_txn.get(t.id, (None, False))[1] is False and t.id in pair_by_txn,
+                "duplicate_status": duplicate_by_txn.get(t.id),
                 "refund_status": a.refund_status if a else None,
                 "refund_match_transaction_id": a.refund_match_transaction_id if a else None,
                 "refund_reason": a.refund_reason if a else None,
@@ -1177,26 +1319,23 @@ def recompute_all_category_rules(payload: CategoryRuleRecomputeRequest, db: Sess
 
 
 def _apply_transfer_exclusion(q, include_transfers: bool):
-    """Filter out transactions participating in a TransferPair.
+    """Filter out transactions participating in a confirmed TransferPair.
 
     A transfer is a *matched pair* across two covered accounts — that is the only
-    thing that can double-count money as both income and expense. The legacy
+    thing that can double-count money as both income and expense. An automatic
+    candidate is evidence for review, not an accounting conclusion, so it stays
+    in realized totals until the user confirms it. The legacy
     one-sided `is_transfer_override` flag is deliberately no longer honored: it
     removed single transactions from every analytic with no counterparty, could
     not be set or cleared through any API, and survived re-sync via annotation
     fingerprints, so anything carrying it was silently and permanently missing
     from spend and income.
     """
-    if include_transfers:
-        return q
-    return q.filter(
-        ~Transaction.id.in_(select(TransferPair.txn_out_id)),
-        ~Transaction.id.in_(select(TransferPair.txn_in_id)),
-    )
+    return q if include_transfers else exclude_confirmed_transfers(q)
 
 
 def _is_refund_expr():
-    return TransactionAnnotation.refund_status.in_(["confirmed", "likely"])
+    return is_refund()
 
 
 def _apply_account_filter(q, account_ids: list[int] | None):
@@ -1216,21 +1355,18 @@ def monthly_spend(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
-    account_ids: list[int] | None = Query(default=None),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers, account_ids=account_ids)
     month_col = func.strftime("%Y-%m", Transaction.date).label("month")
     q = (
         db.query(
             month_col,
-            func.sum(case(
-                (_is_refund_expr(), Transaction.amount),
-                (Transaction.amount > 0, Transaction.amount),
-                else_=0,
-            )),
+            func.sum(expense_amount()),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
-    q = _apply_transfer_exclusion(q, include_transfers)
+    q = posted_activity(q, include_transfers=include_transfers)
     q = _apply_account_filter(q, account_ids)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
@@ -1246,21 +1382,18 @@ def category_spend(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
-    account_ids: list[int] | None = Query(default=None),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers, account_ids=account_ids)
     effective_category = _effective_category_expr().label("category")
     q = (
         db.query(
             effective_category,
-            func.sum(case(
-                (_is_refund_expr(), Transaction.amount),
-                (Transaction.amount > 0, Transaction.amount),
-                else_=0,
-            )),
+            func.sum(expense_amount()),
         )
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
-    q = _apply_transfer_exclusion(q, include_transfers)
+    q = posted_activity(q, include_transfers=include_transfers)
     q = _apply_account_filter(q, account_ids)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
@@ -1276,52 +1409,57 @@ def cashflow_trend(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
-    account_ids: list[int] | None = Query(default=None),
+    granularity: Literal["daily", "monthly"] = "monthly",
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
-    month_col = func.strftime("%Y-%m", Transaction.date).label("month")
-    q = (
-        db.query(
-            month_col,
-            func.sum(case(
-                (_is_refund_expr(), Transaction.amount),
-                (Transaction.amount > 0, Transaction.amount),
-                else_=0,
-            )).label("expenses"),
-            func.sum(case(
-                (
-                    (Transaction.amount < 0)
-                    & or_(
-                        TransactionAnnotation.refund_status.is_(None),
-                        ~TransactionAnnotation.refund_status.in_(["confirmed", "likely"]),
-                    ),
-                    -Transaction.amount,
-                ),
-                else_=0,
-            )).label("income"),
-        )
-        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers, account_ids=account_ids)
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="From date must precede To date")
+    if granularity == "daily" and (not start_date or not end_date or (end_date - start_date).days > 3660):
+        raise HTTPException(status_code=422, detail="Daily trend needs a bounded date range")
+    daily = granularity == "daily"
+    bucket = func.strftime("%Y-%m-%d" if daily else "%Y-%m", Transaction.date).label("period")
+    q = db.query(bucket, func.sum(expense_amount()), func.sum(income_amount())).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
-    q = _apply_transfer_exclusion(q, include_transfers)
+    q = posted_activity(q, include_transfers=include_transfers)
     q = _apply_account_filter(q, account_ids)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
         q = q.filter(Transaction.date <= end_date)
-    rows = q.group_by(month_col).order_by(month_col).all()
+    rows = q.group_by(bucket).order_by(bucket).all()
+    totals = {
+        period: (round(float(expenses or 0), 2), round(float(income or 0), 2))
+        for period, expenses, income in rows
+    }
+    # For a short selected window, show EVERY calendar day, not just the days
+    # on which the bank reported activity. A current month is not one point.
+    keys = []
+    if daily:
+        d = start_date
+        while d <= end_date:
+            keys.append(d.isoformat())
+            d += timedelta(days=1)
+    else:
+        keys = sorted(totals)
     return [
-        {
-            "month": month,
-            "expenses": round(float(expenses or 0), 2),
-            "income": round(float(income or 0), 2),
-            "net": round(float((income or 0) - (expenses or 0)), 2),
-        }
-        for month, expenses, income in rows
+        {"month": key,
+         "expenses": totals.get(key, (0.0, 0.0))[0],
+         "income": totals.get(key, (0.0, 0.0))[1],
+         "net": round(totals.get(key, (0.0, 0.0))[1] - totals.get(key, (0.0, 0.0))[0], 2)}
+        for key in keys
     ]
 
 
 @router.get("/analytics/accounts-summary")
 def accounts_summary(db: Session = Depends(get_db)):
     accounts = db.query(Account).all()
+    reporting = currency_reporting(
+        a.currency.strip().upper() if a.currency and a.currency.strip() else None
+        for a in accounts if a.current_balance is not None
+        and a.type in {"depository", "credit", "loan"}
+    )
     by_type: dict[str, list[dict]] = {}
     for a in accounts:
         bal = float(a.current_balance) if a.current_balance is not None else 0.0
@@ -1341,10 +1479,18 @@ def accounts_summary(db: Session = Depends(get_db)):
     liabilities = sum(x["current_balance"] for x in by_type.get("credit", []))
     liabilities += sum(x["current_balance"] for x in by_type.get("loan", []))
     return {
+        "reporting": reporting,
         "assets": round(assets, 2),
         "liabilities": round(liabilities, 2),
         "net_worth": round(assets - liabilities, 2),
         "groups": by_type,
+        # Provider IDs are authoritative for a single link, but two provider
+        # IDs can still describe the same real-world account.  Do not guess
+        # from weak fields such as name or mask; make this uncertainty visible.
+        "coverage": {
+            "duplicate_account_coverage": "unverified",
+            "history_coverage": "unverified",
+        },
     }
 
 
@@ -1371,12 +1517,14 @@ def _month_label(month: str) -> str:
 
 
 def _expense_value_case():
-    """Signed per-transaction expense: positive charges add, refunds subtract."""
-    return case(
-        (_is_refund_expr(), Transaction.amount),
-        (Transaction.amount > 0, Transaction.amount),
-        else_=0,
-    )
+    """Compatibility alias for the shared realized-expense expression."""
+    return expense_amount()
+
+
+def _latest_realized_activity_date(db: Session):
+    """Latest posted, non-transfer activity used to choose analytic periods."""
+    q = db.query(func.max(Transaction.date))
+    return posted_activity(q, include_transfers=False).scalar()
 
 
 def _project_month(month: str, total: float) -> float:
@@ -1402,21 +1550,47 @@ def _merge_comparison(current: dict[str, float], previous: dict[str, float]) -> 
     return rows
 
 
+def _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date):
+    """Validate optional inclusive date windows. A custom range may have no prior."""
+    if start_date is None and end_date is None:
+        if compare_start_date is not None or compare_end_date is not None:
+            raise HTTPException(status_code=422, detail="Comparison requires a selected date range")
+        return None
+    if start_date is None or end_date is None or start_date > end_date:
+        raise HTTPException(status_code=422, detail="Both From and To must be valid and ordered")
+    if (end_date - start_date).days > 3660:
+        raise HTTPException(status_code=422, detail="Date window exceeds ten years")
+    if (compare_start_date is None) != (compare_end_date is None):
+        raise HTTPException(status_code=422, detail="Both comparison boundaries are required")
+    if compare_start_date is not None and compare_start_date > compare_end_date:
+        raise HTTPException(status_code=422, detail="Invalid comparison window")
+    return (start_date, end_date, compare_start_date or start_date, compare_end_date or end_date)
+
+
 @router.get("/analytics/overview")
 def analytics_overview(
     db: Session = Depends(get_db),
-    account_ids: list[int] | None = Query(default=None),
+    reporting_date: date | None = Query(default=None),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    compare_start_date: date | None = Query(default=None),
+    compare_end_date: date | None = Query(default=None),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
     """One-shot summary for the mobile Overview screen (KPIs + needs-attention)."""
     accounts = accounts_summary(db)
-    cash = cashflow_trend(db, start_date=None, end_date=None, include_transfers=False, account_ids=account_ids)
-    by_month = {row["month"]: row for row in cash}
-    latest = cash[-1]["month"] if cash else _month_key(date.today())
-    previous = _prev_month_key(latest)
-    cur = by_month.get(latest, {})
-    pre = by_month.get(previous, {})
-
-    as_of = db.query(func.max(Transaction.date)).scalar() or date.today()
+    as_of = reporting_date if isinstance(reporting_date, date) else date.today()
+    explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
+    bounds = explicit or comparison_bounds(as_of)
+    start, end, previous_start, previous_end = bounds
+    reporting = comparison_reporting(db, bounds, account_ids=account_ids)
+    if explicit and compare_start_date is None:
+        reporting["comparison_available"] = False
+        reporting["comparison_qualification"] = "No comparison selected."
+    current_rows = cashflow_trend(db, start, end, include_transfers=False, account_ids=account_ids)
+    prior_rows = cashflow_trend(db, previous_start, previous_end, include_transfers=False, account_ids=account_ids) if not explicit or compare_start_date else []
+    cur = {key: round(sum(r[key] for r in current_rows), 2) for key in ("expenses", "income", "net")}
+    pre = {key: round(sum(r[key] for r in prior_rows), 2) for key in ("expenses", "income", "net")}
 
     # Counted over transactions, not annotations: an annotation whose transaction
     # is gone is invisible everywhere else, so counting it here would advertise
@@ -1445,14 +1619,16 @@ def analytics_overview(
         )
     ).scalar() or 0
 
-    uncategorized_q = (
-        db.query(func.count(Transaction.id))
-        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
-        .filter(func.lower(_effective_category_expr()) == "uncategorized")
+    uncategorized_q = db.query(func.count(Transaction.id)).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
-    uncategorized = _apply_account_filter(uncategorized_q, account_ids).scalar() or 0
+    uncategorized = _apply_transfer_exclusion(_apply_account_filter(uncategorized_q, account_ids), include_transfers=False).filter(
+        func.lower(_effective_category_expr()) == "uncategorized"
+    ).scalar() or 0
 
     return {
+        "reporting": reporting,
+        "balance_reporting": accounts["reporting"],
         "as_of_date": str(as_of),
         "net_worth": accounts["net_worth"],
         "assets": accounts["assets"],
@@ -1476,48 +1652,58 @@ def analytics_overview(
 def analytics_spending_summary(
     db: Session = Depends(get_db),
     granularity: str = Query(default="monthly"),
-    account_ids: list[int] | None = Query(default=None),
+    reporting_date: date | None = Query(default=None),
+    window: Literal["calendar", "rolling"] = Query(default="calendar"),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    compare_start_date: date | None = Query(default=None),
+    compare_end_date: date | None = Query(default=None),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
     """Period spend total, comparison, projection, top driver, and per-category diff."""
-    monthly = monthly_spend(db, start_date=None, end_date=None, include_transfers=False, account_ids=account_ids)
-    spend_by_month = {r["month"]: r["spend"] for r in monthly}
-    latest = monthly[-1]["month"] if monthly else _month_key(date.today())
+    as_of = reporting_date if isinstance(reporting_date, date) else date.today()
+    explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
+    bounds = explicit or comparison_bounds(as_of, granularity, window)
+    cur_start, cur_end, prev_start, prev_end = bounds
+    reporting = comparison_reporting(db, bounds, account_ids=account_ids)
+    if explicit and compare_start_date is None:
+        reporting["comparison_available"] = False
+        reporting["comparison_qualification"] = "No comparison selected."
+    cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False, account_ids=account_ids)}
+    prev_cats = ({r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False, account_ids=account_ids)}
+                 if not explicit or compare_start_date else {})
+    total = round(sum(cur_cats.values()), 2)
+    previous_total = round(sum(prev_cats.values()), 2)
+    elapsed_days = (cur_end - cur_start).days + 1
+    full_end = date(as_of.year, 12, 31) if granularity == "yearly" else _month_bounds(_month_key(as_of))[1]
+    full_days = (full_end - cur_start).days + 1
+    projection = round(total / elapsed_days * full_days, 2)
+    period_label = f"{as_of.year} YTD through {as_of.isoformat()}" if granularity == "yearly" else f"{_month_label(_month_key(as_of))} through {as_of.isoformat()}"
+    reporting["projection_qualification"] = "Straight-line estimate from recorded activity, not observed spend; coverage is unverified."
 
-    if granularity == "yearly":
-        year = int(latest.split("-")[0])
-        prev_year = year - 1
-        total = round(sum(v for m, v in spend_by_month.items() if m.startswith(f"{year}-")), 2)
-        previous_total = round(
-            sum(v for m, v in spend_by_month.items() if m.startswith(f"{prev_year}-")), 2
-        )
-        months_with_data = sum(1 for m in spend_by_month if m.startswith(f"{year}-"))
-        projection = round(total / months_with_data * 12, 2) if months_with_data else 0.0
-        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, date(year, 1, 1), date(year, 12, 31), include_transfers=False, account_ids=account_ids)}
-        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, date(prev_year, 1, 1), date(prev_year, 12, 31), include_transfers=False, account_ids=account_ids)}
-        period_label = f"{year} YTD"
-    else:
-        previous = _prev_month_key(latest)
-        total = round(spend_by_month.get(latest, 0.0), 2)
-        previous_total = round(spend_by_month.get(previous, 0.0), 2)
-        projection = _project_month(latest, total)
-        cur_start, cur_end = _month_bounds(latest)
-        prev_start, prev_end = _month_bounds(previous)
-        cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False, account_ids=account_ids)}
-        prev_cats = {r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False, account_ids=account_ids)}
-        period_label = _month_label(latest)
+    if explicit:
+        projection = total
+        period_label = f"{cur_start.isoformat()} through {cur_end.isoformat()}"
+        reporting["projection_qualification"] = "Explicit selected range; no projection applied."
+    elif window == "rolling":
+        projection = total
+        period_label = f"Last {elapsed_days} days through {as_of.isoformat()}"
+        reporting["projection_qualification"] = "Complete rolling window; no projection applied."
 
     comparison = _merge_comparison(cur_cats, prev_cats)
     top_driver = None
-    if comparison:
+    if comparison and reporting["comparison_available"]:
         top = comparison[0]
         top_driver = {"category": top["category"], "amount": round(top["current"] - top["previous"], 2)}
-    change_pct = round((total - previous_total) / previous_total * 100, 2) if previous_total else None
+    change_pct = round((total - previous_total) / abs(previous_total) * 100, 2) if previous_total and reporting["comparison_available"] else None
 
     return {
+        "reporting": reporting,
         "period_label": period_label,
         "total": total,
+        "daily_average": round(total / elapsed_days, 2),
         "previous_total": previous_total,
-        "change": round(total - previous_total, 2),
+        "change": round(total - previous_total, 2) if reporting["comparison_available"] else None,
         "change_pct": change_pct,
         "projection": projection,
         "top_driver": top_driver,
@@ -1529,11 +1715,12 @@ def _daily_expense(
     db: Session, start: date, end: date, bucket: str, account_ids: list[int] | None = None
 ) -> dict[int, float]:
     """Sum expense per day-of-month ('%d') or per month-of-year ('%m') in [start, end]."""
+    reporting_scope(db, start, end, account_ids=account_ids)
     bucket_col = func.strftime(bucket, Transaction.date)
     q = db.query(bucket_col, func.sum(_expense_value_case())).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
-    q = _apply_transfer_exclusion(q, include_transfers=False)
+    q = posted_activity(q, include_transfers=False)
     q = _apply_account_filter(q, account_ids)
     q = q.filter(Transaction.date >= start, Transaction.date <= end)
     rows = q.group_by(bucket_col).all()
@@ -1557,16 +1744,96 @@ def _cumulative(daily: dict[int, float], length: int) -> list[float | None]:
 def analytics_cumulative_spend(
     db: Session = Depends(get_db),
     granularity: str = Query(default="monthly"),
-    account_ids: list[int] | None = Query(default=None),
+    reporting_date: date | None = Query(default=None),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    compare_start_date: date | None = Query(default=None),
+    compare_end_date: date | None = Query(default=None),
+    compare2_start_date: date | None = Query(default=None),
+    compare2_end_date: date | None = Query(default=None),
+    compare3_start_date: date | None = Query(default=None),
+    compare3_end_date: date | None = Query(default=None),
+    alignment: Literal["ordinal", "calendar-month", "calendar-year"] = Query(default="ordinal"),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
-    """Cumulative spend pace for the current period vs the prior three."""
-    anchor = db.query(func.max(Transaction.date)).scalar() or date.today()
+    """Date-aligned cumulative pace using explicit comparison bounds for 0–3 past windows."""
+    anchor = reporting_date if isinstance(reporting_date, date) else date.today()
+    explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
+    if explicit:
+        start, end, prior_start, prior_end = explicit
+        if (compare2_start_date is None) != (compare2_end_date is None) or (
+            (compare3_start_date is None) != (compare3_end_date is None)
+        ):
+            raise HTTPException(status_code=422, detail="Comparison window must have both dates")
+        if compare3_start_date and not compare2_start_date:
+            raise HTTPException(status_code=422, detail="Comparison windows must be sequential")
+        if compare2_start_date and not compare_start_date:
+            raise HTTPException(status_code=422, detail="Comparison windows must be sequential")
+        windows = [(start, end)]
+        if compare_start_date:
+            windows.append((prior_start, prior_end))
+        if compare2_start_date:
+            windows.append((compare2_start_date, compare2_end_date))
+        if compare3_start_date:
+            windows.append((compare3_start_date, compare3_end_date))
+        for begin, finish in windows:
+            if begin > finish or (finish - begin).days > 3660:
+                raise HTTPException(status_code=422, detail="Invalid comparison period")
+        def daily_values(a, b):
+            reporting_scope(db, a, b, account_ids=account_ids)
+            day_col = func.strftime("%Y-%m-%d", Transaction.date)
+            q = db.query(day_col, func.sum(expense_amount())).outerjoin(
+                TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+            )
+            q = posted_activity(q, include_transfers=False)
+            q = _apply_account_filter(q, account_ids)
+            rows = q.filter(Transaction.date >= a, Transaction.date <= b).group_by(day_col).all()
+            return {key: round(float(amount or 0), 2) for key, amount in rows}
+
+        day_maps = [daily_values(begin, finish) for begin, finish in windows]
+        prefixes = []
+        for (begin, finish), amounts in zip(windows, day_maps):
+            running = 0.0
+            prefix = {}
+            day = begin
+            while day <= finish:
+                running = round(running + amounts.get(day.isoformat(), 0.0), 2)
+                prefix[day.isoformat()] = running
+                day += timedelta(days=1)
+            prefixes.append(prefix)
+
+        result = []
+        for i in range((end - start).days + 1):
+            current_day = start + timedelta(days=i)
+            point = {"x": i + 1, "date": current_day.isoformat()}
+            for j, name in enumerate(("current", "previous1", "previous2", "previous3")):
+                if j >= len(windows):
+                    point[name] = None
+                    continue
+                begin, finish = windows[j]
+                day = begin + timedelta(days=i)
+                if j and alignment == "calendar-year":
+                    # Leap years: Mar 1 must align to Mar 1, not Feb 29.
+                    matched_day = min(current_day.day, calendar.monthrange(begin.year, current_day.month)[1])
+                    day = date(begin.year, current_day.month, matched_day)
+                elif j and alignment == "calendar-month":
+                    # A prior February has no 29th/30th/31st; don't duplicate Feb 28.
+                    if current_day.day > calendar.monthrange(begin.year, begin.month)[1]:
+                        point[name] = None
+                        continue
+                    day = date(begin.year, begin.month, current_day.day)
+                if day < begin or day > finish or (j > 0 and not day_maps[j]):
+                    point[name] = None
+                else:
+                    point[name] = prefixes[j][day.isoformat()]
+            result.append(point)
+        return result
     keys = ("current", "previous1", "previous2", "previous3")
 
     if granularity == "yearly":
         years = [anchor.year - i for i in range(4)]
         series = [
-            _cumulative(_daily_expense(db, date(y, 1, 1), date(y, 12, 31), "%m", account_ids), 12)
+            _cumulative(_daily_expense(db, date(y, 1, 1), anchor if y == anchor.year else date(y, 12, 31), "%m", account_ids=account_ids), 12)
             for y in years
         ]
         length = 12
@@ -1579,7 +1846,9 @@ def analytics_cumulative_spend(
         series = []
         for mkey in months:
             start, end = _month_bounds(mkey)
-            series.append(_cumulative(_daily_expense(db, start, end, "%d", account_ids), length))
+            if mkey == anchor_month:
+                end = anchor
+            series.append(_cumulative(_daily_expense(db, start, end, "%d", account_ids=account_ids), length))
 
     return [
         {"x": i + 1, **{key: series[j][i] for j, key in enumerate(keys)}}
@@ -1600,16 +1869,16 @@ def analytics_recurring(
     Transfers and refunds are excluded (only positive expense-side transactions
     are considered). Detection is deterministic — see
     app/services/recurring_detector.py."""
+    reporting = reporting_scope(db, start_date, end_date, expense_only=True)
     effective_merchant = _effective_merchant_expr()
     effective_category = _effective_category_expr()
     q = (
         db.query(Transaction, effective_merchant, effective_category)
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
-        .filter(Transaction.pending == False)  # noqa: E712
-        .filter(Transaction.amount > 0)
+        .filter(expense_amount() > 0)
     )
-    q = _apply_transfer_exclusion(q, include_transfers=False)
+    q = posted_activity(q, include_transfers=False)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1684,6 +1953,7 @@ def analytics_recurring(
     ]
     return {
         "items": items,
+        "reporting": reporting,
         "summary": {
             "count": len(items),
             "active_count": active_count,
@@ -1721,13 +1991,271 @@ def set_recurring_status(
     return {"merchant_key": merchant_key, "manual_status": payload.status}
 
 
+@router.get("/analytics/cashflow-sankey")
+def analytics_cashflow_sankey(
+    db: Session = Depends(get_db),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+):
+    """Income -> top-level category buckets -> categories, plus savings/deficit.
+
+    Buckets are the part of the effective category before the first '/'. Transfers
+    are always excluded; refunds net against their expense category rather than
+    counting as income (same rule as every other analytics endpoint)."""
+    reporting = reporting_scope(db, start_date, end_date)
+    effective_category = _effective_category_expr().label("category")
+    income_expr = income_amount()
+    expense_expr = expense_amount()
+
+    q = (
+        db.query(effective_category, func.sum(income_expr), func.sum(expense_expr))
+        .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
+    )
+    q = posted_activity(q, include_transfers=False)
+    if start_date:
+        q = q.filter(Transaction.date >= start_date)
+    if end_date:
+        q = q.filter(Transaction.date <= end_date)
+    rows = q.group_by(effective_category).all()
+
+    income = 0.0
+    income_by_category: dict[str, float] = {}
+    positive_category_totals: dict[str, float] = {}
+    refund_credit_categories: dict[str, float] = {}
+    for category, income_total, expense_total in rows:
+        income_total = float(income_total or 0)
+        expense_total = float(expense_total or 0)
+        if income_total > 0:
+            income_by_category[category] = income_by_category.get(category, 0.0) + income_total
+            income += income_total
+        if expense_total != 0:
+            if expense_total > 0:
+                positive_category_totals[category] = expense_total
+            elif expense_total < 0:
+                # Keep only the residual credit after same-category netting.
+                # It is a credit, not income and not the gross refund volume.
+                refund_credit_categories[category] = -expense_total
+
+    bucket_categories: dict[str, dict[str, float]] = {}
+    bucket_totals: dict[str, float] = {}
+    for category, amount in positive_category_totals.items():
+        bucket = category.split("/", 1)[0] or "UNCATEGORIZED"
+        bucket_totals[bucket] = bucket_totals.get(bucket, 0.0) + amount
+        bucket_categories.setdefault(bucket, {})[category] = amount
+
+    positive_net_spend = sum(bucket_totals.values())
+    net_refund_credits = sum(refund_credit_categories.values())
+    total_spend = positive_net_spend - net_refund_credits
+    savings = max(income + net_refund_credits - positive_net_spend, 0.0)
+    deficit = max(positive_net_spend - income - net_refund_credits, 0.0)
+
+    income_sources = sorted(
+        ({"category": c, "amount": round(a, 2)} for c, a in income_by_category.items()),
+        key=lambda r: r["amount"],
+        reverse=True,
+    )
+    buckets = [
+        {
+            "bucket": bucket,
+            "amount": round(bucket_totals[bucket], 2),
+            "categories": sorted(
+                (
+                    {"category": c, "amount": round(a, 2)}
+                    for c, a in bucket_categories.get(bucket, {}).items()
+                ),
+                key=lambda r: r["amount"],
+                reverse=True,
+            ),
+        }
+        for bucket in sorted(bucket_totals, key=lambda b: bucket_totals[b], reverse=True)
+    ]
+
+    return {
+        "reporting": reporting,
+        "negative_categories": [
+            # Legacy signed field retained for API compatibility. New clients
+            # should use net_refund_credit_categories (positive credit values).
+            {"category": category, "amount": round(-amount, 2)}
+            for category, amount in sorted(refund_credit_categories.items())
+        ],
+        "net_refund_credits": round(net_refund_credits, 2),
+        "net_refund_credit_categories": [
+            {"category": category, "amount": round(amount, 2)}
+            for category, amount in sorted(refund_credit_categories.items())
+        ],
+        "positive_net_spend": round(positive_net_spend, 2),
+        "sankey_supported": True,
+        "visualization_qualification": (
+            "Net refund credits are residual category credits after netting; they are not income."
+            if net_refund_credits > 0 else None
+        ),
+        "income": round(income, 2),
+        "total_spend": round(total_spend, 2),
+        "savings": round(savings, 2),
+        "deficit": round(deficit, 2),
+        "income_sources": income_sources,
+        "buckets": buckets,
+    }
+
+
+@router.get("/analytics/category-movers")
+def analytics_category_movers(
+    db: Session = Depends(get_db),
+    month: str | None = Query(default=None, description="YYYY-MM historical month; defaults to current month-to-date"),
+    limit: int = Query(default=12, ge=1, le=50),
+    reporting_date: date | None = Query(default=None),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    compare_start_date: date | None = Query(default=None),
+    compare_end_date: date | None = Query(default=None),
+):
+    """Top categories by absolute change in spend vs the previous month."""
+    as_of = reporting_date if isinstance(reporting_date, date) else date.today()
+    if isinstance(month, str):
+        try:
+            as_of = _month_bounds(month)[1]
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="month must be YYYY-MM")
+    anchor = _month_key(as_of)
+    previous = _prev_month_key(anchor)
+    explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
+    bounds = explicit or comparison_bounds(as_of)
+    cur_start, cur_end, prev_start, prev_end = bounds
+    reporting = comparison_reporting(db, bounds)
+    if explicit and compare_start_date is None:
+        reporting["comparison_available"] = False
+        reporting["comparison_qualification"] = "No comparison selected."
+    current = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
+    previous_totals = ({
+        r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)
+    } if not explicit or compare_start_date else {})
+
+    rows = [
+        {
+            "category": cat,
+            "current": round(current.get(cat, 0.0), 2),
+            "previous": round(previous_totals.get(cat, 0.0), 2),
+            "change": round(current.get(cat, 0.0) - previous_totals.get(cat, 0.0), 2),
+        }
+        for cat in (set(current) | set(previous_totals))
+    ]
+    rows.sort(key=lambda r: abs(r["change"]), reverse=True)
+    return {
+        "reporting": reporting,
+        "month": anchor,
+        "previous_month": previous,
+        "items": rows[:limit],
+    }
+
+
+@router.get("/analytics/spending-day")
+def analytics_spending_day(
+    db: Session = Depends(get_db),
+    selected_date: date = Query(...),
+    limit: int = Query(default=5, ge=1, le=20),
+    account_ids: Annotated[list[int] | None, Query()] = None,
+):
+    """Top signed spending entries for a timeline point, using the exact ledger expression."""
+    reporting_scope(db, selected_date, selected_date, account_ids=account_ids)
+    q = db.query(Transaction.id, _effective_merchant_expr(), expense_amount()).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+    )
+    q = posted_activity(q, include_transfers=False)
+    q = _apply_account_filter(q, account_ids)
+    q = q.filter(Transaction.date == selected_date)
+    rows = [(ident, merchant, round(float(amount or 0), 2))
+            for ident, merchant, amount in q.all() if amount != 0]
+    total = round(sum(amount for _, _, amount in rows), 2)
+    ranked = sorted(rows, key=lambda row: (-row[2], row[0]))
+    running = 0.0
+    items = []
+    for ident, merchant, amount in ranked[:limit]:
+        running = round(running + amount, 2)
+        items.append({
+            "id": ident, "merchant": merchant or "Unknown merchant",
+            "amount": amount,
+            "percent_of_day": round(100 * amount / total, 1) if total > 0 else None,
+            "cumulative_percent": round(100 * running / total, 1) if total > 0 else None,
+        })
+    return {
+        "date": selected_date.isoformat(), "total": total,
+        "transaction_count": len(rows), "items": items,
+        "qualification": ("Signed net spending includes refunds. Percentages may exceed 100% when "
+                          "refunds offset charges; unavailable for zero or negative net spend."),
+    }
+
+
+@router.get("/analytics/timeline-spikes")
+def analytics_timeline_spikes(
+    db: Session = Depends(get_db),
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    account_ids: Annotated[list[int] | None, Query()] = None,
+):
+    """Timeline-only spike annotations; no inference or Sankey behavior changes."""
+    if start_date > end_date or (end_date - start_date).days > 3660:
+        raise HTTPException(status_code=422, detail="Invalid timeline date window (maximum 3661 days)")
+    lookback = start_date - timedelta(days=35)
+    reporting_scope(db, lookback, end_date, account_ids=account_ids)
+    q = db.query(Transaction.id, Transaction.date, _effective_merchant_expr(), expense_amount()).outerjoin(
+        TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
+    )
+    q = posted_activity(q, include_transfers=False)
+    q = _apply_account_filter(q, account_ids)
+    q = q.filter(Transaction.date >= lookback, Transaction.date <= end_date)
+    rows = [(ident, day, merchant, float(amount)) for ident, day, merchant, amount in q.all() if amount != 0]
+    totals = {}
+    for _, day, _, amount in rows:
+        if start_date <= day <= end_date:
+            key = day.isoformat()
+            totals[key] = round(totals.get(key, 0.0) + amount, 2)
+    days = []
+    day = start_date
+    while day <= end_date:
+        days.append({"date": day.isoformat(), "amount": totals.get(day.isoformat(), 0.0)})
+        day += timedelta(days=1)
+    return {
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+        "days": days,
+        "spikes": detect_spikes(rows, start_date, end_date),
+        "qualification": "Recorded posted spending only; historic account coverage is not verified.",
+    }
+
+
+@router.get("/analytics/daily-spend")
+def analytics_daily_spend(
+    db: Session = Depends(get_db),
+    year: int | None = Query(default=None),
+):
+    """Daily expense totals for one calendar year (refund-netted, transfers excluded)."""
+    anchor_year = year or (_latest_realized_activity_date(db) or date.today()).year
+    start, end = date(anchor_year, 1, 1), date(anchor_year, 12, 31)
+    by_day_of_year = _daily_expense(db, start, end, "%j")
+
+    days = []
+    current, day_of_year = start, 1
+    while current <= end:
+        days.append({"date": str(current), "amount": round(by_day_of_year.get(day_of_year, 0.0), 2)})
+        current += timedelta(days=1)
+        day_of_year += 1
+
+    available_years = sorted(
+        {int(y) for (y,) in db.query(func.strftime("%Y", Transaction.date)).distinct().all() if y},
+        reverse=True,
+    )
+
+    return {"year": anchor_year, "available_years": available_years, "days": days,
+            "reporting": reporting_scope(db, start, end)}
+
+
 @router.post("/transfers/detect")
 def transfers_detect(
     db: Session = Depends(get_db),
     window_days: int = Query(default=3, ge=0, le=14),
     reset_auto: bool = Query(
-        default=False,
-        description="Discard unconfirmed auto pairs first (keeps confirmed/manual)",
+        default=True,
+        description="Rebuild unconfirmed automatic candidates first (keeps confirmed/manual)",
     ),
 ):
     cleared = transfer_detector.clear_auto_pairs(db) if reset_auto else 0
@@ -1744,7 +2272,7 @@ def _transfer_side(db: Session, txn_id: int) -> dict:
     txn = db.get(Transaction, txn_id)
     if not txn:
         return {"transaction_id": txn_id, "account_id": None, "account_name": None,
-                "account_type": None, "date": None, "name": None, "amount": None}
+                "account_type": None, "currency": None, "date": None, "name": None, "amount": None}
     account = db.get(Account, txn.account_id)
     account_name = None
     if account:
@@ -1756,6 +2284,7 @@ def _transfer_side(db: Session, txn_id: int) -> dict:
         "account_id": txn.account_id,
         "account_name": account_name,
         "account_type": account.type if account else None,
+        "currency": account.currency if account else None,
         "date": str(txn.date),
         "name": txn.name,
         "amount": round(float(txn.amount), 2) if txn.amount is not None else None,
@@ -1783,6 +2312,7 @@ def transfers_list(
             "id": p.id,
             "detected_by": p.detected_by,
             "confirmed": p.confirmed,
+            "decision_evidence": json.loads(p.decision_evidence or "{}"),
             "amount": out["amount"],
             "gap_days": gap,
             "out": out,
@@ -1808,8 +2338,10 @@ def transfers_confirm(pair_id: int, db: Session = Depends(get_db)):
     pair = db.get(TransferPair, pair_id)
     if not pair:
         raise HTTPException(status_code=404, detail="pair not found")
-    pair.confirmed = True
-    db.commit()
+    try:
+        pair = transfer_detector.confirm_pair(db, pair)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"id": pair.id, "confirmed": True}
 
 

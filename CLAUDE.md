@@ -1,41 +1,54 @@
 # VibeLedger
 
-Single-user personal finance ledger. FastAPI + SQLite + Plaid, with a multipage Streamlit dashboard (Overview / Transactions / Spending / Cashflow / Accounts, plus Recurring / Flow / Transfers / Rules / Experimental / Add account under "More") served alongside the API.
+Single-user personal finance ledger. FastAPI + SQLite + Plaid with a React/Vite product UI served alongside the API.
+
+## Roadmap
+
+Current execution lives in `/docs/roadmap`, not in this file.
+
+- `docs/roadmap/epics/<NN-slug>/_epic.md` — scope, status, revision log.
+- `docs/roadmap/epics/<NN-slug>/spirit.md` — durable problem and intent.
+- `docs/roadmap/epics/<NN-slug>/tasks/*.md` — task metadata, acceptance, logs.
+- `docs/roadmap/_registry.md` and `_blocked.md` — generated; never hand-edit.
+- `docs/roadmap/_archive/` — reserved for retained historical work.
+
+Before selecting work, install `docs/roadmap/requirements.txt` if needed, run
+`python docs/roadmap/scan.py`, read the registry, and open the epic and task.
+Run the scan again before committing task changes. A task may start only when
+all dependencies are done. Follow `docs/roadmap/README.md` for coordination.
+The broader `docs/finance-intelligence-roadmap.md` backlog is deferred while
+existing cashflow correctness is hardened.
 
 ## Setup
 
 ```bash
 python3 -m venv .venv          # requires Python 3.11+
 source .venv/bin/activate
-pip install -e '.[dev,dashboard]'
+pip install -e '.[dev]'
 ```
 
-- `dev` is enough for tests/API work; `dashboard` extra adds Streamlit/pandas/requests.
 - If the venv breaks after moving the repo: `rm -rf .venv && python3 -m venv .venv && source .venv/bin/activate && pip install -e .[dev]`
 
 ## Running the app
 
-**Do not run uvicorn/streamlit manually** (`nohup`+`&` won't survive agent exec boundaries). Two systemd **user** services do this, with lingering enabled so they survive reboot/logout:
+**Do not run uvicorn manually** (`nohup`+`&` won't survive agent exec boundaries). The systemd **user** service does this, with lingering enabled so it survives reboot/logout:
 
 | Service | Port | What | URL |
 |---|---|---|---|
 | `vibeledger.service` | 8000 | FastAPI (`--reload`, `--root-path /vibeledger`) | `/vibeledger/` |
-| `vibeledger-dash.service` | 8501 | Streamlit dashboard | `/vibeledger/dash/` |
 
-- **First action for agents:** `curl http://127.0.0.1:8000/health` and `curl http://127.0.0.1:8501/vibeledger/dash/_stcore/health` — both services are normally already up. Only restart on failure.
-- Restart after code changes: `systemctl --user restart vibeledger` (app/.env) or `vibeledger-dash` (dashboard files).
-- Logs: `journalctl --user -u vibeledger -n 100` (also `/tmp/vibeledger.log`); same pattern for `-dash`.
-- **Never `pkill -f uvicorn/streamlit`** — use `systemctl --user restart <service>`.
+- **First action for agents:** `curl http://127.0.0.1:8000/health`. Restart only on failure.
+- Restart after code changes: `systemctl --user restart vibeledger`.
+- Logs: `journalctl --user -u vibeledger -n 100` (also `/tmp/vibeledger.log`).
+- **Never `pkill -f uvicorn`** — use `systemctl --user restart vibeledger`.
 - Edited a unit file? `systemctl --user daemon-reload` first.
 - Requires `.env` (see `.env.example`); app refuses to start without `TOKEN_ENCRYPTION_KEY` (Fernet) and `VIBELEDGER_API_TOKEN`.
 
 **Tailnet access** (already configured, persists across reboots — don't re-run unless routes are removed):
 ```bash
 sudo tailscale serve --bg --set-path /vibeledger http://127.0.0.1:8000
-sudo tailscale serve --bg --set-path /vibeledger/dash http://127.0.0.1:8501/vibeledger/dash
 ```
-- `https://contabo.tail6fb821.ts.net/vibeledger/` → API, `.../vibeledger/dash/` → dashboard.
-- The dashboard target URL repeats `/vibeledger/dash` because `--set-path` strips that prefix before proxying, and Streamlit's `--server.baseUrlPath` expects it back. The API doesn't need this trick (uvicorn `--root-path` accepts a stripped prefix).
+- `https://contabo.tail6fb821.ts.net/vibeledger/` → API and React UI.
 - `.env`'s `APP_BASE_URL` must be exactly `https://contabo.tail6fb821.ts.net/vibeledger` (no trailing slash) — used to build Plaid Link `connect_url`.
 
 **Troubleshooting:**
@@ -94,22 +107,8 @@ app/
     category_resolver.py     # Rule compilation + Plaid->friendly category map (shared by API and SQL view)
     category_catalog.py      # DEFAULT_CATEGORIES + merge of ledger/rule/default vocab for pickers (pure)
     search_query.py          # Canonical transaction search grammar (pure parser)
-Spend.py                     # Streamlit "Overview" entry page (net worth, month spend/income, needs-attention)
-dashboard_lib.py             # Cached SQLite loaders + HTTP helpers for mutations + shared nav/filters
-pages/
-  0_Transfers.py             # Review queue: confirm/unpair, manual pairing
-  1_Accounts.py              # Balances grouped by type, net worth estimate
-  2_Cashflow.py              # Income, expenses, and net cashflow trend
-  2_Spending.py              # Spending analysis: category breakdown, comparison, drill-down
-  3_Cashflow_Sankey.py       # Income allocation into top-level category buckets
-  4_Experimental.py          # Month-over-month movers and calendar heatmap
-  5_Rules.py                 # Category rule management
-  6_Transactions.py          # Transaction browsing and annotation
-  7_Debt_and_Cash_Runway.py  # Placeholder for debt payoff and runway planning
-  8_Recurring.py             # Subscriptions & recurring payments review (reads /analytics/recurring)
-  9_Add_Account.py           # Launch Plaid Link to connect a new bank account, then sync
+frontend/                    # Mobile-first React/Vite product UI;
 analytics/                   # Standalone ad-hoc plotting scripts (not part of the dashboard app)
-frontend/                    # Mobile-first React/Vite app (at parity with Streamlit for daily flows);
                              #   thin client — all analytics come from /analytics/* endpoints. See frontend/README.md.
 scripts/
   connect_funnel.sh          # Tailscale Funnel automation for connect flow
@@ -147,7 +146,8 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 - `GET /analytics/recurring` — detected subscriptions/recurring payments grouped by merchant, with cadence (weekly/biweekly/monthly/quarterly/yearly), average amount, next expected date, monthly/annual estimates, and effective `status` (`active`/`inactive`) plus `auto_status` (what the detector inferred) and `manual_status` (`kept`/`canceled`/null). Supports `start_date`/`end_date`, `status`, `min_monthly`. Excludes transfers and refunds; detection logic is deterministic (`app/services/recurring_detector.py`). Each series also carries `search_query` — **the only field a drilldown link may use**. `merchant_label` is one raw sample name and can carry a per-transaction suffix (`Zelle payment to Clara -SF26 JPM99ck4gexd`); since search ANDs free-text tokens, a label-derived query returns just that one transaction. `search_query` is the same normalized tokens as `merchant_key`, space-separated, so it matches every member of the group by construction. Enforced by `tests/test_recurring_api.py::test_recurring_drilldown_query_returns_the_whole_series`.
 - `POST /analytics/recurring/{merchant_key}/status` — manual status override, persisted per merchant in `recurring_overrides` (keyed by the detector's `merchant_key`): `kept` forces active, `canceled` forces inactive, `auto` clears it. The GET response's effective `status` and the active totals reflect the override, while `auto_status` preserves the detector's own call for auditing.
 - `GET /analytics/overview` — one-shot Overview summary (net worth, current/previous month spend/income/net, needs-attention counts). Backs the React Overview screen.
-- `GET /analytics/spending-summary?granularity=monthly|yearly` — period total, comparison, projection, top driver, and per-category diff.
+- `GET /analytics/spending-summary?granularity=monthly|yearly` — period total, comparison, projection, top driver, and per-category diff. Optional `window=calendar|rolling` defaults to calendar MTD/YTD; rolling compares the last 30/365 inclusive days through the reporting date with the preceding equal-length window. Rolling returns observed total as projection (no extrapolation).
+- Spending’s category comparison has its own Calendar/Rolling toggle, displays both server-reported date ranges, and uses the selected current range for category drilldowns. Summary cards, pace chart, and the transaction list remain calendar-aligned.
 - `GET /analytics/cumulative-spend?granularity=monthly|yearly` — cumulative spend pace for the current period vs the prior three.
 - These three consolidate what the React client used to compute in the browser, so money math stays server-side (single source of truth). `GET /transactions` also accepts `q=` for server-side name/merchant/category search.
 - Confirmed/likely refunds reduce their expense category instead of being counted as income.
@@ -161,11 +161,9 @@ The token gates tailnet access to Plaid-linked account data, so it stays.
 - **Unpairing is remembered.** `DELETE /transfers/{id}` records the combination in `rejected_transfer_pairs`, because detection re-runs after every sync — without it an unpaired false positive reappears immediately and the review page is a treadmill. Manually pairing the same two transactions clears the rejection.
 - Matching is deliberately conservative but **not precise**: with only amount + date + different-account it cannot tell a real transfer from two unrelated transactions of the same size (a rent payment vs a card payment). Accepted for now — the mitigation is visibility (Transfer badge in the transactions list) plus durable manual correction.
 
-**Dashboard:**
-- Reads SQLite directly (cached, fast); writes go through the FastAPI endpoints (auth/validation/transfer logic stay centralized). Server-computed analytics (e.g. the Recurring page) read via the API so the logic isn't duplicated in the dashboard.
-- **Add account** (under "More") drives the connect flow from the browser: it calls `POST /connect/sessions` and opens the returned `connect_url` (Plaid Link), then offers `POST /sync/all`. Same flow as the curl steps in "Linking a bank account" below.
+**React UI:**
+- Reads server-computed analytics and uses FastAPI endpoints for all writes.
 - Date range pickers default to the last 90 days even though more history may be loaded — widen the range to see older data.
-- Restart after changes: `systemctl --user restart vibeledger-dash`.
 
 ## Key design decisions
 

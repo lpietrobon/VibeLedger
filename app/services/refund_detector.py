@@ -13,6 +13,7 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from app.models.models import Transaction, TransactionAnnotation, TransferPair
+from app.services.duplicate_corrections import active_duplicate_ids
 from app.services.category_resolver import detailed_category, friendly_category
 
 
@@ -59,12 +60,14 @@ def classify_refunds(db: Session, lookback_days: int = 540) -> dict:
             annotation.refund_match_transaction_id = None
             annotation.refund_reason = None
 
+    active_duplicates = active_duplicate_ids(db)
     transactions = (
         db.query(Transaction)
         .filter(Transaction.pending == False)  # noqa: E712
         .order_by(Transaction.date.asc(), Transaction.id.asc())
         .all()
     )
+    transactions = [tx for tx in transactions if tx.id not in active_duplicates]
     charges = [tx for tx in transactions if tx.amount is not None and tx.amount > 0]
     likely_count = 0
     confirmed_count = 0

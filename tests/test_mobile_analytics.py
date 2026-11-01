@@ -2,8 +2,8 @@
 mobile (React) app: /analytics/overview, /analytics/spending-summary,
 /analytics/cumulative-spend, and q= search on /transactions.
 
-Data is seeded in 2020 so the "current month" projection branch never triggers
-regardless of when the suite runs, keeping assertions deterministic.
+Data is seeded in 2020 and requests explicitly select a reporting date, so the
+calendar-comparison assertions remain deterministic without latest-row inference.
 """
 from datetime import date
 
@@ -21,7 +21,7 @@ def _seed():
         item = Item(plaid_item_id="i-mob", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id="a-mob", item_id=item.id, name="Checking")
+        account = Account(currency="USD", plaid_account_id="a-mob", item_id=item.id, name="Checking")
         db.add(account)
         db.flush()
 
@@ -56,7 +56,7 @@ def _seed_two_accounts():
         item = Item(plaid_item_id="i-mob2", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id="a-mob2", item_id=item.id, name="Savings")
+        account = Account(currency="USD", plaid_account_id="a-mob2", item_id=item.id, name="Savings")
         db.add(account)
         db.flush()
 
@@ -80,10 +80,10 @@ def _seed_two_accounts():
 def test_overview_kpis_and_needs_attention():
     _seed()
     with TestClient(app) as client:
-        r = client.get("/analytics/overview", headers=AUTH_HEADERS)
+        r = client.get("/analytics/overview", params={"reporting_date": "2020-03-31"}, headers=AUTH_HEADERS)
     assert r.status_code == 200
     body = r.json()
-    assert body["as_of_date"] == "2020-03-10"
+    assert body["as_of_date"] == "2020-03-31"
     assert body["month_spend"] == 500.0
     assert body["previous_month_spend"] == 400.0
     assert body["month_income"] == 1200.0
@@ -98,14 +98,14 @@ def test_overview_kpis_and_needs_attention():
 def test_spending_summary_monthly():
     _seed()
     with TestClient(app) as client:
-        r = client.get("/analytics/spending-summary", headers=AUTH_HEADERS)
+        r = client.get("/analytics/spending-summary", params={"reporting_date": "2020-03-31"}, headers=AUTH_HEADERS)
     assert r.status_code == 200
     body = r.json()
     assert body["total"] == 500.0
     assert body["previous_total"] == 400.0
     assert body["change"] == 100.0
     assert body["change_pct"] == 25.0
-    assert body["projection"] == 500.0  # 2020-03 is not the live month
+    assert body["projection"] == 500.0  # Complete calendar month.
     assert body["top_driver"]["category"] == "FOOD/OTHER"
     assert body["top_driver"]["amount"] == 100.0
     comp = {row["category"]: row for row in body["category_comparison"]}
@@ -116,9 +116,9 @@ def test_spending_summary_monthly():
 def test_spending_summary_yearly():
     _seed()
     with TestClient(app) as client:
-        r = client.get("/analytics/spending-summary", params={"granularity": "yearly"}, headers=AUTH_HEADERS)
+        r = client.get("/analytics/spending-summary", params={"granularity": "yearly", "reporting_date": "2020-03-31"}, headers=AUTH_HEADERS)
     body = r.json()
-    assert body["period_label"] == "2020 YTD"
+    assert body["period_label"] == "2020 YTD through 2020-03-31"
     assert body["total"] == 900.0
     assert body["previous_total"] == 0.0
     assert body["change_pct"] is None  # no prior-year baseline
@@ -127,7 +127,7 @@ def test_spending_summary_yearly():
 def test_cumulative_spend_monthly():
     _seed()
     with TestClient(app) as client:
-        r = client.get("/analytics/cumulative-spend", headers=AUTH_HEADERS)
+        r = client.get("/analytics/cumulative-spend", params={"reporting_date": "2020-03-31"}, headers=AUTH_HEADERS)
     rows = r.json()
     assert len(rows) == 31  # March
     by_x = {row["x"]: row for row in rows}
@@ -174,13 +174,13 @@ def test_account_ids_scopes_overview_spending_summary_and_cumulative():
     other_id = _seed_two_accounts()
     with TestClient(app) as client:
         overview = client.get(
-            "/analytics/overview", params={"account_ids": [account_id]}, headers=AUTH_HEADERS
+            "/analytics/overview", params={"account_ids": [account_id], "reporting_date": "2020-03-31"}, headers=AUTH_HEADERS
         ).json()
         summary = client.get(
-            "/analytics/spending-summary", params={"account_ids": [account_id]}, headers=AUTH_HEADERS
+            "/analytics/spending-summary", params={"account_ids": [account_id], "reporting_date": "2020-03-31"}, headers=AUTH_HEADERS
         ).json()
         cumulative = client.get(
-            "/analytics/cumulative-spend", params={"account_ids": [account_id]}, headers=AUTH_HEADERS
+            "/analytics/cumulative-spend", params={"account_ids": [account_id], "reporting_date": "2020-03-31"}, headers=AUTH_HEADERS
         ).json()
 
     assert overview["month_spend"] == 500.0
@@ -200,3 +200,33 @@ def test_transactions_search_query():
     assert coffee["total"] == 1
     assert sorted(t["name"] for t in groceries["items"]) == ["Groceries", "Groceries"]
     assert by_cat["total"] == 3  # all three FOOD_AND_DRINK rows map to FOOD/OTHER
+
+
+def test_account_scope_with_explicit_dates_timeline_and_reporting():
+    account_id = _seed()
+    other_id = _seed_two_accounts()
+    dates = {"start_date": "2020-03-01", "end_date": "2020-03-31",
+             "compare_start_date": "2020-02-01", "compare_end_date": "2020-02-29",
+             "account_ids": [account_id]}
+    with TestClient(app) as client:
+        def get(path, params):
+            response = client.get(path, params=params, headers=AUTH_HEADERS)
+            assert response.status_code == 200, response.text
+            return response.json()
+        summary = get('/analytics/spending-summary', dates)
+        overview = get('/analytics/overview', dates)
+        cumulative = get('/analytics/cumulative-spend', dates)
+        timeline = get('/analytics/timeline-spikes', dates)
+        day = get('/analytics/spending-day', {'selected_date': '2020-03-15', 'account_ids': [account_id]})
+        both = get('/analytics/spending-summary', {**dates, 'account_ids': [account_id, other_id]})
+        daily = get('/analytics/cashflow-trend', {**dates, 'granularity': 'daily'})
+        yearly = get('/analytics/cumulative-spend', {'account_ids': [account_id], 'granularity': 'yearly', 'reporting_date': '2020-03-31'})
+    assert summary['total'] == overview['month_spend'] == cumulative[-1]['current'] == 500
+    assert summary['previous_total'] == 400
+    assert summary['reporting']['current_period']['recorded_row_count'] == 3
+    assert sum(row['amount'] for row in timeline['days']) == 500
+    assert day['total'] == day['transaction_count'] == 0
+    assert day['items'] == []
+    assert both['total'] == 10499
+    assert sum(row['expenses'] for row in daily) == 500
+    assert yearly[2]['current'] == 900

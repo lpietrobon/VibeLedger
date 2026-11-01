@@ -1,0 +1,164 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+_ test_failed_batch_preserves_ledger_balances_cursor_and_can_retry[False-False] _
+
+historical = False, existing_account = False
+
+    @pytest.mark.parametrize("historical", [False, True])
+    @pytest.mark.parametrize("existing_account", [False, True])
+    def test_failed_batch_preserves_ledger_balances_cursor_and_can_retry(historical, existing_account):
+        client = BatchClient()
+        service = SyncService(client)
+        with SessionLocal() as db:
+            item = Item(plaid_item_id="atomic-item", access_token_encrypted=encrypt_token("synthetic"))
+            db.add(item)
+            db.flush()
+            item_id = item.id
+            db.add(SyncState(item_id=item_id, cursor="previous"))
+            if existing_account:
+                db.add(Account(plaid_account_id="atomic-account", item_id=item_id,
+                               name="Old name", current_balance=100, available_balance=90,
+                               currency="USD"))
+            db.commit()
+    
+            def sync():
+                if historical:
+                    return service.sync_item_historical(db, item_id, date(2026, 4, 1), date(2026, 4, 30))
+                return service.sync_item(db, item_id)
+    
+            with pytest.raises(ValueError):
+                sync()
+    
+            # Read after expiration so this checks committed DB state, not cached ORM values.
+            db.expire_all()
+>           assert db.query(Transaction).count() == 0
+E           assert 1 == 0
+E            +  where 1 = count()
+E            +    where count = <sqlalchemy.orm.query.Query object at 0x7fedcfe766c0>.count
+E            +      where <sqlalchemy.orm.query.Query object at 0x7fedcfe766c0> = query(Transaction)
+E            +        where query = <sqlalchemy.orm.session.Session object at 0x7fedcfe7b8f0>.query
+
+tests/test_sync_atomicity.py:61: AssertionError
+_ test_failed_batch_preserves_ledger_balances_cursor_and_can_retry[False-True] _
+
+historical = True, existing_account = False
+
+    @pytest.mark.parametrize("historical", [False, True])
+    @pytest.mark.parametrize("existing_account", [False, True])
+    def test_failed_batch_preserves_ledger_balances_cursor_and_can_retry(historical, existing_account):
+        client = BatchClient()
+        service = SyncService(client)
+        with SessionLocal() as db:
+            item = Item(plaid_item_id="atomic-item", access_token_encrypted=encrypt_token("synthetic"))
+            db.add(item)
+            db.flush()
+            item_id = item.id
+            db.add(SyncState(item_id=item_id, cursor="previous"))
+            if existing_account:
+                db.add(Account(plaid_account_id="atomic-account", item_id=item_id,
+                               name="Old name", current_balance=100, available_balance=90,
+                               currency="USD"))
+            db.commit()
+    
+            def sync():
+                if historical:
+                    return service.sync_item_historical(db, item_id, date(2026, 4, 1), date(2026, 4, 30))
+                return service.sync_item(db, item_id)
+    
+            with pytest.raises(ValueError):
+                sync()
+    
+            # Read after expiration so this checks committed DB state, not cached ORM values.
+            db.expire_all()
+>           assert db.query(Transaction).count() == 0
+E           assert 1 == 0
+E            +  where 1 = count()
+E            +    where count = <sqlalchemy.orm.query.Query object at 0x7fedcf1eb290>.count
+E            +      where <sqlalchemy.orm.query.Query object at 0x7fedcf1eb290> = query(Transaction)
+E            +        where query = <sqlalchemy.orm.session.Session object at 0x7fedcf1eb680>.query
+
+tests/test_sync_atomicity.py:61: AssertionError
+_ test_failed_batch_preserves_ledger_balances_cursor_and_can_retry[True-False] _
+
+historical = False, existing_account = True
+
+    @pytest.mark.parametrize("historical", [False, True])
+    @pytest.mark.parametrize("existing_account", [False, True])
+    def test_failed_batch_preserves_ledger_balances_cursor_and_can_retry(historical, existing_account):
+        client = BatchClient()
+        service = SyncService(client)
+        with SessionLocal() as db:
+            item = Item(plaid_item_id="atomic-item", access_token_encrypted=encrypt_token("synthetic"))
+            db.add(item)
+            db.flush()
+            item_id = item.id
+            db.add(SyncState(item_id=item_id, cursor="previous"))
+            if existing_account:
+                db.add(Account(plaid_account_id="atomic-account", item_id=item_id,
+                               name="Old name", current_balance=100, available_balance=90,
+                               currency="USD"))
+            db.commit()
+    
+            def sync():
+                if historical:
+                    return service.sync_item_historical(db, item_id, date(2026, 4, 1), date(2026, 4, 30))
+                return service.sync_item(db, item_id)
+    
+            with pytest.raises(ValueError):
+                sync()
+    
+            # Read after expiration so this checks committed DB state, not cached ORM values.
+            db.expire_all()
+>           assert db.query(Transaction).count() == 0
+E           assert 1 == 0
+E            +  where 1 = count()
+E            +    where count = <sqlalchemy.orm.query.Query object at 0x7fedcf1a2c00>.count
+E            +      where <sqlalchemy.orm.query.Query object at 0x7fedcf1a2c00> = query(Transaction)
+E            +        where query = <sqlalchemy.orm.session.Session object at 0x7fedcf1a3ce0>.query
+
+tests/test_sync_atomicity.py:61: AssertionError
+_ test_failed_batch_preserves_ledger_balances_cursor_and_can_retry[True-True] __
+
+historical = True, existing_account = True
+
+    @pytest.mark.parametrize("historical", [False, True])
+    @pytest.mark.parametrize("existing_account", [False, True])
+    def test_failed_batch_preserves_ledger_balances_cursor_and_can_retry(historical, existing_account):
+        client = BatchClient()
+        service = SyncService(client)
+        with SessionLocal() as db:
+            item = Item(plaid_item_id="atomic-item", access_token_encrypted=encrypt_token("synthetic"))
+            db.add(item)
+            db.flush()
+            item_id = item.id
+            db.add(SyncState(item_id=item_id, cursor="previous"))
+            if existing_account:
+                db.add(Account(plaid_account_id="atomic-account", item_id=item_id,
+                               name="Old name", current_balance=100, available_balance=90,
+                               currency="USD"))
+            db.commit()
+    
+            def sync():
+                if historical:
+                    return service.sync_item_historical(db, item_id, date(2026, 4, 1), date(2026, 4, 30))
+                return service.sync_item(db, item_id)
+    
+            with pytest.raises(ValueError):
+                sync()
+    
+            # Read after expiration so this checks committed DB state, not cached ORM values.
+            db.expire_all()
+>           assert db.query(Transaction).count() == 0
+E           assert 1 == 0
+E            +  where 1 = count()
+E            +    where count = <sqlalchemy.orm.query.Query object at 0x7fedcf1e90a0>.count
+E            +      where <sqlalchemy.orm.query.Query object at 0x7fedcf1e90a0> = query(Transaction)
+E            +        where query = <sqlalchemy.orm.session.Session object at 0x7fedcf1e8dd0>.query
+
+tests/test_sync_atomicity.py:61: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_sync_atomicity.py::test_failed_batch_preserves_ledger_balances_cursor_and_can_retry[False-False]
+FAILED tests/test_sync_atomicity.py::test_failed_batch_preserves_ledger_balances_cursor_and_can_retry[False-True]
+FAILED tests/test_sync_atomicity.py::test_failed_batch_preserves_ledger_balances_cursor_and_can_retry[True-False]
+FAILED tests/test_sync_atomicity.py::test_failed_batch_preserves_ledger_balances_cursor_and_can_retry[True-True]
+4 failed in 0.16s

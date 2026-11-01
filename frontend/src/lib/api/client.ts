@@ -15,6 +15,13 @@ import type {
   ConnectStatus,
   SearchSuggestionsResponse,
   CategoryEntry,
+  CashflowSankey,
+  CategoryMovers,
+  DailySpend,
+  ComparisonReporting,
+  ReportingScope,
+  DuplicateCorrection,
+  DuplicateCorrectionsResponse,
 } from "./types";
 import { CATEGORY_COLORS } from "./theme";
 
@@ -62,8 +69,15 @@ function apiOrigin() {
 }
 
 // --- Analytics (all computed server-side; the client only fetches + maps) ---
+export type DateWindowParams = { accountIds?: number[] | null; startDate?: string; endDate?: string; compareStartDate?: string; compareEndDate?: string };
+function dateWindowParams(p?: DateWindowParams) {
+  return { account_ids: p?.accountIds ?? undefined, start_date: p?.startDate, end_date: p?.endDate,
+    compare_start_date: p?.compareStartDate, compare_end_date: p?.compareEndDate };
+}
+
 
 type OverviewResponse = {
+  reporting?: ReportingResponse;
   as_of_date: string;
   net_worth: number;
   assets: number;
@@ -82,14 +96,71 @@ type OverviewResponse = {
   };
 };
 
-export async function getOverviewSummary(params?: {
-  accountIds?: number[] | null;
-}): Promise<OverviewSummary> {
-  const r = await jsonFetch<OverviewResponse>("/analytics/overview", {
-    account_ids: params?.accountIds ?? undefined,
-  });
+type ReportingScopeResponse = {
+  currency: string | null;
+  currency_status: "empty" | "unknown" | "mixed" | "single";
+  currencies: string[];
+  history_coverage: "unverified";
+  duplicate_account_coverage: "unverified";
+  qualification: string;
+  start_date: string | null;
+  end_date: string | null;
+  recorded_row_count: number;
+  first_recorded_date: string | null;
+  last_recorded_date: string | null;
+};
+
+type ReportingResponse = ReportingScopeResponse & {
+  reporting_date: string;
+  current_period: ReportingScopeResponse;
+  previous_period: ReportingScopeResponse;
+  comparison_available: boolean;
+  comparison_qualification: string;
+  projection_qualification?: string;
+};
+
+const REPORTING_UNAVAILABLE =
+  "Reporting metadata is unavailable. Totals show recorded activity, but period coverage and comparison confidence cannot be verified until the API is updated.";
+
+function mapReportingScope(r?: Partial<ReportingScopeResponse>): ReportingScope {
+  const status = r?.currency_status;
+  return {
+    currency: r?.currency ?? null,
+    currencyStatus: status === "empty" || status === "single" || status === "mixed" || status === "unknown"
+      ? status
+      : "unknown",
+    currencies: Array.isArray(r?.currencies) ? r.currencies : [],
+    historyCoverage: "unverified",
+    duplicateAccountCoverage: "unverified",
+    qualification: r?.qualification ?? REPORTING_UNAVAILABLE,
+    startDate: r?.start_date ?? null,
+    endDate: r?.end_date ?? null,
+    recordedRowCount: typeof r?.recorded_row_count === "number" ? r.recorded_row_count : 0,
+    firstRecordedDate: r?.first_recorded_date ?? null,
+    lastRecordedDate: r?.last_recorded_date ?? null,
+  };
+}
+
+function mapReporting(r?: Partial<ReportingResponse>): ComparisonReporting {
+  const hasComparablePeriods = Boolean(r?.current_period && r?.previous_period);
+  return {
+    ...mapReportingScope(r),
+    reportingDate: r?.reporting_date ?? "",
+    currentPeriod: mapReportingScope(r?.current_period ?? r),
+    previousPeriod: mapReportingScope(r?.previous_period),
+    comparisonAvailable: hasComparablePeriods && r?.comparison_available === true,
+    comparisonQualification: hasComparablePeriods
+      ? (r?.comparison_qualification ?? REPORTING_UNAVAILABLE)
+      : REPORTING_UNAVAILABLE,
+    projectionQualification: r?.projection_qualification,
+  };
+}
+
+export async function getOverviewSummary(params?: DateWindowParams): Promise<OverviewSummary> {
+  const r = await jsonFetch<OverviewResponse>("/analytics/overview", dateWindowParams(params));
   return {
     asOfDate: r.as_of_date,
+    reporting: mapReporting(r.reporting),
     netWorth: r.net_worth,
     assets: r.assets,
     liabilities: r.liabilities,
@@ -108,14 +179,11 @@ export async function getOverviewSummary(params?: {
   };
 }
 
-export async function getCashflowTrend(params?: {
-  accountIds?: number[] | null;
-}): Promise<CashflowPoint[]> {
+export async function getCashflowTrend(params?: DateWindowParams & { granularity?: "daily" | "monthly" }): Promise<CashflowPoint[]> {
   const rows = await jsonFetch<Array<{ month: string; income: number; expenses: number; net: number }>>(
-    "/analytics/cashflow-trend",
-    { account_ids: params?.accountIds ?? undefined },
+    "/analytics/cashflow-trend", { account_ids: params?.accountIds ?? undefined, start_date: params?.startDate, end_date: params?.endDate, granularity: params?.granularity },
   );
-  return rows.slice(-12).map((row) => ({
+  return (params?.startDate ? rows : rows.slice(-12)).map((row) => ({
     month: row.month,
     income: row.income,
     expenses: -Math.abs(row.expenses),
@@ -140,8 +208,10 @@ export async function getCategorySpend(params?: {
 }
 
 type SpendingSummaryResponse = {
+  reporting?: ReportingResponse;
   period_label: string;
   total: number;
+  daily_average?: number;
   previous_total: number;
   change: number;
   change_pct: number | null;
@@ -150,21 +220,19 @@ type SpendingSummaryResponse = {
   category_comparison: CategoryComparisonPoint[];
 };
 
-async function fetchSpendingSummary(granularity: "monthly" | "yearly", accountIds?: number[] | null) {
-  return jsonFetch<SpendingSummaryResponse>("/analytics/spending-summary", {
-    granularity,
-    account_ids: accountIds ?? undefined,
-  });
+async function fetchSpendingSummary(granularity: "monthly" | "yearly", window?: "calendar" | "rolling", dates?: DateWindowParams) {
+  return jsonFetch<SpendingSummaryResponse>("/analytics/spending-summary", { granularity, window, ...dateWindowParams(dates) });
 }
 
 export async function getSpendingSummary(params?: {
   granularity: "monthly" | "yearly";
-  accountIds?: number[] | null;
-}): Promise<SpendingSummary> {
-  const r = await fetchSpendingSummary(params?.granularity ?? "monthly", params?.accountIds);
+} & DateWindowParams): Promise<SpendingSummary> {
+  const r = await fetchSpendingSummary(params?.granularity ?? "monthly", undefined, params);
   return {
+    reporting: mapReporting(r.reporting),
     periodLabel: r.period_label,
     total: r.total,
+    dailyAverage: r.daily_average ?? 0,
     previousTotal: r.previous_total,
     change: r.change,
     changePct: r.change_pct,
@@ -173,30 +241,132 @@ export async function getSpendingSummary(params?: {
   };
 }
 
-export async function getCategoryComparison(params?: {
-  accountIds?: number[] | null;
-}): Promise<CategoryComparisonPoint[]> {
-  const r = await fetchSpendingSummary("monthly", params?.accountIds);
+export async function getCategoryComparison(
+  granularity: "monthly" | "yearly" = "monthly", params?: DateWindowParams,
+): Promise<CategoryComparisonPoint[]> {
+  const r = await fetchSpendingSummary(granularity, undefined, params);
   return r.category_comparison.slice().sort((a, b) => b.current - a.current);
+}
+
+export async function getCategoryComparisonPeriod(
+  granularity: "monthly" | "yearly",
+  window: "calendar" | "rolling", dates?: DateWindowParams,
+) {
+  const r = await fetchSpendingSummary(granularity, window, dates);
+  return {
+    items: r.category_comparison.slice().sort((a, b) => b.current - a.current),
+    reporting: mapReporting(r.reporting),
+  };
 }
 
 export async function getCumulativeSpending(params?: {
   granularity: "monthly" | "yearly";
-  accountIds?: number[] | null;
-}): Promise<CumulativeSpendingPoint[]> {
+} & DateWindowParams & { reportingDate?: string; comparisonPeriods?: Array<{ startDate: string; endDate: string }>; alignment?: "ordinal" | "calendar-month" | "calendar-year" }): Promise<CumulativeSpendingPoint[]> {
   const rows = await jsonFetch<
-    Array<{ x: number; current: number | null; previous1: number | null; previous2: number | null; previous3: number | null }>
+    Array<{ x: number; date?: string; current: number | null; previous1: number | null; previous2: number | null; previous3: number | null }>
   >("/analytics/cumulative-spend", {
     granularity: params?.granularity ?? "monthly",
-    account_ids: params?.accountIds ?? undefined,
+    reporting_date: params?.reportingDate,
+    alignment: params?.alignment,
+    ...dateWindowParams(params),
+    compare_start_date: params?.comparisonPeriods?.[0]?.startDate ?? params?.compareStartDate,
+    compare_end_date: params?.comparisonPeriods?.[0]?.endDate ?? params?.compareEndDate,
+    compare2_start_date: params?.comparisonPeriods?.[1]?.startDate,
+    compare2_end_date: params?.comparisonPeriods?.[1]?.endDate,
+    compare3_start_date: params?.comparisonPeriods?.[2]?.startDate,
+    compare3_end_date: params?.comparisonPeriods?.[2]?.endDate,
   });
   return rows.map((row) => ({
     day: row.x,
+    ...(row.date ? { date: row.date } : {}),
     current: row.current,
     previous1: row.previous1,
     previous2: row.previous2,
     previous3: row.previous3,
   }));
+}
+
+type SankeyResponse = {
+  sankey_supported: boolean;
+  visualization_qualification: string | null;
+  negative_categories: { category: string; amount: number }[];
+  net_refund_credits?: number;
+  net_refund_credit_categories?: { category: string; amount: number }[];
+  positive_net_spend?: number;
+  income: number;
+  total_spend: number;
+  savings: number;
+  deficit: number;
+  income_sources: { category: string; amount: number }[];
+  buckets: { bucket: string; amount: number; categories: { category: string; amount: number }[] }[];
+};
+
+export async function getCashflowSankey(params?: {
+  startDate?: string;
+  endDate?: string;
+}): Promise<CashflowSankey> {
+  const r = await jsonFetch<SankeyResponse>("/analytics/cashflow-sankey", {
+    start_date: params?.startDate,
+    end_date: params?.endDate,
+  });
+  return {
+    sankeySupported: r.sankey_supported,
+    visualizationQualification: r.visualization_qualification,
+    negativeCategories: r.negative_categories,
+    netRefundCredits: r.net_refund_credits ?? 0,
+    netRefundCreditCategories: r.net_refund_credit_categories ?? r.negative_categories,
+    positiveNetSpend: r.positive_net_spend ?? r.buckets.reduce((sum, bucket) => sum + bucket.amount, 0),
+    income: r.income,
+    totalSpend: r.total_spend,
+    savings: r.savings,
+    deficit: r.deficit,
+    incomeSources: r.income_sources,
+    buckets: r.buckets,
+  };
+}
+
+export async function getCategoryMovers(params?: {
+  month?: string;
+  limit?: number;
+} & DateWindowParams): Promise<CategoryMovers> {
+  const r = await jsonFetch<{
+    month: string;
+    previous_month: string;
+    items: { category: string; current: number; previous: number; change: number }[];
+  }>("/analytics/category-movers", { month: params?.month, limit: params?.limit, ...dateWindowParams(params) });
+  return { month: r.month, previousMonth: r.previous_month, items: r.items };
+}
+
+export async function getDailySpend(params?: { year?: number }): Promise<DailySpend> {
+  const r = await jsonFetch<{
+    year: number;
+    available_years: number[];
+    days: { date: string; amount: number }[];
+  }>("/analytics/daily-spend", { year: params?.year });
+  return { year: r.year, availableYears: r.available_years, days: r.days };
+}
+
+export type TimelineSpike = {
+  date: string; observed: number; baseline: number; excess: number;
+  top_transaction_id: number | null; top_merchant: string | null; top_amount: number | null;
+  max_attributable_amount: number; max_attributable_pct: number | null;
+  qualification: string;
+};
+export type SpendingTimeline = {
+  start_date: string; end_date: string; days: { date: string; amount: number }[];
+  spikes: TimelineSpike[]; qualification: string;
+};
+export async function getSpendingTimeline(params: { startDate: string; endDate: string; accountIds?: number[] | null }): Promise<SpendingTimeline> {
+  return jsonFetch("/analytics/timeline-spikes", { account_ids: params.accountIds ?? undefined, start_date: params.startDate, end_date: params.endDate });
+}
+
+export type SpendingDay = {
+  date: string; total: number; transaction_count: number; qualification: string;
+  items: { id: number; merchant: string; amount: number;
+    percent_of_day: number | null; cumulative_percent: number | null; }[];
+};
+export async function getSpendingDay(date: string, accountIds?: number[] | null): Promise<SpendingDay> {
+  return jsonFetch("/analytics/spending-day", { selected_date: date, limit: 5, account_ids: accountIds ?? undefined });
 }
 
 // --- Accounts ---
@@ -221,6 +391,8 @@ export async function getTransactions(params?: {
   limit?: number;
   offset?: number;
   query?: string;
+  sort?: "date" | "amount";
+  order?: "asc" | "desc";
 }): Promise<TransactionsResponse> {
   return jsonFetch<TransactionsResponse>("/transactions", {
     start_date: params?.startDate,
@@ -229,6 +401,8 @@ export async function getTransactions(params?: {
     q: params?.query || undefined,
     limit: params?.limit ?? 100,
     offset: params?.offset ?? 0,
+    sort: params?.sort,
+    order: params?.order,
   });
 }
 
@@ -274,6 +448,34 @@ export async function patchTransactionAnnotations(
     "/transactions/annotations/batch",
     undefined,
     jsonBody("PATCH", { transaction_ids: transactionIds, ...payload }),
+  );
+}
+
+// --- Duplicate corrections ---
+
+export async function getDuplicateCorrections(): Promise<DuplicateCorrectionsResponse> {
+  return jsonFetch<DuplicateCorrectionsResponse>("/duplicate-corrections");
+}
+
+export async function createDuplicateCorrection(payload: {
+  canonicalTransactionId: number;
+  duplicateTransactionId: number;
+}): Promise<DuplicateCorrection> {
+  return jsonFetch<DuplicateCorrection>(
+    "/duplicate-corrections",
+    undefined,
+    jsonBody("POST", {
+      canonical_transaction_id: payload.canonicalTransactionId,
+      duplicate_transaction_id: payload.duplicateTransactionId,
+    }),
+  );
+}
+
+export async function reverseDuplicateCorrection(correctionId: number): Promise<{ id: number; status: "reversed" }> {
+  return jsonFetch<{ id: number; status: "reversed" }>(
+    `/duplicate-corrections/${correctionId}`,
+    undefined,
+    { method: "DELETE" },
   );
 }
 
@@ -333,10 +535,11 @@ export async function getRecurring(params?: {
   status?: "active" | "inactive";
   minMonthly?: number;
 }): Promise<RecurringResponse> {
-  return jsonFetch<RecurringResponse>("/analytics/recurring", {
+  const r = await jsonFetch<RecurringResponse & { reporting?: ReportingScopeResponse }>("/analytics/recurring", {
     status: params?.status,
     min_monthly: params?.minMonthly,
   });
+  return { ...r, reporting: r.reporting ? mapReportingScope(r.reporting) : undefined };
 }
 
 export async function setRecurringStatus(

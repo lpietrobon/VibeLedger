@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 
 #: Curated starter taxonomy. Lives here rather than in the frontend so every
-#: client (React, Streamlit) offers the same baseline. Every value targeted by
+#: client (React) offers the same baseline. Every value targeted by
 #: PLAID_FRIENDLY_MAP / PLAID_DETAILED_FRIENDLY_MAP must appear here — there is a
 #: test asserting exactly that, so the two stay in step.
 DEFAULT_CATEGORIES: list[str] = [

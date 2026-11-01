@@ -28,6 +28,7 @@ from app.models.models import (
     Account,
     CategoryDecisionEvent,
     Item,
+    RejectedTransferPair,
     Transaction,
     TransactionAnnotation,
     TransferPair,
@@ -120,8 +121,8 @@ def _seed_ledger() -> None:
             db.add(TransactionAnnotation(transaction_id=t.id, reviewed=True))
         for t in refunds:
             db.add(TransactionAnnotation(transaction_id=t.id, refund_status="likely", reviewed=False))
-        # Paired transfers are excluded from the unreviewed count, so the
-        # drill-down has to exclude them too.
+        # An unconfirmed transfer is still an accounting and review candidate;
+        # it becomes excluded only after the user confirms the pair.
         db.add(TransferPair(txn_out_id=transfer_out.id, txn_in_id=transfer_in.id, confirmed=False))
         db.commit()
 
@@ -147,7 +148,7 @@ def test_every_attention_count_is_reproduced_by_its_drilldown():
         # Guards the fixture itself: if these stop being non-zero and older than
         # one page, the test would pass without exercising anything.
         assert needs_attention["likely_refunds"] == 9
-        assert needs_attention["unreviewed_transactions"] == 12  # 9 refunds + 3 uncategorized
+        assert needs_attention["unreviewed_transactions"] == 14  # 9 refunds + 3 uncategorized + 2 candidates
         assert needs_attention["uncategorized_transactions"] == 3
 
         for key, ui_filter in ATTENTION_ROWS.items():
@@ -168,7 +169,7 @@ def test_every_attention_count_is_reproduced_by_its_drilldown():
         assert {t["effective_category"].lower() for t in uncategorized} == {"uncategorized"}
         unreviewed = _drilldown(client, ui_queries["unreviewed"])["items"]
         assert not any(t["annotation"]["reviewed"] for t in unreviewed)
-        assert "att-xfer-out" not in {t["plaid_transaction_id"] for t in unreviewed}
+        assert "att-xfer-out" in {t["plaid_transaction_id"] for t in unreviewed}
 
 
 def test_overview_rows_only_link_to_filters_the_transactions_screen_implements():
@@ -261,3 +262,32 @@ def test_schema_patches_purge_orphaned_rows():
         )
         assert refreshed.refund_match_transaction_id is None
         assert refreshed.refund_status is None
+
+
+def test_schema_patches_purge_orphaned_rejected_transfer_pairs():
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="orphan-rejection", access_token_encrypted=encrypt_token("t"))
+        db.add(item)
+        db.flush()
+        account = Account(plaid_account_id="orphan-rejection-account", item_id=item.id, name="Checking")
+        db.add(account)
+        db.flush()
+        doomed = Transaction(
+            plaid_transaction_id="orphan-rejection-doomed", account_id=account.id, item_id=item.id,
+            date=date(2026, 4, 1), amount=10, name="Out",
+        )
+        survivor = Transaction(
+            plaid_transaction_id="orphan-rejection-survivor", account_id=account.id, item_id=item.id,
+            date=date(2026, 4, 2), amount=-10, name="In",
+        )
+        db.add_all([doomed, survivor])
+        db.flush()
+        db.add(RejectedTransferPair(txn_out_id=doomed.id, txn_in_id=survivor.id))
+        db.commit()
+        db.delete(doomed)
+        db.commit()
+
+    apply_patches(engine)
+
+    with SessionLocal() as db:
+        assert db.query(RejectedTransferPair).count() == 0

@@ -22,9 +22,37 @@ export function formatMonth(iso: string) {
   return d.toLocaleString("en-US", { month: "short" });
 }
 
-export function formatDate(iso: string) {
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const MONTH_ABBREVIATIONS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/**
+ * Render an API calendar date without making its result depend on the browser
+ * timezone.  Transaction dates are date-based business facts: for timestamp
+ * input, the leading ISO date is the rendered calendar date.
+ */
+export function formatDate(
+  value: string | null | undefined,
+  options: { referenceDate?: Date } = {},
+) {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
+  if (!match) return "—";
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    month < 1 || month > 12 || day < 1 ||
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) return "—";
+
+  const referenceYear = (options.referenceDate ?? new Date()).getUTCFullYear();
+  const formatted = `${day} ${MONTH_ABBREVIATIONS[month - 1]}`;
+  return year === referenceYear ? formatted : `${formatted}, ${year}`;
 }
 
 export function deltaPct(current: number, previous: number): number | null {

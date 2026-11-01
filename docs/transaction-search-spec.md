@@ -25,8 +25,8 @@ possible later as a complement).
 
 ## Grammar (server-side, canonical)
 
-A superset of the existing Streamlit power-user syntax, so current habits keep
-working. Tokens are space-separated; anything unrecognized becomes free text.
+A server-side power-user syntax used by the React Activity search. Tokens are
+space-separated; anything unrecognized becomes free text.
 
 | Token | Meaning |
 |---|---|
@@ -96,11 +96,3 @@ frequency, capped (20).
   combination) + endpoint tests (filters actually narrow results; suggestions
   return fields when empty and values inside a token).
 - vitest: client mapping for the suggestions response; token→chip parsing helper.
-
-## Known follow-up
-
-`dashboard_lib.parse_transaction_filter_query` (Streamlit) still has its own local
-copy of this grammar, applied to a pandas DataFrame. It is now the *second*
-implementation. Streamlit reads SQLite directly, so unifying it means routing that
-page through the API — deliberately out of scope here, but it is the remaining
-duplication and should be closed when Streamlit's transactions page is next touched.

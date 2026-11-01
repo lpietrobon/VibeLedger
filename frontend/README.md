@@ -1,8 +1,7 @@
 # VibeLedger Frontend (mobile app)
 
-A mobile-first React/Vite consumer app for VibeLedger, at functional parity with
-the Streamlit dashboard for the everyday flows. Streamlit is retained for the
-desktop analyst views (Cashflow Sankey, Experimental movers/heatmap).
+A mobile-first React/Vite consumer app for VibeLedger. It is the product UI for
+daily flows and analytics, including cashflow and inspectability surfaces.
 
 It started as a controlled import of the Lovable first draft from
 `lpietrobon/vibeledger-vision` at commit `177a4fca110049b4777875d7683840770edf855e`,
@@ -15,7 +14,7 @@ and is intentionally a plain Vite React app, not the raw Lovable/TanStack Start 
   summary, cumulative pace, and transaction search each map to one FastAPI
   endpoint (`/analytics/overview`, `/analytics/spending-summary`,
   `/analytics/cumulative-spend`, `/transactions?q=`). This keeps a single source
-  of truth shared with Streamlit and keeps mobile payloads small.
+  of truth and keeps mobile payloads small.
 - `src/lib/api/client.ts` is a thin fetch + snake→camel mapping layer.
 - **Installable PWA.** `vite-plugin-pwa` generates a web app manifest + service
   worker (Workbox), so the app installs to a phone home screen or a laptop desktop

@@ -1,7 +1,9 @@
 from datetime import date, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.services import recurring_detector
 from app.db.session import SessionLocal
 from app.main import app
 from app.models.models import (
@@ -15,14 +17,25 @@ from app.services.security import encrypt_token
 from tests.conftest import AUTH_HEADERS
 
 
+@pytest.fixture(autouse=True)
+def recurring_clock(monkeypatch):
+    """Keep active/inactive classification stable as calendar time advances."""
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 6, 20)
+
+    monkeypatch.setattr(recurring_detector, "date", FixedDate)
+
+
 def _seed():
     """A monthly subscription, a one-off purchase, and a transfer pair."""
     with SessionLocal() as db:
         item = Item(plaid_item_id="i-rec", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        checking = Account(plaid_account_id="a-rec-chk", item_id=item.id, name="Checking")
-        credit = Account(plaid_account_id="a-rec-cc", item_id=item.id, name="Card")
+        checking = Account(currency="USD", plaid_account_id="a-rec-chk", item_id=item.id, name="Checking")
+        credit = Account(currency="USD", plaid_account_id="a-rec-cc", item_id=item.id, name="Card")
         db.add_all([checking, credit])
         db.flush()
 
@@ -89,7 +102,12 @@ def _seed_noisy_descriptors():
         item = Item(plaid_item_id="i-zelle", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        checking = Account(plaid_account_id="a-zelle-chk", item_id=item.id, name="Checking")
+        checking = Account(
+            plaid_account_id="a-zelle-chk",
+            item_id=item.id,
+            name="Checking",
+            currency="USD",
+        )
         db.add(checking)
         db.flush()
 
@@ -141,7 +159,8 @@ def test_recurring_drilldown_query_returns_the_whole_series():
 def test_manual_status_override_canceled_and_cleared():
     _seed()
     with TestClient(app) as client:
-        before = client.get("/analytics/recurring", headers=AUTH_HEADERS).json()
+        params = {"end_date": "2026-06-30"}
+        before = client.get("/analytics/recurring", params=params, headers=AUTH_HEADERS).json()
         spotify = next(i for i in before["items"] if i["merchant_label"] == "Spotify")
         assert spotify["status"] == "active"
         assert spotify["manual_status"] is None
@@ -155,7 +174,7 @@ def test_manual_status_override_canceled_and_cleared():
         )
         assert set_resp.status_code == 200
 
-        after = client.get("/analytics/recurring", headers=AUTH_HEADERS).json()
+        after = client.get("/analytics/recurring", params=params, headers=AUTH_HEADERS).json()
         s2 = next(i for i in after["items"] if i["merchant_key"] == key)
         assert s2["status"] == "inactive"
         assert s2["manual_status"] == "canceled"
@@ -164,12 +183,14 @@ def test_manual_status_override_canceled_and_cleared():
         assert after["summary"]["active_monthly_estimate"] == 0
 
         # Only appears under the inactive filter now.
-        active_only = client.get("/analytics/recurring", params={"status": "active"}, headers=AUTH_HEADERS).json()
+        active_only = client.get(
+            "/analytics/recurring", params={**params, "status": "active"}, headers=AUTH_HEADERS
+        ).json()
         assert all(i["merchant_key"] != key for i in active_only["items"])
 
         # Clearing the override restores auto behavior.
         client.post(f"/analytics/recurring/{key}/status", json={"status": "auto"}, headers=AUTH_HEADERS)
-        restored = client.get("/analytics/recurring", headers=AUTH_HEADERS).json()
+        restored = client.get("/analytics/recurring", params=params, headers=AUTH_HEADERS).json()
         s3 = next(i for i in restored["items"] if i["merchant_key"] == key)
         assert s3["status"] == "active"
         assert s3["manual_status"] is None
@@ -188,6 +209,6 @@ def test_one_sided_transfer_override_no_longer_hides_recurring():
         db.commit()
 
     with TestClient(app) as client:
-        r = client.get("/analytics/recurring", headers=AUTH_HEADERS)
+        r = client.get("/analytics/recurring", params={"end_date": "2026-06-30"}, headers=AUTH_HEADERS)
     assert r.status_code == 200
     assert [i["merchant_label"] for i in r.json()["items"]] == ["Spotify"]
