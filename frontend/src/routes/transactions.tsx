@@ -22,6 +22,7 @@ import {
 } from "@/lib/api/client";
 import type { DuplicateCorrection, Transaction } from "@/lib/api/types";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { useAccountScopeQuery } from "@/lib/accountScope";
 import { invalidateLedger } from "@/lib/api/cache";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/+$/, "");
@@ -79,8 +80,11 @@ export default function TransactionsPage() {
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [duplicateFeedback, setDuplicateFeedback] = useState<string | null>(null);
   const [onlyUnreviewed, setOnlyUnreviewed] = useState(false);
-  const limit = filter || startDate || endDate || category !== "All" || query ? 500 : 100;
-  const serverQuery = [filter ? FILTER_QUERY[filter] : "", query].filter(Boolean).join(" ");
+  const accountScopeQuery = useAccountScopeQuery();
+  const limit = filter || startDate || endDate || category !== "All" || query || accountScopeQuery ? 500 : 100;
+  const serverQuery = [filter ? FILTER_QUERY[filter] : "", accountScopeQuery, query]
+    .filter(Boolean)
+    .join(" ");
 
   const tx = useQuery({
     enabled: validateRange(dateRange, dateRange.preset === "all"),

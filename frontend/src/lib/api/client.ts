@@ -30,12 +30,17 @@ const MAX_PAGE_SIZE = 500;
 
 const jsonFetch = async <T>(
   path: string,
-  params?: Record<string, string | number | boolean | undefined>,
+  params?: Record<string, string | number | boolean | number[] | undefined>,
   init?: RequestInit,
 ) => {
   const url = new URL(path.replace(/^\/+/, ""), apiOrigin());
   for (const [key, value] of Object.entries(params ?? {})) {
-    if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
+    if (value === undefined || value === "") continue;
+    if (Array.isArray(value)) {
+      for (const v of value) url.searchParams.append(key, String(v));
+    } else {
+      url.searchParams.set(key, String(value));
+    }
   }
 
   const response = await fetch(url, init);
@@ -64,9 +69,9 @@ function apiOrigin() {
 }
 
 // --- Analytics (all computed server-side; the client only fetches + maps) ---
-export type DateWindowParams = { startDate?: string; endDate?: string; compareStartDate?: string; compareEndDate?: string };
+export type DateWindowParams = { accountIds?: number[] | null; startDate?: string; endDate?: string; compareStartDate?: string; compareEndDate?: string };
 function dateWindowParams(p?: DateWindowParams) {
-  return { start_date: p?.startDate, end_date: p?.endDate,
+  return { account_ids: p?.accountIds ?? undefined, start_date: p?.startDate, end_date: p?.endDate,
     compare_start_date: p?.compareStartDate, compare_end_date: p?.compareEndDate };
 }
 
@@ -176,7 +181,7 @@ export async function getOverviewSummary(params?: DateWindowParams): Promise<Ove
 
 export async function getCashflowTrend(params?: DateWindowParams & { granularity?: "daily" | "monthly" }): Promise<CashflowPoint[]> {
   const rows = await jsonFetch<Array<{ month: string; income: number; expenses: number; net: number }>>(
-    "/analytics/cashflow-trend", { start_date: params?.startDate, end_date: params?.endDate, granularity: params?.granularity },
+    "/analytics/cashflow-trend", { account_ids: params?.accountIds ?? undefined, start_date: params?.startDate, end_date: params?.endDate, granularity: params?.granularity },
   );
   return (params?.startDate ? rows : rows.slice(-12)).map((row) => ({
     month: row.month,
@@ -189,10 +194,12 @@ export async function getCashflowTrend(params?: DateWindowParams & { granularity
 export async function getCategorySpend(params?: {
   startDate?: string;
   endDate?: string;
+  accountIds?: number[] | null;
 }): Promise<CategorySpendPoint[]> {
   const rows = await jsonFetch<CategorySpendPoint[]>("/analytics/category-spend", {
     start_date: params?.startDate,
     end_date: params?.endDate,
+    account_ids: params?.accountIds ?? undefined,
   });
   return rows
     .filter((row) => row.spend > 0)
@@ -349,8 +356,8 @@ export type SpendingTimeline = {
   start_date: string; end_date: string; days: { date: string; amount: number }[];
   spikes: TimelineSpike[]; qualification: string;
 };
-export async function getSpendingTimeline(params: { startDate: string; endDate: string }): Promise<SpendingTimeline> {
-  return jsonFetch("/analytics/timeline-spikes", { start_date: params.startDate, end_date: params.endDate });
+export async function getSpendingTimeline(params: { startDate: string; endDate: string; accountIds?: number[] | null }): Promise<SpendingTimeline> {
+  return jsonFetch("/analytics/timeline-spikes", { account_ids: params.accountIds ?? undefined, start_date: params.startDate, end_date: params.endDate });
 }
 
 export type SpendingDay = {
@@ -358,8 +365,8 @@ export type SpendingDay = {
   items: { id: number; merchant: string; amount: number;
     percent_of_day: number | null; cumulative_percent: number | null; }[];
 };
-export async function getSpendingDay(date: string): Promise<SpendingDay> {
-  return jsonFetch("/analytics/spending-day", { selected_date: date, limit: 5 });
+export async function getSpendingDay(date: string, accountIds?: number[] | null): Promise<SpendingDay> {
+  return jsonFetch("/analytics/spending-day", { selected_date: date, limit: 5, account_ids: accountIds ?? undefined });
 }
 
 // --- Accounts ---

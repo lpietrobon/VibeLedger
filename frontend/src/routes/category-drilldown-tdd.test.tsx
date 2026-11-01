@@ -16,6 +16,7 @@ vi.mock("@/components/finance/charts/CumulativeChart", () => ({
 }));
 
 vi.mock("@/lib/api/client", () => ({
+  getAccountsSummary: vi.fn(async () => ({ groups: {} })),
   CATEGORIES: ["FOOD/OTHER", "FOOD/DINING", "SHOPPING/GENERAL"],
   CATEGORY_GROUPS: [{ label: "Food", options: ["FOOD/OTHER", "FOOD/DINING"] }],
   getOverviewSummary: vi.fn(),
