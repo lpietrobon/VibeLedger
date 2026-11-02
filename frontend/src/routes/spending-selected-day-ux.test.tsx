@@ -119,3 +119,16 @@ it("refetches date-bounded charts and day details when account scope changes", a
   act(() => setAccountScope(null));
   await settled();
 });
+
+
+it("shows unequal-duration comparison qualifications instead of silently comparing raw totals", async () => {
+  const warning = "Unequal period lengths: current 3 days versus previous 1 days. Raw totals are not normalized for duration.";
+  const summary = await api.getSpendingSummary({ granularity: "monthly" });
+  vi.mocked(api.getSpendingSummary).mockResolvedValue({
+    ...summary, reporting: { ...summary.reporting, comparisonQualification: warning },
+  });
+  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+  act(() => root.render(<QueryClientProvider client={client}><SpendingPage/></QueryClientProvider>));
+  await settled(); await settled();
+  expect(container.textContent).toContain(warning);
+});

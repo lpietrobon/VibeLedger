@@ -9,8 +9,8 @@ procedure, and verification. It must not contain a host's credentials or exact
 private topology.
 
 - `.env.example` documents required values.
-- `deploy/systemd/*.service.in` defines the API, dashboard, and frontend processes.
-- `scripts/deploy.sh` updates, builds, restarts all three processes, and verifies them.
+- `deploy/systemd/*.service.in` defines the API and frontend processes.
+- `scripts/deploy.sh` updates, builds, restarts both processes, and verifies them.
 - `scripts/deploy_doctor.py` checks local health and the configured Tailscale route.
 
 ## Host-owned state
@@ -51,11 +51,8 @@ https://machine.example.ts.net:8444/vibeledger
         -> /vibeledger/api/* and /vibeledger/connect/* -> 127.0.0.1:8000
 ```
 
-Streamlit may have a sibling Serve route:
-
-```text
-/vibeledger/dash -> http://127.0.0.1:8501/vibeledger/dash
-```
+Streamlit is retired; only the API and React frontend are supported. Stop and
+disable any legacy `vibeledger-dash.service` still installed on a host.
 
 Tailscale Serve is tailnet-only. Funnel is not required for ordinary phone use
 when the phone is connected to Tailscale. OAuth callbacks or webhooks that Plaid
@@ -75,7 +72,7 @@ Then inspect the rendered units before enabling them:
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now \
-  vibeledger.service vibeledger-dash.service vibeledger-frontend.service
+  vibeledger.service vibeledger-frontend.service
 ```
 
 The services deliberately bind only to `127.0.0.1`. Tailscale Serve or an SSH
@@ -91,8 +88,7 @@ VIBELEDGER_ENV_FILE="$HOME/.config/vibeledger/vibeledger.env" \
 ```
 
 The script refuses a dirty checkout, fast-forwards the selected remote branch,
-installs Python and Node dependencies, builds React, restarts the API, dashboard,
-and frontend together, then runs the deployment doctor. Pass a commit SHA for a
+installs Python and Node dependencies, builds React, restarts the API and frontend together, then runs the deployment doctor. Pass a commit SHA for a
 detached exact-revision deployment.
 
 Run verification without changing code:
@@ -108,7 +104,7 @@ The deployment wrapper accepts the equivalent
 `VIBELEDGER_SKIP_TAILSCALE=1` and `VIBELEDGER_SKIP_EXTERNAL=1` environment
 switches.
 
-Deployment is complete only when all three services are active and the doctor
+Deployment is complete only when both services are active and the doctor
 passes. Restarting only the frontend can leave React and FastAPI on incompatible
 revisions; changing `APP_BASE_URL` without checking Tailscale Serve can generate
 unreachable Plaid links.
