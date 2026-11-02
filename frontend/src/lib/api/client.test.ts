@@ -263,3 +263,16 @@ describe("getTransactions", () => {
     expect(calledUrl.searchParams.get("limit")).toBe("30");
   });
 });
+
+it("combines repeated account IDs with date and comparison windows", async () => {
+  const fetchMock = mockFetch([]);
+  await getCumulativeSpending({
+    granularity: "monthly", accountIds: [12, 34],
+    startDate: "2020-03-01", endDate: "2020-03-31",
+    comparisonPeriods: [{ startDate: "2020-02-01", endDate: "2020-02-29" }],
+  });
+  const url = new URL(String(fetchMock.mock.calls[0][0]));
+  expect(url.searchParams.getAll("account_ids")).toEqual(["12", "34"]);
+  expect(url.searchParams.get("start_date")).toBe("2020-03-01");
+  expect(url.searchParams.get("compare_start_date")).toBe("2020-02-01");
+});

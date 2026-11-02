@@ -9,6 +9,7 @@ vi.mock("@/components/finance/charts/CumulativeChart", () => ({
     <button type="button" onClick={() => onSelect("2026-10-10")}>Select cumulative point Oct 10</button>,
 }));
 vi.mock("@/lib/api/client", () => ({
+  getAccountsSummary: vi.fn(async () => ({ groups: {} })),
   CATEGORIES: ["FOOD/OTHER", "INSURANCE"],
   getSpendingSummary: vi.fn(), getCategoryComparisonPeriod: vi.fn(),
   getCumulativeSpending: vi.fn(), getSpendingTimeline: vi.fn(), getSpendingDay: vi.fn(),
@@ -18,11 +19,13 @@ vi.mock("@/lib/api/client", () => ({
 vi.mock("@/lib/api/cache", () => ({ invalidateLedger: vi.fn(async () => undefined) }));
 import * as api from "@/lib/api/client";
 import SpendingPage from "./spending";
+import { setAccountScope } from "@/lib/accountScope";
 
 let root: Root;
 let container: HTMLDivElement;
 const settled = async () => { await act(async () => { await new Promise((done) => setTimeout(done, 0)); }); };
 beforeEach(() => {
+  setAccountScope(null);
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-10-25T12:00:00Z"));
@@ -83,7 +86,7 @@ it("keeps four one-row KPIs, fixed default prior lines and a compact five-transa
   await act(async () => (Array.from(container.querySelectorAll("button")).find(x =>
     x.textContent?.includes("Select cumulative point Oct 10")) as HTMLButtonElement).click());
   await settled();
-  expect(api.getSpendingDay).toHaveBeenCalledWith("2026-10-10");
+  expect(api.getSpendingDay).toHaveBeenCalledWith("2026-10-10", null);
   expect(container.textContent).toContain("Insurance");
   expect(container.textContent).toContain("70.8%");
   expect(container.textContent).toContain("100%");
@@ -99,4 +102,20 @@ it("keeps four one-row KPIs, fixed default prior lines and a compact five-transa
   }));
   expect(container.textContent).toContain("+10.8%");
   expect(window.localStorage.getItem("vibeledger.prior-period-count")).toBe("0");
+});
+
+it("refetches date-bounded charts and day details when account scope changes", async () => {
+  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+  act(() => root.render(<QueryClientProvider client={client}><SpendingPage/></QueryClientProvider>));
+  await settled(); await settled();
+  act(() => setAccountScope([12, 34]));
+  await settled(); await settled();
+  const scope = expect.objectContaining({ accountIds: [12, 34], startDate: "2026-10-01", endDate: "2026-10-25" });
+  expect(api.getSpendingSummary).toHaveBeenLastCalledWith(scope);
+  expect(api.getCumulativeSpending).toHaveBeenLastCalledWith(scope);
+  expect(api.getCategoryComparisonPeriod).toHaveBeenLastCalledWith("monthly", "calendar", scope);
+  expect(api.getSpendingTimeline).toHaveBeenLastCalledWith(scope);
+  expect(api.getSpendingDay).toHaveBeenLastCalledWith("2026-10-11", [12, 34]);
+  act(() => setAccountScope(null));
+  await settled();
 });

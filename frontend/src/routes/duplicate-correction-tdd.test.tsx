@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Transaction } from "@/lib/api/types";
 
 vi.mock("@/lib/api/client", () => ({
+  getAccountsSummary: vi.fn(async () => ({ groups: {} })),
   CATEGORIES: ["FOOD/OTHER", "SHOPPING/GENERAL"],
   CATEGORY_GROUPS: [
     { label: "Food", options: ["FOOD/OTHER"] },

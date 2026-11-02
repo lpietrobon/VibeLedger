@@ -1,0 +1,14 @@
+[Unit]
+Description=VibeLedger FastAPI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=@REPO_ROOT@
+EnvironmentFile=@ENV_FILE@
+ExecStart=@REPO_ROOT@/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --root-path /vibeledger
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

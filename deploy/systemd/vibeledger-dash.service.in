@@ -1,0 +1,13 @@
+[Unit]
+Description=VibeLedger Streamlit dashboard
+After=vibeledger.service
+
+[Service]
+WorkingDirectory=@REPO_ROOT@
+EnvironmentFile=@ENV_FILE@
+ExecStart=@REPO_ROOT@/.venv/bin/streamlit run Spend.py --server.address 127.0.0.1 --server.port 8501 --server.baseUrlPath /vibeledger/dash --server.headless true --browser.gatherUsageStats false
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

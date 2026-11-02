@@ -71,11 +71,13 @@ def currency_reporting(currencies):
     return metadata
 
 
-def reporting_scope(db, start=None, end=None, *, include_transfers=False, expense_only=False):
+def reporting_scope(db, start=None, end=None, *, include_transfers=False, expense_only=False, account_ids=None):
     """Qualify the same posted scope as the aggregate without exporting its rows."""
     q = db.query(currency_expression(), func.count(Transaction.id), func.min(Transaction.date), func.max(Transaction.date)).join(
         Account, Account.id == Transaction.account_id)
     q = posted_activity(q, include_transfers=include_transfers)
+    if account_ids:
+        q = q.filter(Transaction.account_id.in_(account_ids))
     if start is not None:
         q = q.filter(Transaction.date >= start)
     if end is not None:
@@ -94,10 +96,10 @@ def reporting_scope(db, start=None, end=None, *, include_transfers=False, expens
     return metadata
 
 
-def comparison_reporting(db, bounds):
+def comparison_reporting(db, bounds, *, account_ids=None):
     start, end, prior_start, prior_end = bounds
-    current = reporting_scope(db, start, end)
-    previous = reporting_scope(db, prior_start, prior_end)
+    current = reporting_scope(db, start, end, account_ids=account_ids)
+    previous = reporting_scope(db, prior_start, prior_end, account_ids=account_ids)
     return {
         **current,
         "reporting_date": str(end),

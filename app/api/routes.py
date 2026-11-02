@@ -3,7 +3,7 @@ import calendar
 import re
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal
+from typing import Annotated, Literal
 import logging
 import json
 import os
@@ -1361,6 +1361,12 @@ def _is_refund_expr():
     return is_refund()
 
 
+def _apply_account_filter(q, account_ids: list[int] | None):
+    if account_ids:
+        q = q.filter(Transaction.account_id.in_(account_ids))
+    return q
+
+
 @router.post("/refunds/detect")
 def refunds_detect(db: Session = Depends(get_db)):
     return classify_refunds(db)
@@ -1372,8 +1378,9 @@ def monthly_spend(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
-    reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers, account_ids=account_ids)
     month_col = func.strftime("%Y-%m", Transaction.date).label("month")
     q = (
         db.query(
@@ -1383,6 +1390,7 @@ def monthly_spend(
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
     q = posted_activity(q, include_transfers=include_transfers)
+    q = _apply_account_filter(q, account_ids)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1397,8 +1405,9 @@ def category_spend(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
-    reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers, account_ids=account_ids)
     effective_category = _effective_category_expr().label("category")
     q = (
         db.query(
@@ -1408,6 +1417,7 @@ def category_spend(
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
     )
     q = posted_activity(q, include_transfers=include_transfers)
+    q = _apply_account_filter(q, account_ids)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1423,8 +1433,9 @@ def cashflow_trend(
     end_date: date | None = Query(default=None),
     include_transfers: bool = Query(default=False),
     granularity: Literal["daily", "monthly"] = "monthly",
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
-    reporting_scope(db, start_date, end_date, include_transfers=include_transfers)
+    reporting_scope(db, start_date, end_date, include_transfers=include_transfers, account_ids=account_ids)
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=422, detail="From date must precede To date")
     if granularity == "daily" and (not start_date or not end_date or (end_date - start_date).days > 3660):
@@ -1435,6 +1446,7 @@ def cashflow_trend(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
     q = posted_activity(q, include_transfers=include_transfers)
+    q = _apply_account_filter(q, account_ids)
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
@@ -1586,6 +1598,7 @@ def analytics_overview(
     end_date: date | None = Query(default=None),
     compare_start_date: date | None = Query(default=None),
     compare_end_date: date | None = Query(default=None),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
     """One-shot summary for the mobile Overview screen (KPIs + needs-attention)."""
     accounts = accounts_summary(db)
@@ -1593,24 +1606,24 @@ def analytics_overview(
     explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
     bounds = explicit or comparison_bounds(as_of)
     start, end, previous_start, previous_end = bounds
-    reporting = comparison_reporting(db, bounds)
+    reporting = comparison_reporting(db, bounds, account_ids=account_ids)
     if explicit and compare_start_date is None:
         reporting["comparison_available"] = False
         reporting["comparison_qualification"] = "No comparison selected."
-    current_rows = cashflow_trend(db, start, end, include_transfers=False)
-    prior_rows = cashflow_trend(db, previous_start, previous_end, include_transfers=False) if not explicit or compare_start_date else []
+    current_rows = cashflow_trend(db, start, end, include_transfers=False, account_ids=account_ids)
+    prior_rows = cashflow_trend(db, previous_start, previous_end, include_transfers=False, account_ids=account_ids) if not explicit or compare_start_date else []
     cur = {key: round(sum(r[key] for r in current_rows), 2) for key in ("expenses", "income", "net")}
     pre = {key: round(sum(r[key] for r in prior_rows), 2) for key in ("expenses", "income", "net")}
 
     # Counted over transactions, not annotations: an annotation whose transaction
     # is gone is invisible everywhere else, so counting it here would advertise
     # rows the Transactions screen can never show.
-    likely_refunds = (
+    likely_refunds_q = (
         db.query(func.count(Transaction.id))
         .join(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
         .filter(TransactionAnnotation.refund_status == "likely")
-        .scalar()
-    ) or 0
+    )
+    likely_refunds = _apply_account_filter(likely_refunds_q, account_ids).scalar() or 0
     transfer_pending = (
         db.query(func.count(TransferPair.id))
         .filter(TransferPair.confirmed == False)  # noqa: E712
@@ -1621,6 +1634,7 @@ def analytics_overview(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
     unreviewed_q = _apply_transfer_exclusion(unreviewed_q, include_transfers=False)
+    unreviewed_q = _apply_account_filter(unreviewed_q, account_ids)
     unreviewed = unreviewed_q.filter(
         or_(
             TransactionAnnotation.reviewed.is_(None),
@@ -1631,7 +1645,7 @@ def analytics_overview(
     uncategorized_q = db.query(func.count(Transaction.id)).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
-    uncategorized = _apply_transfer_exclusion(uncategorized_q, include_transfers=False).filter(
+    uncategorized = _apply_transfer_exclusion(_apply_account_filter(uncategorized_q, account_ids), include_transfers=False).filter(
         func.lower(_effective_category_expr()) == "uncategorized"
     ).scalar() or 0
 
@@ -1667,18 +1681,19 @@ def analytics_spending_summary(
     end_date: date | None = Query(default=None),
     compare_start_date: date | None = Query(default=None),
     compare_end_date: date | None = Query(default=None),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
     """Period spend total, comparison, projection, top driver, and per-category diff."""
     as_of = reporting_date if isinstance(reporting_date, date) else date.today()
     explicit = _explicit_comparison_bounds(start_date, end_date, compare_start_date, compare_end_date)
     bounds = explicit or comparison_bounds(as_of, granularity, window)
     cur_start, cur_end, prev_start, prev_end = bounds
-    reporting = comparison_reporting(db, bounds)
+    reporting = comparison_reporting(db, bounds, account_ids=account_ids)
     if explicit and compare_start_date is None:
         reporting["comparison_available"] = False
         reporting["comparison_qualification"] = "No comparison selected."
-    cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False)}
-    prev_cats = ({r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False)}
+    cur_cats = {r["category"]: r["spend"] for r in category_spend(db, cur_start, cur_end, include_transfers=False, account_ids=account_ids)}
+    prev_cats = ({r["category"]: r["spend"] for r in category_spend(db, prev_start, prev_end, include_transfers=False, account_ids=account_ids)}
                  if not explicit or compare_start_date else {})
     total = round(sum(cur_cats.values()), 2)
     previous_total = round(sum(prev_cats.values()), 2)
@@ -1719,14 +1734,17 @@ def analytics_spending_summary(
     }
 
 
-def _daily_expense(db: Session, start: date, end: date, bucket: str) -> dict[int, float]:
+def _daily_expense(
+    db: Session, start: date, end: date, bucket: str, account_ids: list[int] | None = None
+) -> dict[int, float]:
     """Sum expense per day-of-month ('%d') or per month-of-year ('%m') in [start, end]."""
-    reporting_scope(db, start, end)
+    reporting_scope(db, start, end, account_ids=account_ids)
     bucket_col = func.strftime(bucket, Transaction.date)
     q = db.query(bucket_col, func.sum(_expense_value_case())).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
     q = posted_activity(q, include_transfers=False)
+    q = _apply_account_filter(q, account_ids)
     q = q.filter(Transaction.date >= start, Transaction.date <= end)
     rows = q.group_by(bucket_col).all()
     return {int(b): float(total or 0) for b, total in rows if b is not None}
@@ -1759,6 +1777,7 @@ def analytics_cumulative_spend(
     compare3_start_date: date | None = Query(default=None),
     compare3_end_date: date | None = Query(default=None),
     alignment: Literal["ordinal", "calendar-month", "calendar-year"] = Query(default="ordinal"),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
     """Date-aligned cumulative pace using explicit comparison bounds for 0–3 past windows."""
     anchor = reporting_date if isinstance(reporting_date, date) else date.today()
@@ -1784,12 +1803,13 @@ def analytics_cumulative_spend(
             if begin > finish or (finish - begin).days > 3660:
                 raise HTTPException(status_code=422, detail="Invalid comparison period")
         def daily_values(a, b):
-            reporting_scope(db, a, b)
+            reporting_scope(db, a, b, account_ids=account_ids)
             day_col = func.strftime("%Y-%m-%d", Transaction.date)
             q = db.query(day_col, func.sum(expense_amount())).outerjoin(
                 TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
             )
             q = posted_activity(q, include_transfers=False)
+            q = _apply_account_filter(q, account_ids)
             rows = q.filter(Transaction.date >= a, Transaction.date <= b).group_by(day_col).all()
             return {key: round(float(amount or 0), 2) for key, amount in rows}
 
@@ -1836,7 +1856,7 @@ def analytics_cumulative_spend(
     if granularity == "yearly":
         years = [anchor.year - i for i in range(4)]
         series = [
-            _cumulative(_daily_expense(db, date(y, 1, 1), anchor if y == anchor.year else date(y, 12, 31), "%m"), 12)
+            _cumulative(_daily_expense(db, date(y, 1, 1), anchor if y == anchor.year else date(y, 12, 31), "%m", account_ids=account_ids), 12)
             for y in years
         ]
         length = 12
@@ -1851,7 +1871,7 @@ def analytics_cumulative_spend(
             start, end = _month_bounds(mkey)
             if mkey == anchor_month:
                 end = anchor
-            series.append(_cumulative(_daily_expense(db, start, end, "%d"), length))
+            series.append(_cumulative(_daily_expense(db, start, end, "%d", account_ids=account_ids), length))
 
     return [
         {"x": i + 1, **{key: series[j][i] for j, key in enumerate(keys)}}
@@ -2156,13 +2176,15 @@ def analytics_spending_day(
     db: Session = Depends(get_db),
     selected_date: date = Query(...),
     limit: int = Query(default=5, ge=1, le=20),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
     """Top signed spending entries for a timeline point, using the exact ledger expression."""
-    reporting_scope(db, selected_date, selected_date)
+    reporting_scope(db, selected_date, selected_date, account_ids=account_ids)
     q = db.query(Transaction.id, _effective_merchant_expr(), expense_amount()).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
     q = posted_activity(q, include_transfers=False)
+    q = _apply_account_filter(q, account_ids)
     q = q.filter(Transaction.date == selected_date)
     rows = [(ident, merchant, round(float(amount or 0), 2))
             for ident, merchant, amount in q.all() if amount != 0]
@@ -2191,16 +2213,18 @@ def analytics_timeline_spikes(
     db: Session = Depends(get_db),
     start_date: date = Query(...),
     end_date: date = Query(...),
+    account_ids: Annotated[list[int] | None, Query()] = None,
 ):
     """Timeline-only spike annotations; no inference or Sankey behavior changes."""
     if start_date > end_date or (end_date - start_date).days > 3660:
         raise HTTPException(status_code=422, detail="Invalid timeline date window (maximum 3661 days)")
     lookback = start_date - timedelta(days=35)
-    reporting_scope(db, lookback, end_date)
+    reporting_scope(db, lookback, end_date, account_ids=account_ids)
     q = db.query(Transaction.id, Transaction.date, _effective_merchant_expr(), expense_amount()).outerjoin(
         TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id
     )
     q = posted_activity(q, include_transfers=False)
+    q = _apply_account_filter(q, account_ids)
     q = q.filter(Transaction.date >= lookback, Transaction.date <= end_date)
     rows = [(ident, day, merchant, float(amount)) for ident, day, merchant, amount in q.all() if amount != 0]
     totals = {}

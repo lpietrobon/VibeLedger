@@ -18,6 +18,7 @@ import {
 } from "@/lib/api/client";
 import type { Transaction } from "@/lib/api/types";
 import { formatCurrency } from "@/lib/format";
+import { useAccountScope, useAccountScopeQuery } from "@/lib/accountScope";
 import { invalidateLedger } from "@/lib/api/cache";
 import { categoryDrilldownHref } from "@/lib/categoryDrilldown";
 
@@ -35,6 +36,8 @@ function CompactMetric({ label, value, note }: { label: string; value: string; n
 }
 
 export default function SpendingPage() {
+  const [accountIds] = useAccountScope();
+  const accountScopeQuery = useAccountScopeQuery();
   const queryClient = useQueryClient();
   const [selectedRange, setSelectedRange] = useState<DateRangeSelection>(() => ({
     ...initialDateSelection("current-month"), comparison: "previous-month",
@@ -46,8 +49,8 @@ export default function SpendingPage() {
   const [selected, setSelected] = useState<Transaction | null>(null);
   const valid = validateRange(selectedRange);
   const granularity = selectedRange.preset === "current-year" || selectedRange.preset === "last-365" ? "yearly" : "monthly";
-  const params: DateWindowParams = rangeQuery(selectedRange) ?? {};
-  const dataKey = [params.startDate, params.endDate, params.compareStartDate, params.compareEndDate];
+  const params: DateWindowParams = { ...rangeQuery(selectedRange), accountIds };
+  const dataKey = [accountIds, params.startDate, params.endDate, params.compareStartDate, params.compareEndDate];
   const historic = valid ? comparisonPeriods(selectedRange, priorCount) : [];
   const summary = useQuery({
     queryKey: ["spending-summary", granularity, ...dataKey],
@@ -70,8 +73,8 @@ export default function SpendingPage() {
     enabled: valid,
   });
   const timeline = useQuery({
-    queryKey: ["spending-timeline", selectedRange.startDate, selectedRange.endDate],
-    queryFn: () => getSpendingTimeline({ startDate: selectedRange.startDate, endDate: selectedRange.endDate }),
+    queryKey: ["spending-timeline", accountIds, selectedRange.startDate, selectedRange.endDate],
+    queryFn: () => getSpendingTimeline({ accountIds, startDate: selectedRange.startDate, endDate: selectedRange.endDate }),
     enabled: valid,
   });
   // Default to the most recent flagged peak or latest spending day. Any chart date
@@ -80,14 +83,14 @@ export default function SpendingPage() {
     (timeline.data?.spikes?.[0]?.date ??
       timeline.data?.days.slice().reverse().find((day) => day.amount !== 0)?.date ?? null);
   const day = useQuery({
-    queryKey: ["spending-day", activeDate],
-    queryFn: () => getSpendingDay(activeDate!),
+    queryKey: ["spending-day", activeDate, accountIds],
+    queryFn: () => getSpendingDay(activeDate!, accountIds),
     enabled: valid && Boolean(activeDate),
   });
   const tx = useQuery({
-    queryKey: ["tx", query, category, selectedRange.startDate, selectedRange.endDate],
+    queryKey: ["tx", accountScopeQuery, query, category, selectedRange.startDate, selectedRange.endDate],
     queryFn: () => getTransactions({
-      query: query ? "is:spend " + query : "is:spend",
+      query: ["is:spend", accountScopeQuery, query].filter(Boolean).join(" "),
       category, startDate: selectedRange.startDate, endDate: selectedRange.endDate, limit: 30,
     }),
     enabled: valid,

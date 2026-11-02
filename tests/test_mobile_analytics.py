@@ -47,6 +47,34 @@ def _seed():
                 )
             )
         db.commit()
+        return account.id
+
+
+def _seed_two_accounts():
+    """A second account with its own transactions, to prove account_ids scopes."""
+    with SessionLocal() as db:
+        item = Item(plaid_item_id="i-mob2", access_token_encrypted=encrypt_token("t"), status="active")
+        db.add(item)
+        db.flush()
+        account = Account(currency="USD", plaid_account_id="a-mob2", item_id=item.id, name="Savings")
+        db.add(account)
+        db.flush()
+
+        db.add(
+            Transaction(
+                plaid_transaction_id="tx-2020-03-15-Other",
+                account_id=account.id,
+                item_id=item.id,
+                date=date(2020, 3, 15),
+                amount=9999.0,
+                name="ShouldBeExcluded",
+                merchant_name="ShouldBeExcluded",
+                plaid_category_primary="SHOPPING",
+                pending=False,
+            )
+        )
+        db.commit()
+        return account.id
 
 
 def test_overview_kpis_and_needs_attention():
@@ -110,6 +138,58 @@ def test_cumulative_spend_monthly():
     assert by_x[1]["previous2"] is None  # no data two months back
 
 
+def test_account_ids_scopes_monthly_category_and_cashflow():
+    account_id = _seed()
+    other_id = _seed_two_accounts()
+    with TestClient(app) as client:
+        monthly = client.get(
+            "/analytics/monthly-spend", params={"account_ids": [account_id]}, headers=AUTH_HEADERS
+        ).json()
+        category = client.get(
+            "/analytics/category-spend", params={"account_ids": [account_id]}, headers=AUTH_HEADERS
+        ).json()
+        cashflow = client.get(
+            "/analytics/cashflow-trend", params={"account_ids": [account_id]}, headers=AUTH_HEADERS
+        ).json()
+        unscoped = client.get("/analytics/monthly-spend", headers=AUTH_HEADERS).json()
+        other_only = client.get(
+            "/analytics/monthly-spend", params={"account_ids": [other_id]}, headers=AUTH_HEADERS
+        ).json()
+
+    by_month = {r["month"]: r["spend"] for r in monthly}
+    assert by_month["2020-03"] == 500.0  # unaffected by the other account's transaction
+    assert sum(r["spend"] for r in category) == 900.0  # all months, no date filter: 400 + 300 + 200
+    cash_by_month = {r["month"]: r for r in cashflow}
+    assert cash_by_month["2020-03"]["expenses"] == 500.0
+
+    unscoped_by_month = {r["month"]: r["spend"] for r in unscoped}
+    assert unscoped_by_month["2020-03"] == 500.0 + 9999.0
+
+    other_by_month = {r["month"]: r["spend"] for r in other_only}
+    assert other_by_month["2020-03"] == 9999.0
+
+
+def test_account_ids_scopes_overview_spending_summary_and_cumulative():
+    account_id = _seed()
+    other_id = _seed_two_accounts()
+    with TestClient(app) as client:
+        overview = client.get(
+            "/analytics/overview", params={"account_ids": [account_id], "reporting_date": "2020-03-31"}, headers=AUTH_HEADERS
+        ).json()
+        summary = client.get(
+            "/analytics/spending-summary", params={"account_ids": [account_id], "reporting_date": "2020-03-31"}, headers=AUTH_HEADERS
+        ).json()
+        cumulative = client.get(
+            "/analytics/cumulative-spend", params={"account_ids": [account_id], "reporting_date": "2020-03-31"}, headers=AUTH_HEADERS
+        ).json()
+
+    assert overview["month_spend"] == 500.0
+    assert overview["needs_attention"]["unreviewed_transactions"] == 5  # excludes the other account's row
+    assert summary["total"] == 500.0
+    by_x = {row["x"]: row for row in cumulative}
+    assert by_x[10]["current"] == 500.0  # unaffected by the other account's 3/15 transaction
+
+
 def test_transactions_search_query():
     _seed()
     with TestClient(app) as client:
@@ -120,3 +200,33 @@ def test_transactions_search_query():
     assert coffee["total"] == 1
     assert sorted(t["name"] for t in groceries["items"]) == ["Groceries", "Groceries"]
     assert by_cat["total"] == 3  # all three FOOD_AND_DRINK rows map to FOOD/OTHER
+
+
+def test_account_scope_with_explicit_dates_timeline_and_reporting():
+    account_id = _seed()
+    other_id = _seed_two_accounts()
+    dates = {"start_date": "2020-03-01", "end_date": "2020-03-31",
+             "compare_start_date": "2020-02-01", "compare_end_date": "2020-02-29",
+             "account_ids": [account_id]}
+    with TestClient(app) as client:
+        def get(path, params):
+            response = client.get(path, params=params, headers=AUTH_HEADERS)
+            assert response.status_code == 200, response.text
+            return response.json()
+        summary = get('/analytics/spending-summary', dates)
+        overview = get('/analytics/overview', dates)
+        cumulative = get('/analytics/cumulative-spend', dates)
+        timeline = get('/analytics/timeline-spikes', dates)
+        day = get('/analytics/spending-day', {'selected_date': '2020-03-15', 'account_ids': [account_id]})
+        both = get('/analytics/spending-summary', {**dates, 'account_ids': [account_id, other_id]})
+        daily = get('/analytics/cashflow-trend', {**dates, 'granularity': 'daily'})
+        yearly = get('/analytics/cumulative-spend', {'account_ids': [account_id], 'granularity': 'yearly', 'reporting_date': '2020-03-31'})
+    assert summary['total'] == overview['month_spend'] == cumulative[-1]['current'] == 500
+    assert summary['previous_total'] == 400
+    assert summary['reporting']['current_period']['recorded_row_count'] == 3
+    assert sum(row['amount'] for row in timeline['days']) == 500
+    assert day['total'] == day['transaction_count'] == 0
+    assert day['items'] == []
+    assert both['total'] == 10499
+    assert sum(row['expenses'] for row in daily) == 500
+    assert yearly[2]['current'] == 900

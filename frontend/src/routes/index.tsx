@@ -19,6 +19,7 @@ import {
 } from "@/lib/api/client";
 import { CATEGORY_COLORS } from "@/lib/api/theme";
 import { formatCurrency } from "@/lib/format";
+import { useAccountScope, useAccountScopeQuery } from "@/lib/accountScope";
 import { categoryDrilldownHref } from "@/lib/categoryDrilldown";
 
 const CashflowChart = lazy(() => import("@/components/finance/charts/CashflowChart"));
@@ -31,19 +32,21 @@ function appHref(path: string) {
 }
 
 export default function OverviewPage() {
+  const [accountIds] = useAccountScope();
+  const accountScopeQuery = useAccountScopeQuery();
   const [dateRange, setDateRange] = useState<DateRangeSelection>(() => ({
     ...initialDateSelection("current-month"), comparison: "previous-month",
   }));
-  const dates: DateWindowParams = rangeQuery(dateRange) ?? {};
-  const key = [dates.startDate, dates.endDate, dates.compareStartDate, dates.compareEndDate];
+  const dates: DateWindowParams = { ...rangeQuery(dateRange), accountIds };
+  const key = [accountIds, dates.startDate, dates.endDate, dates.compareStartDate, dates.compareEndDate];
   const valid = validateRange(dateRange);
   const cashflowResolution = trendGranularity(dateRange);
   const summary = useQuery({ queryKey: ["overview", ...key], queryFn: () => getOverviewSummary(dates), enabled: valid });
   const cashflow = useQuery({ queryKey: ["cashflow", cashflowResolution, ...key], queryFn: () => getCashflowTrend({ ...dates, granularity: cashflowResolution }), enabled: valid });
   const comparison = useQuery({ queryKey: ["comparison", ...key], queryFn: () => getCategoryComparison("monthly", dates), enabled: valid });
   const recent = useQuery({
-    queryKey: ["recent-tx", ...key],
-    queryFn: () => getTransactions({ limit: 8, startDate: dateRange.startDate, endDate: dateRange.endDate }),
+    queryKey: ["recent-tx", accountScopeQuery, ...key],
+    queryFn: () => getTransactions({ query: accountScopeQuery, limit: 8, startDate: dateRange.startDate, endDate: dateRange.endDate }),
     enabled: valid,
   });
 
