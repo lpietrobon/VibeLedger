@@ -129,6 +129,9 @@ export default function SpendingPage() {
         </> : Array.from({ length: 4 }, (_, i) =>
           <div key={i} className="h-16 animate-pulse rounded-lg bg-secondary" />)}
       </div>
+      {s?.reporting.comparisonQualification ? <p className="mt-2 text-xs text-muted-foreground">
+        {s.reporting.comparisonQualification}
+      </p> : null}
       {summary.isError ? <p role="alert" className="mt-2 text-sm text-red-600">{summary.error.message}</p> : null}
       <Section title="Cumulative spending" className="mt-3"
         action={<PriorPeriodsControl value={priorCount} onChange={setPriorCount} />}>
