@@ -123,7 +123,7 @@ it("refetches date-bounded charts and day details when account scope changes", a
 
 it("shows unequal-duration comparison qualifications instead of silently comparing raw totals", async () => {
   const warning = "Unequal period lengths: current 3 days versus previous 1 days. Raw totals are not normalized for duration.";
-  const summary = await api.getSpendingSummary({});
+  const summary = await api.getSpendingSummary({ granularity: "monthly" });
   vi.mocked(api.getSpendingSummary).mockResolvedValue({
     ...summary, reporting: { ...summary.reporting, comparisonQualification: warning },
   });
