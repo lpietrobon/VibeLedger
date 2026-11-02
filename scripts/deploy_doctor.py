@@ -16,12 +16,10 @@ from urllib.request import urlopen
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVICES = (
     "vibeledger.service",
-    "vibeledger-dash.service",
     "vibeledger-frontend.service",
 )
 LOCAL_ENDPOINTS = (
     ("API health", "http://127.0.0.1:8000/health"),
-    ("dashboard health", "http://127.0.0.1:8501/vibeledger/dash/_stcore/health"),
     ("frontend", "http://127.0.0.1:5173/vibeledger/frontend/"),
     ("frontend API proxy", "http://127.0.0.1:5173/vibeledger/api/health"),
 )

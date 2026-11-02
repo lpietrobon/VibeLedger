@@ -39,13 +39,12 @@ fi
 
 revision="$(git rev-parse HEAD)"
 
-"${repo_root}/.venv/bin/python" -m pip install -e '.[dashboard]'
+"${repo_root}/.venv/bin/python" -m pip install -e .
 npm ci --prefix frontend
 npm run build --prefix frontend
 
 systemctl --user restart \
   vibeledger.service \
-  vibeledger-dash.service \
   vibeledger-frontend.service
 
 python3 scripts/deploy_doctor.py "${doctor_flags[@]}"
