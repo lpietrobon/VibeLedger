@@ -10,7 +10,7 @@ const priorLines = [
 ] as const;
 
 /** One primary cumulative view. Dates are explicit, not inferred from graph position. */
-export default function CumulativeChart({ data, days = [], spikes = [], selectedDate, priorCount = 1, onSelect } : {
+export default function CumulativeChart({ data, days = [], selectedDate, priorCount = 1, onSelect } : {
   data: CumulativeSpendingPoint[];
   days?: { date: string; amount: number }[];
   spikes?: TimelineSpike[];
@@ -19,7 +19,6 @@ export default function CumulativeChart({ data, days = [], spikes = [], selected
   onSelect?: (day: string) => void;
 }) {
   const daily = new Map(days.map((p) => [p.date, p.amount]));
-  const spikeDates = new Set(spikes.map((s) => s.date));
   const pointByDay = new Map(data.map((p) => [p.day, p]));
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -52,11 +51,6 @@ export default function CumulativeChart({ data, days = [], spikes = [], selected
         <Line type="linear" dataKey="current" name="Current" stroke="#2563eb"
           strokeWidth={2.8} dot={false} activeDot={{ r: 5 }}
           isAnimationActive={false} connectNulls={false} />
-        {data.filter((p) => p.date && spikeDates.has(p.date) && p.current !== null).map((p) =>
-          <ReferenceDot key={p.date} x={p.day} y={p.current!} r={4}
-            fill="#f59e0b" stroke="#fff" strokeWidth={1.5}
-            onClick={() => onSelect?.(p.date!)} />
-        )}
         {data.filter((p) => p.date === selectedDate && p.current !== null).map((p) =>
           <ReferenceDot key={"selected-" + p.date} x={p.day} y={p.current!} r={6}
             fill="#2563eb" stroke="#fff" strokeWidth={2} />
