@@ -79,8 +79,8 @@ it("keeps four one-row KPIs, fixed default prior lines and a compact five-transa
   expect(api.getCumulativeSpending).toHaveBeenCalledWith(expect.objectContaining({
     startDate:"2026-10-01",endDate:"2026-10-25",
     comparisonPeriods:[
-      {startDate:"2026-09-01",endDate:"2026-09-25"},
-      {startDate:"2026-08-01",endDate:"2026-08-25"},
+      {startDate:"2026-09-01",endDate:"2026-09-30"},
+      {startDate:"2026-08-01",endDate:"2026-08-31"},
     ],
   }));
   await act(async () => (Array.from(container.querySelectorAll("button")).find(x =>
@@ -112,7 +112,10 @@ it("refetches date-bounded charts and day details when account scope changes", a
   await settled(); await settled();
   const scope = expect.objectContaining({ accountIds: [12, 34], startDate: "2026-10-01", endDate: "2026-10-25" });
   expect(api.getSpendingSummary).toHaveBeenLastCalledWith(scope);
-  expect(api.getCumulativeSpending).toHaveBeenLastCalledWith(scope);
+  expect(api.getCumulativeSpending).toHaveBeenLastCalledWith(expect.objectContaining({
+    accountIds: [12, 34], startDate: "2026-10-01", endDate: "2026-10-25",
+    compareStartDate: "2026-09-01", compareEndDate: "2026-09-30",
+  }));
   expect(api.getCategoryComparisonPeriod).toHaveBeenLastCalledWith("monthly", "calendar", scope);
   expect(api.getSpendingTimeline).toHaveBeenLastCalledWith(scope);
   expect(api.getSpendingDay).toHaveBeenLastCalledWith("2026-10-11", [12, 34]);

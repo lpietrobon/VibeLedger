@@ -9,7 +9,7 @@ import { CategoryComparison } from "@/components/finance/CategoryComparison";
 import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
 import { PriorPeriodsControl } from "@/components/finance/PriorPeriodsControl";
 import { usePriorPeriodCount } from "@/lib/usePriorPeriodCount";
-import { comparisonAlignment, comparisonPeriods, initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
+import { comparisonAlignment, chartComparisonPeriods, initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
 import type { DateWindowParams } from "@/lib/api/client";
 import {
@@ -51,19 +51,19 @@ export default function SpendingPage() {
   const granularity = selectedRange.preset === "current-year" || selectedRange.preset === "last-365" ? "yearly" : "monthly";
   const params: DateWindowParams = { ...rangeQuery(selectedRange), accountIds };
   const dataKey = [accountIds, params.startDate, params.endDate, params.compareStartDate, params.compareEndDate];
-  const historic = valid ? comparisonPeriods(selectedRange, priorCount) : [];
+  const historic = valid ? chartComparisonPeriods(selectedRange, priorCount) : [];
   const summary = useQuery({
     queryKey: ["spending-summary", granularity, ...dataKey],
     queryFn: () => getSpendingSummary({ granularity, ...params }),
     enabled: valid,
   });
   const cumulative = useQuery({
-    queryKey: ["cumulative", granularity, priorCount, ...dataKey],
+    queryKey: ["cumulative", granularity, selectedRange.preset, priorCount, ...dataKey],
     queryFn: () => getCumulativeSpending({
       granularity, ...params, comparisonPeriods: historic, alignment: comparisonAlignment(selectedRange.preset),
       // 0 historical lines does NOT remove the always-on KPI comparison.
-      compareStartDate: priorCount ? params.compareStartDate : undefined,
-      compareEndDate: priorCount ? params.compareEndDate : undefined,
+      compareStartDate: historic[0]?.startDate,
+      compareEndDate: historic[0]?.endDate,
     }),
     enabled: valid,
   });
@@ -135,6 +135,9 @@ export default function SpendingPage() {
       {summary.isError ? <p role="alert" className="mt-2 text-sm text-red-600">{summary.error.message}</p> : null}
       <Section title="Cumulative spending" className="mt-3"
         action={<PriorPeriodsControl value={priorCount} onChange={setPriorCount} />}>
+        {selectedRange.preset === "current-month" ? <p className="mb-2 text-xs text-muted-foreground">
+          Full previous months · current month through {selectedRange.endDate}
+        </p> : null}
         <div className="h-52 sm:h-64">
           {cumulative.data && timeline.data ? <Suspense fallback={<div className="h-full animate-pulse rounded bg-secondary" />}>
             <CumulativeChart data={cumulative.data} days={timeline.data.days} spikes={timeline.data.spikes}

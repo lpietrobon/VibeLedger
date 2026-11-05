@@ -25,7 +25,7 @@ export default function CumulativeChart({ data, days = [], selectedDate, priorCo
       <LineChart data={data}
         onClick={(event) => {
           const point = pointByDay.get(Number(event?.activeLabel));
-          if (point?.date) onSelect?.(point.date);
+          if (point?.date && point.current !== null) onSelect?.(point.date);
         }}
         margin={{ left: -12, right: 8, top: 12, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.08} vertical={false} />
@@ -35,12 +35,16 @@ export default function CumulativeChart({ data, days = [], selectedDate, priorCo
         <Tooltip content={({active, payload}) => {
           if (!active || !payload?.length) return null;
           const point = payload[0]?.payload as CumulativeSpendingPoint | undefined;
-          if (!point?.date) return null;
+          if (!point) return null;
           return <div className="rounded-md border border-border bg-card p-2 text-xs shadow-md">
-            <div className="font-semibold">{point.date}</div>
-            <div>Cumulative: {formatCurrency(point.current ?? 0)}</div>
-            <div>That day: {formatCurrency(daily.get(point.date) ?? 0)}</div>
-            <div className="mt-1 text-muted-foreground">Tap to inspect</div>
+            <div className="font-semibold">{point.date ?? `Day ${point.day}`}</div>
+            {point.current !== null ? <div>Current: {formatCurrency(point.current)}</div> : null}
+            {priorLines.slice(0, priorCount).map((line) => point[line.key] !== null
+              ? <div key={line.key}>{line.label}: {formatCurrency(point[line.key]!)}</div> : null)}
+            {point.date && point.current !== null ? <>
+              <div>That day: {formatCurrency(daily.get(point.date) ?? 0)}</div>
+              <div className="mt-1 text-muted-foreground">Tap to inspect</div>
+            </> : null}
           </div>;
         }} />
         {priorLines.slice(0, priorCount).map((line) =>
@@ -49,7 +53,7 @@ export default function CumulativeChart({ data, days = [], selectedDate, priorCo
             dot={false} isAnimationActive={false} connectNulls={false} />
         )}
         <Line type="linear" dataKey="current" name="Current" stroke="#2563eb"
-          strokeWidth={2.8} dot={false} activeDot={{ r: 5 }}
+          strokeWidth={2.8} dot={data.filter((p) => p.current !== null).length === 1 ? { r: 3 } : false} activeDot={{ r: 5 }}
           isAnimationActive={false} connectNulls={false} />
         {data.filter((p) => p.date === selectedDate && p.current !== null).map((p) =>
           <ReferenceDot key={"selected-" + p.date} x={p.day} y={p.current!} r={6}

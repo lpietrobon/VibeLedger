@@ -263,7 +263,7 @@ export async function getCumulativeSpending(params?: {
   granularity: "monthly" | "yearly";
 } & DateWindowParams & { reportingDate?: string; comparisonPeriods?: Array<{ startDate: string; endDate: string }>; alignment?: "ordinal" | "calendar-month" | "calendar-year" }): Promise<CumulativeSpendingPoint[]> {
   const rows = await jsonFetch<
-    Array<{ x: number; date?: string; current: number | null; previous1: number | null; previous2: number | null; previous3: number | null }>
+    Array<{ x: number; date?: string | null; current: number | null; previous1: number | null; previous2: number | null; previous3: number | null }>
   >("/analytics/cumulative-spend", {
     granularity: params?.granularity ?? "monthly",
     reporting_date: params?.reportingDate,

@@ -152,3 +152,37 @@ def test_calendar_month_comparison_stops_when_prior_month_has_no_more_dates():
     assert rows[28]["previous1"] == 400.0
     assert rows[29]["previous1"] is None
     assert rows[30]["previous1"] is None
+
+
+def test_month_pace_shows_full_prior_month_but_stops_current_at_selected_end():
+    _seed()
+    with TestClient(app) as client:
+        response = client.get("/analytics/cumulative-spend", headers=AUTH_HEADERS, params={
+            "start_date": "2020-03-01", "end_date": "2020-03-05",
+            "compare_start_date": "2020-02-01", "compare_end_date": "2020-02-29",
+            "alignment": "calendar-month",
+        })
+    assert response.status_code == 200, response.text
+    rows = response.json()
+    assert len(rows) == 31
+    assert rows[4]["current"] == 300.0
+    assert all(row["current"] is None and row["date"] is None for row in rows[5:])
+    assert rows[28]["previous1"] == 400.0
+    assert rows[29]["previous1"] is None
+    assert rows[30]["previous1"] is None
+
+
+def test_short_current_month_preserves_day_31_of_prior_month():
+    _seed()
+    with TestClient(app) as client:
+        response = client.get("/analytics/cumulative-spend", headers=AUTH_HEADERS, params={
+            "start_date": "2020-04-01", "end_date": "2020-04-03",
+            "compare_start_date": "2020-03-01", "compare_end_date": "2020-03-31",
+            "alignment": "calendar-month",
+        })
+    assert response.status_code == 200, response.text
+    rows = response.json()
+    assert len(rows) == 31
+    assert rows[30]["previous1"] == 500.0
+    assert rows[30]["current"] is None
+    assert rows[30]["date"] is None

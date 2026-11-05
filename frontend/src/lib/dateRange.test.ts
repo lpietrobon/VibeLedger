@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { comparisonBounds, comparisonPeriods, initialDateSelection, presetBounds, rangeQuery, trendGranularity, validateRange } from "./dateRange";
+import { comparisonBounds, comparisonPeriods, chartComparisonPeriods, initialDateSelection, presetBounds, rangeQuery, trendGranularity, validateRange } from "./dateRange";
 
 describe("date-only range contract (TIME-02)", () => {
   it("computes inclusive rolling and calendar presets independently of UTC offsets", () => {
@@ -62,4 +62,17 @@ describe("unified multi-period chart contract", () => {
     expect(trendGranularity({startDate:"2026-10-01",endDate:"2026-10-25"})).toBe("daily");
     expect(trendGranularity({startDate:"2026-09-01",endDate:"2026-10-25"})).toBe("monthly");
   });
+});
+
+it("shows full historical months on the pace chart without changing MTD KPIs", () => {
+  const selection = initialDateSelection("current-month", "2026-11-04");
+  expect(chartComparisonPeriods(selection, 3)).toEqual([
+    { startDate: "2026-10-01", endDate: "2026-10-31" },
+    { startDate: "2026-09-01", endDate: "2026-09-30" },
+    { startDate: "2026-08-01", endDate: "2026-08-31" },
+  ]);
+  expect(rangeQuery(selection)?.compareEndDate).toBe("2026-10-04");
+  expect(chartComparisonPeriods(initialDateSelection("current-month", "2024-03-02"), 1)[0].endDate).toBe("2024-02-29");
+  const rolling = initialDateSelection("last-30", "2026-11-04");
+  expect(chartComparisonPeriods(rolling, 2)).toEqual(comparisonPeriods(rolling, 2));
 });

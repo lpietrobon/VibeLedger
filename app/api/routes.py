@@ -1826,9 +1826,12 @@ def analytics_cumulative_spend(
             prefixes.append(prefix)
 
         result = []
-        for i in range((end - start).days + 1):
+        length = (end - start).days + 1
+        if alignment == "calendar-month":
+            length = max(calendar.monthrange(begin.year, begin.month)[1] for begin, _ in windows)
+        for i in range(length):
             current_day = start + timedelta(days=i)
-            point = {"x": i + 1, "date": current_day.isoformat()}
+            point = {"x": i + 1, "date": current_day.isoformat() if current_day <= end else None}
             for j, name in enumerate(("current", "previous1", "previous2", "previous3")):
                 if j >= len(windows):
                     point[name] = None
@@ -1841,11 +1844,11 @@ def analytics_cumulative_spend(
                     day = date(begin.year, current_day.month, matched_day)
                 elif j and alignment == "calendar-month":
                     # A prior February has no 29th/30th/31st; don't duplicate Feb 28.
-                    if current_day.day > calendar.monthrange(begin.year, begin.month)[1]:
+                    if start.day + i > calendar.monthrange(begin.year, begin.month)[1]:
                         point[name] = None
                         continue
-                    day = date(begin.year, begin.month, current_day.day)
-                if day < begin or day > finish or (j > 0 and not day_maps[j]):
+                    day = date(begin.year, begin.month, start.day + i)
+                if day < begin or day > finish or not day_maps[j]:
                     point[name] = None
                 else:
                     point[name] = prefixes[j][day.isoformat()]
