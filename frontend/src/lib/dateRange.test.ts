@@ -76,3 +76,17 @@ it("shows full historical months on the pace chart without changing MTD KPIs", (
   const rolling = initialDateSelection("last-30", "2026-11-04");
   expect(chartComparisonPeriods(rolling, 2)).toEqual(comparisonPeriods(rolling, 2));
 });
+
+
+it("shows full historical years without changing YTD KPIs or rolling years", () => {
+  const selection = initialDateSelection("current-year", "2024-02-29");
+  expect(chartComparisonPeriods(selection, 3)).toEqual([
+    { startDate: "2023-01-01", endDate: "2023-12-31" },
+    { startDate: "2022-01-01", endDate: "2022-12-31" },
+    { startDate: "2021-01-01", endDate: "2021-12-31" },
+  ]);
+  expect(rangeQuery(selection)?.compareEndDate).toBe("2023-02-28");
+  expect(chartComparisonPeriods(selection, 0)).toEqual([]);
+  const rolling = initialDateSelection("last-365", "2026-11-04");
+  expect(chartComparisonPeriods(rolling, 2)).toEqual(comparisonPeriods(rolling, 2));
+});

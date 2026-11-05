@@ -135,3 +135,24 @@ it("shows unequal-duration comparison qualifications instead of silently compari
   await settled(); await settled();
   expect(container.textContent).toContain(warning);
 });
+
+it("requests full prior years for Year while retaining YTD summary bounds", async () => {
+  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+  act(() => root.render(<QueryClientProvider client={client}><SpendingPage/></QueryClientProvider>));
+  await settled(); await settled();
+  await act(async () => (Array.from(container.querySelectorAll("button")).find(x =>
+    x.textContent === "Year") as HTMLButtonElement).click());
+  await settled(); await settled();
+  expect(api.getCumulativeSpending).toHaveBeenLastCalledWith(expect.objectContaining({
+    startDate: "2026-01-01", endDate: "2026-10-25", alignment: "calendar-year",
+    compareStartDate: "2025-01-01", compareEndDate: "2025-12-31",
+    comparisonPeriods: [
+      {startDate: "2025-01-01", endDate: "2025-12-31"},
+      {startDate: "2024-01-01", endDate: "2024-12-31"},
+    ],
+  }));
+  expect(api.getSpendingSummary).toHaveBeenLastCalledWith(expect.objectContaining({
+    compareStartDate: "2025-01-01", compareEndDate: "2025-10-25",
+  }));
+  expect(container.textContent).toContain("Full previous years");
+});

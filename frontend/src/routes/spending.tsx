@@ -138,6 +138,9 @@ export default function SpendingPage() {
         {selectedRange.preset === "current-month" ? <p className="mb-2 text-xs text-muted-foreground">
           Full previous months · current month through {selectedRange.endDate}
         </p> : null}
+        {selectedRange.preset === "current-year" ? <p className="mb-2 text-xs text-muted-foreground">
+          Full previous years · current year through {selectedRange.endDate}
+        </p> : null}
         <div className="h-52 sm:h-64">
           {cumulative.data && timeline.data ? <Suspense fallback={<div className="h-full animate-pulse rounded bg-secondary" />}>
             <CumulativeChart data={cumulative.data} days={timeline.data.days} spikes={timeline.data.spikes}

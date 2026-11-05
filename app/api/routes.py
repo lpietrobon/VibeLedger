@@ -1829,6 +1829,12 @@ def analytics_cumulative_spend(
         length = (end - start).days + 1
         if alignment == "calendar-month":
             length = max(calendar.monthrange(begin.year, begin.month)[1] for begin, _ in windows)
+        elif alignment == "calendar-year":
+            # Extend to the latest comparison month/day on the current year's axis.
+            # Mapping dates (not elapsed-day counts) avoids leap-year drift.
+            length = max(length, max((date(start.year, finish.month, min(
+                finish.day, calendar.monthrange(start.year, finish.month)[1]
+            )) - start).days + 1 for _, finish in windows))
         for i in range(length):
             current_day = start + timedelta(days=i)
             point = {"x": i + 1, "date": current_day.isoformat() if current_day <= end else None}

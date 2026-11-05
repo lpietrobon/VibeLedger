@@ -186,3 +186,34 @@ def test_short_current_month_preserves_day_31_of_prior_month():
     assert rows[30]["previous1"] == 500.0
     assert rows[30]["current"] is None
     assert rows[30]["date"] is None
+
+
+def test_year_pace_extends_to_december_in_leap_and_non_leap_years():
+    _seed()
+    with SessionLocal() as db:
+        account = db.query(Account).first()
+        for year in (2019, 2020):
+            for month, day, amount in ((2, 28, 10), (3, 1, 20), (12, 31, 70)):
+                key = f"annual-{year}-{month}-{day}"
+                db.add(Transaction(
+                    plaid_transaction_id=key, account_id=account.id, item_id=account.item_id,
+                    date=date(year, month, day), amount=amount, name=key,
+                    plaid_category_primary="FOOD_AND_DRINK", pending=False,
+                ))
+        db.commit()
+    with TestClient(app) as client:
+        for year, length, total in ((2020, 366, 100), (2021, 365, 1000)):
+            response = client.get("/analytics/cumulative-spend", headers=AUTH_HEADERS, params={
+                "start_date": f"{year}-01-01", "end_date": f"{year}-03-05",
+                "compare_start_date": f"{year-1}-01-01", "compare_end_date": f"{year-1}-12-31",
+                "alignment": "calendar-year",
+            })
+            assert response.status_code == 200, response.text
+            rows = response.json()
+            assert len(rows) == length
+            assert rows[-1]["previous1"] == total
+            assert rows[-2]["previous1"] == total - 70
+            elapsed = (date(year, 3, 5) - date(year, 1, 1)).days + 1
+            assert all(r["current"] is None and r["date"] is None for r in rows[elapsed:])
+            march1 = (date(year, 3, 1) - date(year, 1, 1)).days
+            assert rows[march1]["previous1"] == (30 if year == 2020 else 430)

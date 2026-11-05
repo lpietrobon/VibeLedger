@@ -143,9 +143,10 @@ export function comparisonAlignment(preset: DatePreset): ComparisonAlignment {
     : preset === "current-year" ? "calendar-year" : "ordinal";
 }
 
-/** Pace charts show completed months; KPI comparisons remain month-to-date. */
+/** Pace charts show completed calendar periods; KPI comparisons remain to-date. */
 export function chartComparisonPeriods(selection: DateRangeSelection, count: number): DateRange[] {
   return comparisonPeriods(selection, count).map((period) => {
+    if (selection.preset === "current-year") return { ...period, endDate: period.startDate.slice(0, 4) + "-12-31" };
     if (selection.preset !== "current-month") return period;
     const start = parseDay(period.startDate);
     return { ...period, endDate: fmtDay(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0))) };
