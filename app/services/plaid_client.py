@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import date
 import hashlib
 from typing import Any
@@ -132,6 +133,44 @@ class PlaidClient:
                 }
             )
         return out
+
+    def get_investment_readiness(self, access_token: str) -> dict[str, Any]:
+        """Read existing Item metadata without initializing Investments.
+
+        This is a coverage-spike diagnostic, not an entitlement check or a
+        successful holdings/activity sync. Product availability, billing and
+        consent are separate signals; absent metadata means unknown. The
+        allowlisted summary deliberately omits account identity and balances.
+        No Link, refresh, investment endpoint, or database write is performed.
+        Provider failures propagate rather than producing partial success.
+        """
+        item: Any = {}
+        if not self._mock:
+            from plaid.model.item_get_request import ItemGetRequest
+
+            response = self._client.item_get(ItemGetRequest(access_token=access_token))
+            item = response["item"]
+
+        accounts = self.get_accounts(access_token)
+        counts = Counter(
+            (account.get("type") or "unknown", account.get("subtype") or "unknown")
+            for account in accounts
+        )
+        product_flags = {}
+        for field in ("available_products", "billed_products", "consented_products"):
+            products = item.get(field)
+            product_flags[field] = (
+                None if products is None else any(str(product) == "investments" for product in products)
+            )
+        return {
+            "source": "mock" if self._mock else "provider_metadata",
+            "coverage_verified": False,
+            "investment_products": product_flags,
+            "account_types": [
+                {"type": account_type, "subtype": subtype, "count": count}
+                for (account_type, subtype), count in sorted(counts.items())
+            ],
+        }
 
     def sync_transactions(self, access_token: str, cursor: str | None = None) -> dict:
         if self._mock:
