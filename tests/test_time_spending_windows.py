@@ -75,3 +75,42 @@ def test_invalid_partial_or_reversed_windows_rejected():
         for params in cases:
             response = client.get("/analytics/spending-summary", headers=AUTH_HEADERS, params=params)
             assert response.status_code == 422, (params, response.text)
+
+
+
+def test_current_pace_stops_at_latest_scoped_posted_data_for_month_and_year():
+    from datetime import date
+    from app.db.session import SessionLocal
+    from app.models.models import Account, Transaction
+    from tests.test_mobile_analytics import _seed_two_accounts
+
+    account_id = _seed()
+    _seed_two_accounts()  # March 15 must not extend the selected account's line.
+    with SessionLocal() as db:
+        account = db.get(Account, account_id)
+        db.add(Transaction(
+            plaid_transaction_id="pending-later", account_id=account_id,
+            item_id=account.item_id, date=date(2020, 3, 20), amount=100,
+            name="Pending", pending=True,
+        ))
+        db.commit()
+    with TestClient(app) as client:
+        for start, alignment in (("2020-03-01", "calendar-month"),
+                                 ("2020-01-01", "calendar-year")):
+            response = client.get("/analytics/cumulative-spend", headers=AUTH_HEADERS, params={
+                "start_date": start, "end_date": "2020-03-25",
+                "compare_start_date": "2020-02-01" if alignment == "calendar-month" else "2019-01-01",
+                "compare_end_date": "2020-02-29" if alignment == "calendar-month" else "2019-12-31",
+                "alignment": alignment, "account_ids": [account_id],
+            })
+            assert response.status_code == 200, response.text
+            rows = response.json()
+            observed = [r for r in rows if r["current"] is not None]
+            assert observed[-1]["date"] == "2020-03-10"
+            assert observed[-1]["current"] == (500 if alignment == "calendar-month" else 900)
+            assert all(r["current"] is None for r in rows if r["date"] and r["date"] > "2020-03-10")
+            # Gaps inside observed data still carry the cumulative total forward.
+            assert next(r for r in rows if r["date"] == "2020-03-09")["current"] == (
+                300 if alignment == "calendar-month" else 700)
+            if alignment == "calendar-month":
+                assert rows[28]["previous1"] == 400

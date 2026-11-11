@@ -136,10 +136,10 @@ export default function SpendingPage() {
       <Section title="Cumulative spending" className="mt-3"
         action={<PriorPeriodsControl value={priorCount} onChange={setPriorCount} />}>
         {selectedRange.preset === "current-month" ? <p className="mb-2 text-xs text-muted-foreground">
-          Full previous months · current month through {selectedRange.endDate}
+          Full previous months · current month through latest posted data
         </p> : null}
         {selectedRange.preset === "current-year" ? <p className="mb-2 text-xs text-muted-foreground">
-          Full previous years · current year through {selectedRange.endDate}
+          Full previous years · current year through latest posted data
         </p> : null}
         <div className="h-52 sm:h-64">
           {cumulative.data && timeline.data ? <Suspense fallback={<div className="h-full animate-pulse rounded bg-secondary" />}>

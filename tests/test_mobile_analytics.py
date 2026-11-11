@@ -221,7 +221,8 @@ def test_account_scope_with_explicit_dates_timeline_and_reporting():
         both = get('/analytics/spending-summary', {**dates, 'account_ids': [account_id, other_id]})
         daily = get('/analytics/cashflow-trend', {**dates, 'granularity': 'daily'})
         yearly = get('/analytics/cumulative-spend', {'account_ids': [account_id], 'granularity': 'yearly', 'reporting_date': '2020-03-31'})
-    assert summary['total'] == overview['month_spend'] == cumulative[-1]['current'] == 500
+    assert summary['total'] == overview['month_spend'] == cumulative[9]['current'] == 500
+    assert all(row['current'] is None for row in cumulative[10:])
     assert summary['previous_total'] == 400
     assert summary['reporting']['current_period']['recorded_row_count'] == 3
     assert sum(row['amount'] for row in timeline['days']) == 500

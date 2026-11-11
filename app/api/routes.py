@@ -1814,6 +1814,9 @@ def analytics_cumulative_spend(
             return {key: round(float(amount or 0), 2) for key, amount in rows}
 
         day_maps = [daily_values(begin, finish) for begin, finish in windows]
+        # Keep complete historical windows, but do not imply current-period
+        # observations after the latest posted activity in the selected accounts.
+        current_data_end = max(day_maps[0], default="")
         prefixes = []
         for (begin, finish), amounts in zip(windows, day_maps):
             running = 0.0
@@ -1854,7 +1857,8 @@ def analytics_cumulative_spend(
                         point[name] = None
                         continue
                     day = date(begin.year, begin.month, start.day + i)
-                if day < begin or day > finish or not day_maps[j]:
+                if (day < begin or day > finish or not day_maps[j]
+                        or (j == 0 and day.isoformat() > current_data_end)):
                     point[name] = None
                 else:
                     point[name] = prefixes[j][day.isoformat()]
