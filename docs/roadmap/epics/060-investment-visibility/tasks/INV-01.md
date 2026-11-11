@@ -2,10 +2,10 @@
 id: INV-01
 epic: 060-investment-visibility
 title: Validate Schwab and Fidelity investment coverage
-status: todo
+status: in-progress
 dependencies: []
 superseded_by: null
-assigned_agent: null
+assigned_agent: codex
 created: 2026-11-10
 ---
 
@@ -23,3 +23,7 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 ## Execution Log
 
 - 2026-11-10: Task specified for the staged investment-visibility epic. Not started; no implementation, provider validation, failing-test baseline or independent verification claimed.
+
+- 2026-11-10: Started on `feat/investment-visibility`, based on roadmap commit `86238d4` and canonical main `ec2a3ac`, in an isolated worktree. Building a read-only readiness probe before any investment activation or ingestion.
+- 2026-11-10: Implemented diagnostic in source commit `2b1d2c2`. [Coverage report and remaining gates](../artifacts/INV-01-coverage.md) records the integration audit, Link requirements, coverage matrix and limitations. Red baseline: 7 expected missing-method failures. Targeted green: `python -m pytest tests/test_investment_readiness.py tests/test_plaid_client.py -q`, 12 passed. No production provider call or independent-verification claim; task remains in progress.
+- 2026-11-10: Full backend regression on source `2b1d2c2`: `python -m pytest -q` — 345 passed, 2 warnings (Starlette httpx deprecation; SQLAlchemy identity-map warning). Roadmap scan: 6 epics, 79 tasks, 0 issues. No deployment.
