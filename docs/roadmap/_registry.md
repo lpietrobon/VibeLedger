@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-10-25 (metadata regeneration)_
+_Last scan: 2026-11-11T05:13:09+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -14,6 +14,8 @@ dependencies are done; a blank assignment means unassigned.
 | [030-inspectable-aggregates](epics/030-inspectable-aggregates/_epic.md) | Inspectable aggregates | planned | 1 |  |
 | [040-timeline-spike-attribution](epics/040-timeline-spike-attribution/_epic.md) | Timeline spike attribution and direct investigation | planned | 1 |  |
 | [050-shared-date-range-semantics](epics/050-shared-date-range-semantics/_epic.md) | Shared date selection and deterministic comparison semantics | planned | 1 |  |
+| [060-investment-visibility](epics/060-investment-visibility/_epic.md) | Investment account visibility and trustworthy performance | planned | 1 |  |
+
 ## Tasks
 
 | id | epic | status | deps | assigned | title |
@@ -78,3 +80,22 @@ dependencies are done; a blank assignment means unassigned.
 | [TIME-04](epics/050-shared-date-range-semantics/tasks/TIME-04.md) | 050-shared-date-range-semantics | todo | TIME-01, TIME-02 |  | Pin cross-screen period-selection and monetary-parity behavior with failing integration tests |
 | [TIME-05](epics/050-shared-date-range-semantics/tasks/TIME-05.md) | 050-shared-date-range-semantics | todo | TIME-03, TIME-04 |  | Integrate unified range selection across all applicable views |
 | [TIME-06](epics/050-shared-date-range-semantics/tasks/TIME-06.md) | 050-shared-date-range-semantics | todo | TIME-05 |  | Independently verify date-selection consistency and source evidence |
+| [INV-01](epics/060-investment-visibility/tasks/INV-01.md) | 060-investment-visibility | todo |  |  | Validate Schwab and Fidelity investment coverage |
+| [INV-02](epics/060-investment-visibility/tasks/INV-02.md) | 060-investment-visibility | todo | INV-01 |  | Freeze investment domain and accounting boundaries |
+| [INV-03](epics/060-investment-visibility/tasks/INV-03.md) | 060-investment-visibility | todo | INV-02 |  | Pin ingestion and spending-isolation regression contracts |
+| [INV-04](epics/060-investment-visibility/tasks/INV-04.md) | 060-investment-visibility | todo | INV-03 |  | Implement isolated investment ingestion and valuation history |
+| [INV-05](epics/060-investment-visibility/tasks/INV-05.md) | 060-investment-visibility | todo | INV-04 |  | Independently verify ingestion and spending isolation |
+| [INV-06](epics/060-investment-visibility/tasks/INV-06.md) | 060-investment-visibility | todo | INV-05, TIME-01 |  | Design Investments visibility and Overview navigation proposal |
+| [INV-07](epics/060-investment-visibility/tasks/INV-07.md) | 060-investment-visibility | todo | INV-06 |  | Pin balances and navigation interaction contracts |
+| [INV-08](epics/060-investment-visibility/tasks/INV-08.md) | 060-investment-visibility | todo | INV-07, TIME-03 |  | Build the Investments balances and holdings experience |
+| [INV-09](epics/060-investment-visibility/tasks/INV-09.md) | 060-investment-visibility | todo | INV-08 |  | Independently verify the initial visibility milestone |
+| [INV-10](epics/060-investment-visibility/tasks/INV-10.md) | 060-investment-visibility | todo | INV-09 |  | Freeze contribution and investment-gain contracts with failing tests |
+| [INV-11](epics/060-investment-visibility/tasks/INV-11.md) | 060-investment-visibility | todo | INV-10 |  | Implement reconciled flows and contribution-versus-growth charts |
+| [INV-12](epics/060-investment-visibility/tasks/INV-12.md) | 060-investment-visibility | todo | INV-11 |  | Independently verify flows and dollar performance |
+| [INV-13](epics/060-investment-visibility/tasks/INV-13.md) | 060-investment-visibility | todo | INV-09 |  | Pin pooled exposure and editable classification contracts |
+| [INV-14](epics/060-investment-visibility/tasks/INV-14.md) | 060-investment-visibility | todo | INV-13 |  | Implement editable pooled allocation |
+| [INV-15](epics/060-investment-visibility/tasks/INV-15.md) | 060-investment-visibility | todo | INV-14 |  | Independently verify pooled allocation |
+| [INV-16](epics/060-investment-visibility/tasks/INV-16.md) | 060-investment-visibility | todo | INV-12 |  | Freeze return methodology and numerical oracles |
+| [INV-17](epics/060-investment-visibility/tasks/INV-17.md) | 060-investment-visibility | todo | INV-16 |  | Implement qualified money-weighted and time-weighted returns |
+| [INV-18](epics/060-investment-visibility/tasks/INV-18.md) | 060-investment-visibility | todo | INV-17 |  | Independently verify returns and performance presentation |
+| [INV-19](epics/060-investment-visibility/tasks/INV-19.md) | 060-investment-visibility | todo | INV-15, INV-18 |  | Prepare integrated investment visibility handoff |
