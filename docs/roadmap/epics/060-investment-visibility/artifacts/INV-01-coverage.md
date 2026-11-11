@@ -13,7 +13,7 @@ account identifiers, names, masks or balances appear in its return value.
 
 This is an internal adapter method, not a public route or operator CLI. Invoke
 only through server-side code with the existing protected token-loading mechanism;
-do not pass credentials on command lines. No production invocation has been made.
+do not pass credentials on command lines. The first production metadata-only invocation is recorded below.
 Mock output explicitly identifies itself and cannot establish real coverage.
 Provider exceptions propagate; callers must not expose raw exceptions externally.
 
@@ -102,3 +102,33 @@ unstarted until its acceptance criteria are satisfied.
 - These are implementer-run checks, not independent verification or a release gate.
 
 Full backend regression on source `2b1d2c2`: `python -m pytest -q` — 345 passed, 2 warnings. Roadmap scanner: 0 issues.
+
+## Production metadata checkpoint — 2026-11-10
+
+Source revision: `0163478`. Read-only inventory used the running service's
+configured SQLite database (`mode=ro`, without application startup/migrations).
+The host configuration uses Production, mock disabled, and Link products limited
+to Transactions. No investment accounts are stored locally.
+
+Two existing connections lacked local institution metadata. Authorized server-side
+calls to `/item/get` and `/accounts/get` succeeded; `/institutions/get_by_id`
+resolved their provider identities without persisting any metadata. One is Schwab;
+the other is not Schwab or Fidelity. No Fidelity connection was found.
+
+| Target | Observed linked account coverage | Investments metadata | Conclusion |
+|---|---|---|---|
+| Schwab | Checking only; no investment accounts returned | Available: yes; billed: no; consented: no | Existing Item is a candidate for additional consent/account selection; brokerage/IRA/Roth/workplace coverage remains unverified |
+| Fidelity | No existing Item found | Not tested | A new investment-specific Link connection and entitlement checks are needed; absence is not evidence of unsupported coverage |
+
+No holdings/activity endpoints, Link creation/update, refresh, product activation,
+ledger writes, service restarts, or deployment occurred. Product availability does
+not prove dashboard entitlement, contract pricing, or account-level investment
+coverage. The original account-class matrix therefore remains unverified.
+
+Next operational gate: verify dashboard Investments/OAuth entitlement and billing,
+then use an isolated investment Link path (including supported existing-Item
+consent/account selection for Schwab). The current Transactions-only Link flow is
+not a substitute. Actual account selection requires the account owner's provider
+consent. Do not remove the existing Schwab connection or globally enable
+Investments for ordinary bank linking. INV-01 remains in progress; this metadata
+checkpoint is complete but the full provider-data acceptance criteria are not.
