@@ -29,3 +29,5 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 - 2026-11-10: Full backend regression on source `2b1d2c2`: `python -m pytest -q` — 345 passed, 2 warnings (Starlette httpx deprecation; SQLAlchemy identity-map warning). Roadmap scan: 6 epics, 79 tasks, 0 issues. No deployment.
 
 - 2026-11-10: Ran authorized Production metadata checks from source `0163478` without writes or product activation. Resolved an existing Schwab Item exposing checking only: Investments available=true, billed=false, consented=false. No Fidelity Item found. Recorded redacted evidence and next consent/entitlement gates in [coverage report](../artifacts/INV-01-coverage.md). Holdings/activity and account-class coverage remain unverified; INV-01 stays in progress.
+
+- 2026-11-11: Prepared internal new-connection Investments Link adapter and fake-SDK regression tests; no public route, activation or ingestion. [Preparation and owner-input handoff](../artifacts/INV-01-link-preparation.md). Live entitlement/billing and owner consent remain unresolved; downstream task gates unchanged.

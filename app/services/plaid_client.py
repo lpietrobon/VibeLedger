@@ -45,7 +45,23 @@ class PlaidClient:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Plaid SDK client: {e}") from e
 
+    def create_investment_link_token(self, user_id: str) -> dict:
+        """Prepare NEW investment connections only; not wired to public routes.
+
+        Calling this against production requires entitlement/billing clearance.
+        Existing Items must use a separately verified update-mode flow instead.
+        No token exchange, account ingestion, or bank sync occurs here.
+        """
+        if self._mock:
+            return {"link_token": f"mock-investment-link-{user_id}"}
+        return self._create_link_token(user_id, ["investments"])
+
     def create_link_token(self, user_id: str) -> dict:
+        return self._create_link_token(
+            user_id, [p.strip() for p in settings.plaid_products.split(",") if p.strip()]
+        )
+
+    def _create_link_token(self, user_id: str, product_names: list[str]) -> dict:
         if self._mock:
             return {"link_token": f"mock-link-token-{user_id}"}
 
@@ -55,7 +71,7 @@ class PlaidClient:
         from plaid.model.link_token_transactions import LinkTokenTransactions
         from plaid.model.products import Products
 
-        products = [Products(p.strip()) for p in settings.plaid_products.split(",") if p.strip()]
+        products = [Products(p) for p in product_names]
         country_codes = [CountryCode(c.strip()) for c in settings.plaid_country_codes.split(",") if c.strip()]
 
         req_kwargs: dict[str, Any] = {
