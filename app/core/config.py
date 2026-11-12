@@ -17,6 +17,7 @@ class Settings(BaseModel):
     plaid_products: str = os.getenv("PLAID_PRODUCTS", "transactions")
     plaid_country_codes: str = os.getenv("PLAID_COUNTRY_CODES", "US")
     plaid_redirect_uri: str | None = os.getenv("PLAID_REDIRECT_URI")
+    investment_link_enabled: bool = os.getenv("INVESTMENT_LINK_ENABLED", "false").lower() == "true"
     plaid_use_mock: bool = os.getenv("PLAID_USE_MOCK", "false").lower() == "true"
 
     app_base_url: str = os.getenv("APP_BASE_URL", "http://localhost:8000")

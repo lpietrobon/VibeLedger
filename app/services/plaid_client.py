@@ -56,6 +56,29 @@ class PlaidClient:
             return {"link_token": f"mock-investment-link-{user_id}"}
         return self._create_link_token(user_id, ["investments"])
 
+    def create_investment_update_token(self, user_id: str, access_token: str) -> dict:
+        """Collect additional consent on an existing Item, without initializing data."""
+        if self._mock:
+            return {"link_token": f"mock-investment-update-{user_id}"}
+        from plaid.model.country_code import CountryCode
+        from plaid.model.link_token_create_request import LinkTokenCreateRequest
+        from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+        from plaid.model.link_token_create_request_update import LinkTokenCreateRequestUpdate
+        from plaid.model.products import Products
+
+        kwargs = dict(
+            user=LinkTokenCreateRequestUser(client_user_id=user_id),
+            client_name="VibeLedger", language="en",
+            country_codes=[CountryCode(c.strip()) for c in settings.plaid_country_codes.split(",") if c.strip()],
+            access_token=access_token,
+            additional_consented_products=[Products("investments")],
+            update=LinkTokenCreateRequestUpdate(account_selection_enabled=True),
+        )
+        if settings.plaid_redirect_uri:
+            kwargs["redirect_uri"] = settings.plaid_redirect_uri
+        response = self._client.link_token_create(LinkTokenCreateRequest(**kwargs))
+        return {"link_token": response["link_token"]}
+
     def create_link_token(self, user_id: str) -> dict:
         return self._create_link_token(
             user_id, [p.strip() for p in settings.plaid_products.split(",") if p.strip()]

@@ -112,6 +112,9 @@ def _purge_orphan_transaction_rows(engine: Engine) -> None:
 
 
 def apply_patches(engine: Engine) -> None:
+    if not _has_column(engine, "connect_sessions", "purpose"):
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE connect_sessions ADD COLUMN purpose VARCHAR(32) NOT NULL DEFAULT 'bank'"))
     if not _has_column(engine, "transfer_pairs", "decision_evidence"):
         with engine.begin() as conn:
             conn.execute(text(

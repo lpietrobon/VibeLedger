@@ -258,6 +258,8 @@ class SyncRun(Base):
 class ConnectSession(Base):
     __tablename__ = "connect_sessions"
 
+    purpose: Mapped[str] = mapped_column(String(32), default="bank", server_default="bank")
+
     id: Mapped[int] = mapped_column(primary_key=True)
     session_token: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     user_id: Mapped[str] = mapped_column(String(128), default="default-user")

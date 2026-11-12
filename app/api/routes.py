@@ -220,12 +220,41 @@ def create_connect_session(payload: CreateConnectSessionRequest, db: Session = D
     }
 
 
+@router.post("/items/{item_id}/investments/connect")
+def create_investment_update_session(item_id: int, db: Session = Depends(get_db)):
+    if not settings.investment_link_enabled:
+        raise HTTPException(status_code=409, detail="Investment linking is not released yet")
+    item = db.get(Item, item_id)
+    if not item or item.status != "active":
+        raise HTTPException(status_code=404, detail="active item not found")
+    try:
+        link_token = PlaidClient().create_investment_update_token(
+            "default-user", decrypt_token(item.access_token_encrypted)
+        )["link_token"]
+        _run_connect_tunnel("open")
+    except Exception:
+        # Provider exceptions may contain credentials; never reflect their body.
+        raise HTTPException(status_code=502, detail="Unable to prepare investment consent") from None
+    session = ConnectService().create_session(
+        db, link_token=link_token, purpose="investment_update",
+        plaid_item_id=item.plaid_item_id,
+    )
+    return {
+        "session_token": session.session_token,
+        "expires_at": session.expires_at.isoformat(),
+        "connect_url": f"{settings.app_base_url}/connect/start?session={session.session_token}",
+    }
+
+
 @router.get("/connect/start", response_class=HTMLResponse)
 def connect_start(session: str, db: Session = Depends(get_db)):
     svc = ConnectService()
     active = svc.get_active_session(db, session)
     if not active:
         raise HTTPException(status_code=400, detail="invalid or expired session")
+
+    if not active.link_token and active.purpose != "bank":
+        raise HTTPException(status_code=400, detail="missing update token; create a new session")
 
     if not active.link_token:
         client = PlaidClient()
@@ -325,6 +354,30 @@ def connect_complete(payload: ConnectCompleteRequest, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="invalid or expired session")
 
     client = PlaidClient()
+    if active.purpose == "investment_update":
+        item = db.query(Item).filter(Item.plaid_item_id == active.plaid_item_id, Item.status == "active").first()
+        if not item:
+            raise HTTPException(status_code=409, detail="original connection no longer available")
+        try:
+            readiness = client.get_investment_readiness(decrypt_token(item.access_token_encrypted))
+        except Exception:
+            raise HTTPException(status_code=502, detail="Unable to verify investment consent") from None
+        if readiness["investment_products"]["consented_products"] is not True:
+            raise HTTPException(status_code=409, detail="Investment consent not yet confirmed by provider")
+        # A callback is not coverage proof. No exchange, account write or sync.
+        active.status = "completed"
+        active.completed_at = utcnow()
+        db.commit()
+        cleanup_pending = False
+        try:
+            _run_connect_tunnel("close")
+        except RuntimeError:
+            cleanup_pending = True
+            logger.warning("Investment consent completed; tunnel cleanup pending")
+        return {"status": "consented", "item_id": item.plaid_item_id,
+                "coverage_verified": False, "cleanup_pending": cleanup_pending}
+    if not public_token:
+        raise HTTPException(status_code=400, detail="public_token required for a new connection")
     resp = client.exchange_public_token(public_token)
 
     existing = db.query(Item).filter(Item.plaid_item_id == resp["item_id"]).first()

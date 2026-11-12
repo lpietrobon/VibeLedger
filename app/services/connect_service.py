@@ -15,9 +15,13 @@ class ConnectService:
         db: Session,
         user_id: str = "default-user",
         link_token: str | None = None,
+        purpose: str = "bank",
+        plaid_item_id: str | None = None,
     ) -> ConnectSession:
         session = ConnectSession(
             session_token=secrets.token_urlsafe(32),
+            purpose=purpose,
+            plaid_item_id=plaid_item_id,
             user_id=user_id,
             status="created",
             link_token=link_token,
