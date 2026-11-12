@@ -47,3 +47,11 @@ absent update callback schema). Targeted final tests: eight passed in
 `tests/test_investment_update.py`. Independent working-diff review checked consent
 semantics and identified teardown misreporting; fixed with a regression test.
 No live OAuth, UI delivery or production schema verification claimed.
+
+Final source verification: `31b81fd` — full backend suite **358 passed**, two
+existing warnings (Starlette/httpx and SQLAlchemy identity map); roadmap scan
+6 epics/79 tasks, zero issues; diff whitespace check passed. Independent reviewer
+rechecked this committed source and all eight update tests, approving only the
+preparatory consent slice. Default-off gating prevents session creation, not
+revocation of previously issued sessions. Source pushed to the implementation
+branch; no deployment. Next engineering work: domain isolation before live consent.
