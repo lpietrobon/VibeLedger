@@ -55,6 +55,7 @@ from app.services.security import decrypt_token, encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
+from app.services.account_domain import spending_activity, spending_account_ids, spending_transfer_predicate
 from app.services.accounting import (
     comparison_bounds,
     comparison_reporting,
@@ -711,7 +712,7 @@ def transaction_search_suggestions(
         db.query(expr.label("value"), func.count(Transaction.id).label("n"))
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
-        .filter(expr.is_not(None))
+        .filter(expr.is_not(None), Transaction.account_id.in_(spending_account_ids()))
         .group_by(expr)
         .order_by(func.count(Transaction.id).desc())
         .all()
@@ -755,7 +756,7 @@ def list_categories(
         db.query(expr.label("value"), func.count(Transaction.id).label("n"))
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
-        .filter(expr.is_not(None))
+        .filter(expr.is_not(None), Transaction.account_id.in_(spending_account_ids()))
         .group_by(expr)
         .all()
     )
@@ -805,6 +806,7 @@ def list_transactions(
         Transaction.id == TransactionAnnotation.transaction_id,
     )
 
+    base = spending_activity(base)
     if start_date:
         base = base.filter(Transaction.date >= start_date)
     if end_date:
@@ -839,6 +841,7 @@ def list_transactions(
         pair_rows = db.query(
             TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id, TransferPair.confirmed
         ).filter(
+            spending_transfer_predicate(TransferPair),
             or_(
                 TransferPair.txn_out_id.in_(page_ids),
                 TransferPair.txn_in_id.in_(page_ids),
@@ -1106,6 +1109,7 @@ def _scoped_transactions_query(db: Session, scope):
         TransactionAnnotation.transaction_id == Transaction.id,
     )
 
+    q = spending_activity(q)
     if scope.start_date:
         q = q.filter(Transaction.date >= scope.start_date)
     if scope.end_date:
@@ -1407,6 +1411,7 @@ def _apply_transfer_exclusion(q, include_transfers: bool):
     fingerprints, so anything carrying it was silently and permanently missing
     from spend and income.
     """
+    q = spending_activity(q)
     return q if include_transfers else exclude_confirmed_transfers(q)
 
 
@@ -1676,10 +1681,10 @@ def analytics_overview(
         .join(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
         .filter(TransactionAnnotation.refund_status == "likely")
     )
-    likely_refunds = _apply_account_filter(likely_refunds_q, account_ids).scalar() or 0
+    likely_refunds = _apply_account_filter(spending_activity(likely_refunds_q), account_ids).scalar() or 0
     transfer_pending = (
         db.query(func.count(TransferPair.id))
-        .filter(TransferPair.confirmed == False)  # noqa: E712
+        .filter(TransferPair.confirmed == False, spending_transfer_predicate(TransferPair))  # noqa: E712
         .scalar()
     ) or 0
 
@@ -2389,14 +2394,14 @@ def transfers_list(
 ):
     """Pairs, newest first. `pending` is a whole-table count, not a page count:
     the client must not derive it by filtering `items`, which is truncated."""
-    base = db.query(TransferPair)
+    base = db.query(TransferPair).filter(spending_transfer_predicate(TransferPair))
     if confirmed is not None:
         base = base.filter(TransferPair.confirmed == confirmed)
 
     total = base.with_entities(func.count(TransferPair.id)).scalar() or 0
     pending = (
         db.query(func.count(TransferPair.id))
-        .filter(TransferPair.confirmed == False)  # noqa: E712
+        .filter(TransferPair.confirmed == False, spending_transfer_predicate(TransferPair))  # noqa: E712
         .scalar()
     ) or 0
     rows = base.order_by(TransferPair.id.desc()).limit(limit).offset(offset).all()

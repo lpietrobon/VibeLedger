@@ -20,6 +20,7 @@ from app.models.models import (
     TransferPair,
 )
 from app.services.plaid_client import PlaidClient
+from app.services.account_domain import is_spending_account
 from app.services.refund_detector import classify_refunds
 from app.services.duplicate_corrections import (
     mark_invalidated,
@@ -269,6 +270,11 @@ class SyncService:
                 existing = db.query(Transaction).filter(
                     Transaction.plaid_transaction_id == t["transaction_id"]
                 ).first()
+                if not is_spending_account(account):
+                    if not account.type or account.type.strip().lower() not in {"investment", "brokerage"}:
+                        raise ValueError("transaction account classification unavailable")
+                    # Keep legacy source rows intact but outside spending queries.
+                    continue
                 source = t.get("_source") or t
                 pending_id = source.get("pending_transaction_id")
                 if existing is None and pending_id and not t.get("pending", False):

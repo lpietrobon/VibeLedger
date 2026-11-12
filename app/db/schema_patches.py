@@ -280,6 +280,8 @@ def apply_patches(engine: Engine) -> None:
                 EXISTS (SELECT 1 FROM transfer_pairs p WHERE p.confirmed = 1
                     AND (p.txn_out_id = t.id OR p.txn_in_id = t.id)) AS is_transfer,
                 EXISTS (SELECT 1 FROM transfer_pairs p WHERE p.confirmed = 0
+                    AND p.txn_out_id IN (SELECT tx.id FROM transactions tx JOIN accounts ac ON ac.id=tx.account_id WHERE lower(trim(ac.type)) IN ('depository','credit','loan','payment'))
+                    AND p.txn_in_id IN (SELECT tx.id FROM transactions tx JOIN accounts ac ON ac.id=tx.account_id WHERE lower(trim(ac.type)) IN ('depository','credit','loan','payment'))
                     AND (p.txn_out_id = t.id OR p.txn_in_id = t.id)) AS is_transfer_candidate,
                 ta.merchant_name_override,
                 ta.user_category,
@@ -295,6 +297,7 @@ def apply_patches(engine: Engine) -> None:
             FROM transactions t
             LEFT JOIN transaction_annotations ta ON ta.transaction_id = t.id
             LEFT JOIN accounts a ON a.id = t.account_id
+            WHERE lower(trim(a.type)) IN ('depository', 'credit', 'loan', 'payment')
             ), effective AS (
                 SELECT c.*,
                     COALESCE(c.user_category,

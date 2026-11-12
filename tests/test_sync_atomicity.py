@@ -43,7 +43,7 @@ def test_failed_batch_preserves_ledger_balances_cursor_and_can_retry(historical,
         item_id = item.id
         db.add(SyncState(item_id=item_id, cursor="previous"))
         if existing_account:
-            db.add(Account(plaid_account_id="atomic-account", item_id=item_id,
+            db.add(Account(type="depository", plaid_account_id="atomic-account", item_id=item_id,
                            name="Old name", current_balance=100, available_balance=90,
                            currency="USD"))
         db.commit()

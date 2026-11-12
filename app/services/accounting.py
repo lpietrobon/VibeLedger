@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from fastapi import HTTPException
 from sqlalchemy import case, exists, func, select
 
+from app.services.account_domain import spending_activity
 from app.models.models import Account, DuplicateCorrection, Transaction, TransactionAnnotation, TransferPair
 
 
@@ -136,6 +137,7 @@ def exclude_active_duplicates(query):
 
 
 def posted_activity(query, *, include_transfers: bool = False):
+    query = spending_activity(query)
     query = query.filter(Transaction.pending.is_(False))
     query = query if include_transfers else exclude_confirmed_transfers(query)
     return exclude_active_duplicates(query)

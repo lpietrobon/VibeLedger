@@ -31,6 +31,7 @@ from decimal import Decimal
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
+from app.services.account_domain import spending_activity, is_spending_account
 from app.models.models import (
     Account,
     Item,
@@ -404,6 +405,8 @@ def validate_pair(
     """
     if not txn_a or not txn_b:
         raise ValueError("transaction not found")
+    if not all(is_spending_account(db.get(Account, t.account_id)) for t in (txn_a, txn_b)):
+        raise ValueError("investment or unclassified accounts cannot form spending transfers")
     if txn_a.id == txn_b.id:
         raise ValueError("transfer pair must use two different transactions")
     if txn_a.pending or txn_b.pending:
@@ -469,7 +472,7 @@ def detect_candidates(db: Session, window_days: int = 3) -> list[TransferPair]:
     # Pending rows are transient and their amounts can still change.
     active_duplicates = active_duplicate_ids(db)
     txns = (
-        db.query(Transaction)
+        spending_activity(db.query(Transaction))
         .filter(Transaction.pending == False)  # noqa: E712
         .order_by(Transaction.date.asc(), Transaction.id.asc())
         .all()

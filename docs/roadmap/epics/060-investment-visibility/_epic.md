@@ -4,7 +4,7 @@ title: Investment account visibility and trustworthy performance
 status: planned
 owner: null
 created: 2026-11-10
-revision: 1
+revision: 2
 ---
 
 ## Goal
@@ -72,3 +72,5 @@ Each implementation slice has a test-first contract task and an independent veri
 ## Revision Log
 
 - rev 1 (2026-11-10): Created from the investment research discussion and request for staged account visibility through returns, explicit spending separation, and possible replacement of Overview.
+
+- rev 2 (2026-11-11): Owner authorized continuing through safe Schwab consent. Extract INV-00 spending isolation as an independent prerequisite to live consent, resolving the coverage/consent cycle. INV-01 coverage remains unverified; downstream ingestion milestones are unchanged.
