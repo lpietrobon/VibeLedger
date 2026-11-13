@@ -33,3 +33,5 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 - 2026-11-11: Prepared internal new-connection Investments Link adapter and fake-SDK regression tests; no public route, activation or ingestion. [Preparation and owner-input handoff](../artifacts/INV-01-link-preparation.md). Live entitlement/billing and owner consent remain unresolved; downstream task gates unchanged.
 
 - 2026-11-11: Owner confirmed Investments enabled and prioritized Schwab. Built default-disabled, existing-Item consent flow with provider verification and no ingestion. [Schwab consent preparation and release boundary](../artifacts/INV-01-schwab-consent.md). Independent review found teardown error misreporting; fixed and regression-tested. Coverage remains unverified; no production action.
+
+- 2026-11-13: INV-00 spending prerequisite deployed and verified (`4d2e2f1`). Prepared live existing-Schwab consent session and verified Connect route HTTP 200. Waiting on owner browser account selection; actual OAuth completion, consent verification, holdings/history coverage and pricing remain unclaimed. No investment data endpoint called.

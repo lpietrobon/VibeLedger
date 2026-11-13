@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-11-12T04:37:36+00:00_
+_Last scan: 2026-11-13T14:59:49+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -80,7 +80,7 @@ dependencies are done; a blank assignment means unassigned.
 | [TIME-04](epics/050-shared-date-range-semantics/tasks/TIME-04.md) | 050-shared-date-range-semantics | todo | TIME-01, TIME-02 |  | Pin cross-screen period-selection and monetary-parity behavior with failing integration tests |
 | [TIME-05](epics/050-shared-date-range-semantics/tasks/TIME-05.md) | 050-shared-date-range-semantics | todo | TIME-03, TIME-04 |  | Integrate unified range selection across all applicable views |
 | [TIME-06](epics/050-shared-date-range-semantics/tasks/TIME-06.md) | 050-shared-date-range-semantics | todo | TIME-05 |  | Independently verify date-selection consistency and source evidence |
-| [INV-00](epics/060-investment-visibility/tasks/INV-00.md) | 060-investment-visibility | in-progress |  | codex | Isolate spending before existing-item investment consent |
+| [INV-00](epics/060-investment-visibility/tasks/INV-00.md) | 060-investment-visibility | done |  | codex | Isolate spending before existing-item investment consent |
 | [INV-01](epics/060-investment-visibility/tasks/INV-01.md) | 060-investment-visibility | in-progress |  | codex | Validate Schwab and Fidelity investment coverage |
 | [INV-02](epics/060-investment-visibility/tasks/INV-02.md) | 060-investment-visibility | todo | INV-01 |  | Freeze investment domain and accounting boundaries |
 | [INV-03](epics/060-investment-visibility/tasks/INV-03.md) | 060-investment-visibility | todo | INV-02 |  | Pin ingestion and spending-isolation regression contracts |
