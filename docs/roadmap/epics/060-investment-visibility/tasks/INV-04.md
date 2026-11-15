@@ -2,10 +2,10 @@
 id: INV-04
 epic: 060-investment-visibility
 title: Implement isolated investment ingestion and valuation history
-status: todo
+status: in-progress
 dependencies: ["INV-03"]
 superseded_by: null
-assigned_agent: null
+assigned_agent: codex
 created: 2026-11-10
 ---
 
@@ -23,3 +23,5 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 ## Execution Log
 
 - 2026-11-10: Task specified for the staged investment-visibility epic. Not started; no implementation, provider validation, failing-test baseline or independent verification claimed.
+
+- 2026-11-15: Started only after INV-03 frozen red baseline. Development-only; no production investment call or deployment.

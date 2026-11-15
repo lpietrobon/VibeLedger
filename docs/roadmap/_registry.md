@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-11-15T23:22:21+00:00_
+_Last scan: 2026-11-15T23:23:51+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -83,8 +83,8 @@ dependencies are done; a blank assignment means unassigned.
 | [INV-00](epics/060-investment-visibility/tasks/INV-00.md) | 060-investment-visibility | done |  | codex | Isolate spending before existing-item investment consent |
 | [INV-01](epics/060-investment-visibility/tasks/INV-01.md) | 060-investment-visibility | in-progress |  | codex | Validate Schwab and Fidelity investment coverage |
 | [INV-02](epics/060-investment-visibility/tasks/INV-02.md) | 060-investment-visibility | done | INV-00 | codex | Freeze investment domain and accounting boundaries |
-| [INV-03](epics/060-investment-visibility/tasks/INV-03.md) | 060-investment-visibility | in-progress | INV-02 | codex | Pin ingestion and spending-isolation regression contracts |
-| [INV-04](epics/060-investment-visibility/tasks/INV-04.md) | 060-investment-visibility | todo | INV-03 |  | Implement isolated investment ingestion and valuation history |
+| [INV-03](epics/060-investment-visibility/tasks/INV-03.md) | 060-investment-visibility | done | INV-02 | codex | Pin ingestion and spending-isolation regression contracts |
+| [INV-04](epics/060-investment-visibility/tasks/INV-04.md) | 060-investment-visibility | in-progress | INV-03 | codex | Implement isolated investment ingestion and valuation history |
 | [INV-05](epics/060-investment-visibility/tasks/INV-05.md) | 060-investment-visibility | todo | INV-04 |  | Independently verify ingestion and spending isolation |
 | [INV-06](epics/060-investment-visibility/tasks/INV-06.md) | 060-investment-visibility | todo | INV-05, TIME-01 |  | Design Investments visibility and Overview navigation proposal |
 | [INV-07](epics/060-investment-visibility/tasks/INV-07.md) | 060-investment-visibility | todo | INV-06 |  | Pin balances and navigation interaction contracts |
