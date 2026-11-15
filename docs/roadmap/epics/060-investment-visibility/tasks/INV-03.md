@@ -2,10 +2,10 @@
 id: INV-03
 epic: 060-investment-visibility
 title: Pin ingestion and spending-isolation regression contracts
-status: todo
+status: in-progress
 dependencies: ["INV-02"]
 superseded_by: null
-assigned_agent: null
+assigned_agent: codex
 created: 2026-11-10
 ---
 
@@ -22,3 +22,5 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 ## Execution Log
 
 - 2026-11-10: Task specified for the staged investment-visibility epic. Not started; no implementation, provider validation, failing-test baseline or independent verification claimed.
+
+- 2026-11-15: Started test-first ingestion slice against INV-02 contract. No implementation yet.
