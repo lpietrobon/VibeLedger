@@ -114,7 +114,10 @@ class InvestmentSyncService:
             balances = raw.get('balances')
             if not isinstance(balances, dict):
                 raise ValueError('missing investment balance metadata')
+            account.type = kind
             account.name = raw.get('name') or account.name
+            account.official_name = raw.get('official_name')
+            account.mask = raw.get('mask')
             account.subtype = str(raw['subtype']) if raw.get('subtype') is not None else None
             account.current_balance = number(balances.get('current'))
             account.currency = currency(balances)

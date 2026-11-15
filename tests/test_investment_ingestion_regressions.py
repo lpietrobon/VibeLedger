@@ -44,3 +44,16 @@ def test_holdings_adapter_uses_only_holdings_endpoint():
     assert p.get_investment_holdings('fake')==expected
     p._client.investments_holdings_get.assert_called_once()
     p._client.transactions_sync.assert_not_called()
+
+
+def test_normalized_account_type_preserves_manual_nickname_and_provider_identity():
+    from app.models.models import Account
+    with SessionLocal() as db:
+        item_id=seed(db)
+        db.add(Account(plaid_account_id='broker',item_id=item_id,name='Old IRA',type='Investment',nickname='Retirement'))
+        db.commit()
+        p=Provider();p.holdings['accounts'][0]['mask']='1234'
+        InvestmentSyncService(p).sync_item(db,item_id,START,END)
+        account=db.query(Account).filter_by(plaid_account_id='broker').one()
+        assert account.type=='investment' and account.nickname=='Retirement' and account.mask=='1234'
+        assert investment_summary(db)['total_value']==1250

@@ -1577,10 +1577,10 @@ def accounts_summary(db: Session = Depends(get_db)):
         "coverage": {
             "duplicate_account_coverage": "unverified",
             "history_coverage": "unverified",
-            "investment_accounts": [
+            **({"investment_accounts": [
                 {key: row[key] for key in ("account_id", "freshness", "coverage", "valuation_status", "observed_at")}
                 for row in investment_coverage["accounts"]
-            ],
+            ]} if investment_coverage["accounts"] else {}),
         },
     }
 
