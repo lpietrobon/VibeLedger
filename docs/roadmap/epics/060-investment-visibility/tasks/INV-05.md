@@ -22,3 +22,5 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 ## Execution Log
 
 - 2026-11-10: Task specified for the staged investment-visibility epic. Not started; no implementation, provider validation, failing-test baseline or independent verification claimed.
+
+- 2026-11-15: Ready after INV-04; [independent review brief](../artifacts/INV-05-review-brief.md) prepared for source `f1fee3f`. Awaiting a separate verifier; owner was asked whether to run an independent review agent. No independent verdict claimed and task remains todo.

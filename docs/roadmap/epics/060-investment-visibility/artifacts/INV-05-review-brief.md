@@ -1,6 +1,6 @@
 # Independent review brief — pending, not a verification verdict
 
-Implementation source: `88216f5`; frozen red-contract commit: `11c1c61`.
+Implementation source: `f1fee3f`; frozen red-contract commit: `11c1c61`.
 Review this exact source plus documented follow-up commits, not the deployed
 `4d2e2f1` consent/isolation-only runtime. No live investment endpoint calls.
 

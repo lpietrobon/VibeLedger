@@ -50,3 +50,11 @@ No tax overrides, flow reconciliation engine, return estimates, UI or allocation
 implemented here; existing confirmed funding evidence remains in the bank ledger.
 Atomicity is per investment product pull; a bank sync is separate and remains usable
 when investment sync fails. Foreign/malformed account ownership fails closed.
+
+## Final implementer evidence
+
+Source `f1fee3f`: full backend suite 394 passed, two pre-existing warnings.
+Frozen red baseline at `11c1c61`: 20 expected failures; that test file remains
+unchanged. Supplemental tests cover bank-failure independence, valuation
+provenance, normalization/manual nickname preservation and provider endpoints.
+No independent-verification or live deployment claim.
