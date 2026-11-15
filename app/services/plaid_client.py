@@ -45,6 +45,52 @@ class PlaidClient:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Plaid SDK client: {e}") from e
 
+    @staticmethod
+    def _investment_payload(response):
+        return response.to_dict() if hasattr(response, "to_dict") else response
+
+    def get_investment_holdings(self, access_token: str) -> dict:
+        if self._mock:
+            return {"accounts": [], "securities": [], "holdings": []}
+        from plaid.model.investments_holdings_get_request import InvestmentsHoldingsGetRequest
+        return self._investment_payload(self._client.investments_holdings_get(
+            InvestmentsHoldingsGetRequest(access_token=access_token)))
+
+    def get_investment_transactions(self, access_token: str, start_date: date, end_date: date) -> dict:
+        from app.services.investment_sync import validate_window
+        validate_window(start_date, end_date)
+        if self._mock:
+            return {"investment_transactions": [], "securities": []}
+        from plaid.model.investments_transactions_get_request import InvestmentsTransactionsGetRequest
+        from plaid.model.investments_transactions_get_request_options import InvestmentsTransactionsGetRequestOptions
+        rows, securities, seen = [], {}, set()
+        expected = None
+        while True:
+            request = InvestmentsTransactionsGetRequest(access_token=access_token,
+                start_date=start_date, end_date=end_date,
+                options=InvestmentsTransactionsGetRequestOptions(count=500, offset=len(rows)))
+            page = self._investment_payload(self._client.investments_transactions_get(request))
+            total = page.get("total_investment_transactions")
+            batch = page.get("investment_transactions")
+            if not isinstance(total, int) or total < 0 or not isinstance(batch, list):
+                raise ValueError("incomplete investment page")
+            if expected is None: expected = total
+            if total != expected or len(rows)+len(batch) > total:
+                raise ValueError("unstable investment pagination")
+            for row in batch:
+                key = row.get("investment_transaction_id")
+                if not key or key in seen: raise ValueError("duplicate investment page identity")
+                seen.add(key)
+            rows.extend(batch)
+            for security in page.get("securities", []):
+                key = security.get("security_id")
+                if not key or (key in securities and securities[key] != security):
+                    raise ValueError("unstable investment security metadata")
+                securities[key] = security
+            if len(rows) == total: break
+            if not batch: raise ValueError("incomplete investment pagination")
+        return {"investment_transactions": rows, "securities": list(securities.values())}
+
     def create_investment_link_token(self, user_id: str) -> dict:
         """Prepare NEW investment connections only; not wired to public routes.
 

@@ -25,3 +25,4 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 - 2026-11-10: Task specified for the staged investment-visibility epic. Not started; no implementation, provider validation, failing-test baseline or independent verification claimed.
 
 - 2026-11-15: Started only after INV-03 frozen red baseline. Development-only; no production investment call or deployment.
+- 2026-11-15: Implemented dedicated models/adapter/atomic ingestion, gated sync and coverage summary, single-count net worth and deletion lifecycle. Frozen tests unchanged. Initial full run 389 passed; supplemental lifecycle/provenance tests added, combined investment suite now 34 passed. Corrected naive/aware freshness timestamp mismatch and missing-account observation timestamp. [Implementation, migration/rollback and limitations](../artifacts/INV-04-implementation.md). Final committed-source regression pending; no deployment or live investment call.

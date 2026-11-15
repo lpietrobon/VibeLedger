@@ -482,6 +482,9 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
         )
         db.query(Transaction).filter(Transaction.item_id == item_id).delete(synchronize_session=False)
 
+    from app.services.investment_sync import remove_investment_data
+    remove_investment_data(db, item_id, account_ids)
+
     if account_ids:
         db.query(AccountBalanceSnapshot).filter(AccountBalanceSnapshot.account_id.in_(account_ids)).delete(
             synchronize_session=False
@@ -1539,7 +1542,7 @@ def accounts_summary(db: Session = Depends(get_db)):
     reporting = currency_reporting(
         a.currency.strip().upper() if a.currency and a.currency.strip() else None
         for a in accounts if a.current_balance is not None
-        and a.type in {"depository", "credit", "loan"}
+        and a.type in {"depository", "credit", "loan", "investment", "brokerage"}
     )
     by_type: dict[str, list[dict]] = {}
     for a in accounts:
@@ -1551,19 +1554,22 @@ def accounts_summary(db: Session = Depends(get_db)):
             "nickname": a.nickname,
             "mask": a.mask,
             "subtype": a.subtype,
-            "current_balance": round(bal, 2),
+            "current_balance": (None if a.current_balance is None and a.type in {"investment", "brokerage"} else round(bal, 2)),
             "available_balance": round(float(a.available_balance), 2) if a.available_balance is not None else None,
             "currency": a.currency,
             "credit_limit": round(float(a.credit_limit), 2) if a.credit_limit is not None else None,
         })
-    assets = sum(x["current_balance"] for x in by_type.get("depository", []))
+    assets = sum(x["current_balance"] for kind in ("depository", "investment", "brokerage") for x in by_type.get(kind, []) if x["current_balance"] is not None)
     liabilities = sum(x["current_balance"] for x in by_type.get("credit", []))
     liabilities += sum(x["current_balance"] for x in by_type.get("loan", []))
+    from app.services.investment_sync import investment_summary
+    investment_coverage = investment_summary(db)
+    missing_investment = any(a.type in {"investment", "brokerage"} and a.current_balance is None for a in accounts)
     return {
         "reporting": reporting,
-        "assets": round(assets, 2),
+        "assets": None if missing_investment else round(assets, 2),
         "liabilities": round(liabilities, 2),
-        "net_worth": round(assets - liabilities, 2),
+        "net_worth": None if missing_investment else round(assets - liabilities, 2),
         "groups": by_type,
         # Provider IDs are authoritative for a single link, but two provider
         # IDs can still describe the same real-world account.  Do not guess
@@ -1571,6 +1577,10 @@ def accounts_summary(db: Session = Depends(get_db)):
         "coverage": {
             "duplicate_account_coverage": "unverified",
             "history_coverage": "unverified",
+            "investment_accounts": [
+                {key: row[key] for key in ("account_id", "freshness", "coverage", "valuation_status", "observed_at")}
+                for row in investment_coverage["accounts"]
+            ],
         },
     }
 
@@ -2463,3 +2473,24 @@ def transfers_delete(pair_id: int, db: Session = Depends(get_db)):
     db.delete(pair)
     db.commit()
     return {"status": "unpaired", "remembered": True}
+
+
+@router.get("/investments/summary")
+def investments_summary(db: Session = Depends(get_db)):
+    from app.services.investment_sync import investment_summary
+    return investment_summary(db)
+
+
+@router.post("/investments/sync/{item_id}")
+def investments_sync(item_id: int, start_date: date, end_date: date, db: Session = Depends(get_db)):
+    if not settings.investment_sync_enabled:
+        raise HTTPException(status_code=409, detail="Investment data sync is not released yet")
+    from app.services.investment_sync import InvestmentSyncService, validate_window
+    try:
+        validate_window(start_date, end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    try:
+        return InvestmentSyncService().sync_item(db, item_id, start_date, end_date)
+    except Exception:
+        raise HTTPException(status_code=502, detail="Investment sync failed; last-good data preserved") from None

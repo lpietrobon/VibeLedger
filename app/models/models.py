@@ -300,3 +300,66 @@ class AccountBalanceSnapshot(Base):
     limit_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     source: Mapped[str] = mapped_column(String(32), default="accounts_get")
     pulled_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class InvestmentSecurity(Base):
+    __tablename__ = 'investment_securities'
+    security_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    raw_json: Mapped[str] = mapped_column(Text)
+
+
+class InvestmentHolding(Base):
+    __tablename__ = 'investment_holdings'
+    __table_args__ = (UniqueConstraint('account_id', 'security_id'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey('accounts.id'), index=True)
+    security_id: Mapped[str] = mapped_column(ForeignKey('investment_securities.security_id'))
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(24, 8), nullable=True)
+    value: Mapped[Decimal | None] = mapped_column(Numeric(24, 8), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    raw_json: Mapped[str] = mapped_column(Text)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class InvestmentActivity(Base):
+    __tablename__ = 'investment_activity'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider_id: Mapped[str] = mapped_column(String(128), unique=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey('items.id'), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey('accounts.id'), index=True)
+    security_id: Mapped[str | None] = mapped_column(ForeignKey('investment_securities.security_id'), nullable=True)
+    date: Mapped[date] = mapped_column(Date)
+    amount: Mapped[Decimal] = mapped_column(Numeric(24, 8))
+    type: Mapped[str] = mapped_column(String(64))
+    raw_json: Mapped[str] = mapped_column(Text)
+    original_raw_json: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    is_removed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class InvestmentValuation(Base):
+    __tablename__ = 'investment_valuations'
+    __table_args__ = (UniqueConstraint('account_id', 'as_of_date'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey('accounts.id'), index=True)
+    as_of_date: Mapped[date] = mapped_column(Date)
+    observed_at: Mapped[datetime] = mapped_column(DateTime)
+    value: Mapped[Decimal | None] = mapped_column(Numeric(24, 8), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    source: Mapped[str] = mapped_column(String(64), default='holdings_account_balance')
+    raw_json: Mapped[str] = mapped_column(Text)
+    original_raw_json: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class InvestmentSyncState(Base):
+    __tablename__ = 'investment_sync_state'
+    item_id: Mapped[int] = mapped_column(ForeignKey('items.id'), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), default='never')
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    window_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    window_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    account_ids_json: Mapped[str] = mapped_column(Text, default='[]')
