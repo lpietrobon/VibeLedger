@@ -216,14 +216,16 @@ def investment_summary(db):
             successful = successful.replace(tzinfo=timezone.utc)
         if observed and observed.tzinfo is None: observed=observed.replace(tzinfo=timezone.utc)
         coverage='present' if state and a.id in json.loads(state.account_ids_json) else 'missing_from_latest_response'
-        status='missing' if a.current_balance is None else 'unsupported' if a.currency!='USD' else 'available'
+        value = valuation.value if valuation else None
+        value_currency = valuation.currency if valuation else None
+        status='missing' if value is None else 'unsupported' if value_currency!='USD' else 'available'
         fresh=bool(observed and successful and state.status=='success'
                    and now-min(observed,successful)<=timedelta(hours=24) and coverage=='present')
         if status!='available' or coverage!='present': complete=False
-        else: total+=a.current_balance
+        else: total+=value
         accounts.append({'account_id':a.id,'name':a.nickname or a.name,'subtype':a.subtype,
-                         'value':float(a.current_balance) if a.current_balance is not None else None,
-                         'currency':a.currency,'valuation_status':status,'coverage':coverage,
+                         'value':float(value) if value is not None else None,
+                         'currency':value_currency,'valuation_status':status,'coverage':coverage,
                          'freshness':'fresh' if fresh else 'stale' if observed else 'missing',
                          'observed_at':observed.isoformat() if observed else None})
     return {'accounts':accounts,'total_value':float(total) if accounts and complete else None,

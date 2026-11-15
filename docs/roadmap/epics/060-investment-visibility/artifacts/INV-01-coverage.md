@@ -132,3 +132,28 @@ not a substitute. Actual account selection requires the account owner's provider
 consent. Do not remove the existing Schwab connection or globally enable
 Investments for ordinary bank linking. INV-01 remains in progress; this metadata
 checkpoint is complete but the full provider-data acceptance criteria are not.
+
+## Schwab consent and synthetic development checkpoint — 2026-11-15
+
+Owner completed existing-Item account selection. Both the stored consent session
+and fresh provider metadata confirm success. `/accounts/get` now exposes two
+brokerage accounts, one IRA and one Roth, plus checking; no replacement Item.
+Investments available=true, consented=true, billed=false at verification.
+
+| Target | Account-list evidence | Holdings/activity/history evidence |
+|---|---|---|
+| Schwab brokerage | Two accounts returned after consent | Not yet called/verified |
+| Schwab traditional IRA | One `ira` subtype returned | Not yet called/verified |
+| Schwab Roth | One `roth` subtype returned | Not yet called/verified |
+| Schwab workplace | None verified | Unknown, not inferred from retail accounts |
+| Fidelity / NetBenefits | No linked Item verified | Unknown; remains a distinct coverage gate |
+
+The owner supplied dashboard evidence of enabled Investments. Unit pricing and
+billing terms still have no recorded acceptance. Do not infer free access from
+`billed=false`, enable Refresh, or claim live data success from synthetic tests.
+
+INV-02–04 now develop against the frozen provider-independent contract after
+INV-00; the dependency change is explicit in epic revision 3. Adapter pagination,
+atomic corrections, provenance, missing values and isolation have synthetic tests.
+This does not complete INV-01 or authorize live investment endpoints. Independent
+INV-05 verification and live coverage/billing checks remain separate release gates.

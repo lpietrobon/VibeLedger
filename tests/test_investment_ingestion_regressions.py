@@ -57,3 +57,16 @@ def test_normalized_account_type_preserves_manual_nickname_and_provider_identity
         account=db.query(Account).filter_by(plaid_account_id='broker').one()
         assert account.type=='investment' and account.nickname=='Retirement' and account.mask=='1234'
         assert investment_summary(db)['total_value']==1250
+
+
+def test_bank_balance_refresh_cannot_rewrite_an_investment_observation():
+    from app.models.models import Account
+    with SessionLocal() as db:
+        item_id=seed(db)
+        InvestmentSyncService(Provider()).sync_item(db,item_id,START,END)
+        before=investment_summary(db)
+        account=db.query(Account).filter_by(plaid_account_id='broker').one()
+        account.current_balance=9999  # Independent accounts/get refresh, not holdings evidence.
+        db.commit()
+        assert investment_summary(db)==before
+        assert investment_summary(db)['total_value']==1250
