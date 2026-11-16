@@ -82,7 +82,9 @@ class PlaidClient:
                 if not key or key in seen: raise ValueError("duplicate investment page identity")
                 seen.add(key)
             rows.extend(batch)
-            for security in page.get("securities", []):
+            if not isinstance(page.get("securities"), list):
+                raise ValueError("incomplete investment securities page")
+            for security in page["securities"]:
                 key = security.get("security_id")
                 if not key or (key in securities and securities[key] != security):
                     raise ValueError("unstable investment security metadata")

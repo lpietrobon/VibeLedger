@@ -1539,14 +1539,21 @@ def cashflow_trend(
 @router.get("/analytics/accounts-summary")
 def accounts_summary(db: Session = Depends(get_db)):
     accounts = db.query(Account).all()
+    from app.services.investment_sync import investment_summary
+    investment_coverage = investment_summary(db)
+    observed = {row['account_id']: row for row in investment_coverage['accounts']}
+    def balance(a):
+        return observed[a.id]['value'] if a.id in observed else a.current_balance
+    def balance_currency(a):
+        return observed[a.id]['currency'] if a.id in observed else a.currency
     reporting = currency_reporting(
-        a.currency.strip().upper() if a.currency and a.currency.strip() else None
-        for a in accounts if a.current_balance is not None
+        balance_currency(a).strip().upper() if balance_currency(a) and balance_currency(a).strip() else None
+        for a in accounts if balance(a) is not None
         and a.type in {"depository", "credit", "loan", "investment", "brokerage"}
     )
     by_type: dict[str, list[dict]] = {}
     for a in accounts:
-        bal = float(a.current_balance) if a.current_balance is not None else 0.0
+        bal = float(balance(a)) if balance(a) is not None else 0.0
         by_type.setdefault(a.type or "other", []).append({
             "id": a.id,
             "name": a.name,
@@ -1554,17 +1561,15 @@ def accounts_summary(db: Session = Depends(get_db)):
             "nickname": a.nickname,
             "mask": a.mask,
             "subtype": a.subtype,
-            "current_balance": (None if a.current_balance is None and a.type in {"investment", "brokerage"} else round(bal, 2)),
+            "current_balance": (None if balance(a) is None and a.type in {"investment", "brokerage"} else round(bal, 2)),
             "available_balance": round(float(a.available_balance), 2) if a.available_balance is not None else None,
-            "currency": a.currency,
+            "currency": balance_currency(a),
             "credit_limit": round(float(a.credit_limit), 2) if a.credit_limit is not None else None,
         })
     assets = sum(x["current_balance"] for kind in ("depository", "investment", "brokerage") for x in by_type.get(kind, []) if x["current_balance"] is not None)
     liabilities = sum(x["current_balance"] for x in by_type.get("credit", []))
     liabilities += sum(x["current_balance"] for x in by_type.get("loan", []))
-    from app.services.investment_sync import investment_summary
-    investment_coverage = investment_summary(db)
-    missing_investment = any(a.type in {"investment", "brokerage"} and a.current_balance is None for a in accounts)
+    missing_investment = any(a.type in {"investment", "brokerage"} and balance(a) is None for a in accounts)
     return {
         "reporting": reporting,
         "assets": None if missing_investment else round(assets, 2),

@@ -93,6 +93,12 @@ class InvestmentSyncService:
                               (activity, ('investment_transactions','securities'))]:
             if any(not isinstance(payload.get(k), list) for k in keys):
                 raise ValueError('incomplete investment response')
+        securities = {}
+        for raw in holdings['securities'] + activity['securities']:
+            key = identifier(raw.get('security_id'))
+            if key in securities and securities[key] != raw:
+                raise ValueError('conflicting investment security identity')
+            securities[key] = raw
         accounts = {}
         seen = set()
         for raw in holdings['accounts']:
