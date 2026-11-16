@@ -2,7 +2,7 @@
 id: INV-05
 epic: 060-investment-visibility
 title: Independently verify ingestion and spending isolation
-status: todo
+status: done
 dependencies: ["INV-04"]
 superseded_by: null
 assigned_agent: null
@@ -11,9 +11,9 @@ created: 2026-11-10
 
 ## Acceptance Criteria
 
-- [ ] An independent verifier runs frozen contracts against the actual backend and persisted fixtures, checks migration/retry/relink behavior, and records commit and commands in artifacts/INV-05-verification.md.
-- [ ] Prove investment ingestion does not alter unrelated spending/income/recurring totals or leak into default Activity; explain only deliberate reconciled funding-transfer corrections with exact source evidence.
-- [ ] Confirm investments-only success, mixed-product partial failure handling, stale/missing disclosures and net-worth single counting; unresolved failures block the visibility release.
+- [x] An independent verifier runs frozen contracts against the actual backend and persisted fixtures, checks migration/retry/relink behavior, and records commit and commands in artifacts/INV-05-verification.md.
+- [x] Prove investment ingestion does not alter unrelated spending/income/recurring totals or leak into default Activity; explain only deliberate reconciled funding-transfer corrections with exact source evidence.
+- [x] Confirm investments-only success, mixed-product partial failure handling, stale/missing disclosures and net-worth single counting; unresolved failures block the visibility release.
 
 ## Technical Context / Test Plan
 
@@ -24,3 +24,5 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 - 2026-11-10: Task specified for the staged investment-visibility epic. Not started; no implementation, provider validation, failing-test baseline or independent verification claimed.
 
 - 2026-11-15: Ready after INV-04; [independent review brief](../artifacts/INV-05-review-brief.md) prepared for source `f1fee3f`. Awaiting a separate verifier; owner was asked whether to run an independent review agent. No independent verdict claimed and task remains todo.
+
+- 2026-11-15: Independent review initially required three fixes. Corrected source `4169dca` independently approved for fixture-driven ingestion/isolation after **398 passed**, two existing warnings, and adversarial provenance/rollback/retry probes. Frozen tests unchanged. See [verification report](../artifacts/INV-05-verification.md). No live coverage, pricing, UI or deployment approval; crash-lock recovery remains a pre-rollout follow-up. INV-06 remains dependent on unfinished TIME-01.
