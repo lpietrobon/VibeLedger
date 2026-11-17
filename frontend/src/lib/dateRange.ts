@@ -119,9 +119,9 @@ export function comparisonPeriods(selection: DateRangeSelection, count: number):
   return periods;
 }
 
-/** KPI comparison always uses one prior window, even if no historical lines are drawn. */
+/** Explicit KPI rule is independent of historical chart overlays. */
 export function defaultComparison(selection: DateRangeSelection): DateRange | null {
-  return selection.preset === "all" ? null : comparisonPeriods(selection, 1)[0];
+  return selection.preset === "all" ? null : comparisonBounds(selection, selection.comparison);
 }
 
 export function presetComparison(preset: DatePreset): ComparisonRule {

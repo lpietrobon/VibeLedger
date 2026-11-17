@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-11-17T04:27:10+00:00_
+_Last scan: 2026-11-17T15:53:47+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -76,7 +76,7 @@ dependencies are done; a blank assignment means unassigned.
 | [SPK-06](epics/040-timeline-spike-attribution/tasks/SPK-06.md) | 040-timeline-spike-attribution | todo | SPK-05 |  | Independently verify spike mathematics, usability and source-point parity |
 | [TIME-01](epics/050-shared-date-range-semantics/tasks/TIME-01.md) | 050-shared-date-range-semantics | done |  | charlie | Inventory date-filtered surfaces and settle an explicit date/comparison contract |
 | [TIME-02](epics/050-shared-date-range-semantics/tasks/TIME-02.md) | 050-shared-date-range-semantics | done | TIME-01 | time_contract_tests | Pin shared date bounds and comparison mapping with failing unit/API tests |
-| [TIME-03](epics/050-shared-date-range-semantics/tasks/TIME-03.md) | 050-shared-date-range-semantics | todo | TIME-02 |  | Implement shared date engine, typed selector and comparison adapter |
+| [TIME-03](epics/050-shared-date-range-semantics/tasks/TIME-03.md) | 050-shared-date-range-semantics | in-progress | TIME-02 | time03_implementation | Implement shared date engine, typed selector and comparison adapter |
 | [TIME-04](epics/050-shared-date-range-semantics/tasks/TIME-04.md) | 050-shared-date-range-semantics | todo | TIME-01, TIME-02 |  | Pin cross-screen period-selection and monetary-parity behavior with failing integration tests |
 | [TIME-05](epics/050-shared-date-range-semantics/tasks/TIME-05.md) | 050-shared-date-range-semantics | todo | TIME-03, TIME-04 |  | Integrate unified range selection across all applicable views |
 | [TIME-06](epics/050-shared-date-range-semantics/tasks/TIME-06.md) | 050-shared-date-range-semantics | todo | TIME-05 |  | Independently verify date-selection consistency and source evidence |

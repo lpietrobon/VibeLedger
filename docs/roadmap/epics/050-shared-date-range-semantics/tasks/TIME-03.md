@@ -2,10 +2,10 @@
 id: TIME-03
 epic: 050-shared-date-range-semantics
 title: Implement shared date engine, typed selector and comparison adapter
-status: todo
+status: in-progress
 dependencies: [TIME-02]
 superseded_by: null
-assigned_agent: null
+assigned_agent: time03_implementation
 created: 2026-10-25
 ---
 
@@ -24,3 +24,4 @@ Suggested role: frontend platform and API engineer. Consider `frontend/src/lib/d
 ## Execution Log
 
 - 2026-10-25: Task specified from the accepted spending UX priorities. Not started; no failing-test baseline, production implementation, or independent verification claimed.
+- 2026-11-17: time03_implementation resumed from frozen baseline `b3a0cae`. Implemented explicit comparison adapter, independent native selector, valid-only From/To edits, preserved comparison across presets/calendar, All-time reset, literal date labels and unequal-duration disclosure. Documented reusable API in frontend README. Frozen TIME-02 suite: **36 passed**, unchanged. Backend `tests/test_time_spending_windows.py`: **5 passed**, existing Starlette warning. Full frontend suite: **121 passed / 1 failed**; sole failure is recovered Year-switch test expecting preset-forced previous-year KPI dates, contrary to frozen independent-comparison contract. Independent test author asked to reconcile that oracle; no test changed by implementer. Typecheck passed; Vite application build passed. URL persistence, cross-screen coverage qualification and routing integration remain TIME-04/05 scope. No deploy or live ingestion. Task retained in-progress pending regression reconciliation.
