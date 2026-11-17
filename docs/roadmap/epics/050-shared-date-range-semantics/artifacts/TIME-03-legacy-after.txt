@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /home/skywalker/VibeLedger-investments/frontend
+
+
+ Test Files  5 passed (5)
+      Tests  40 passed (40)
+   Start at  08:29:40
+   Duration  56.28s (transform 2.63s, setup 0ms, import 5.06s, tests 6.82s, environment 36.49s)
+
