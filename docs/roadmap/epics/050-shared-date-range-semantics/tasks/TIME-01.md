@@ -2,21 +2,21 @@
 id: TIME-01
 epic: 050-shared-date-range-semantics
 title: Inventory date-filtered surfaces and settle an explicit date/comparison contract
-status: todo
+status: done
 dependencies: []
 superseded_by: null
-assigned_agent: null
+assigned_agent: charlie
 created: 2026-10-25
 ---
 
 ## Acceptance Criteria
 
-- [ ] Inventory all date-related selectors, date computations, API date parameters, historical URL/deep-link contracts, chart scope, and duplicate code; document affected screens, preserved behavior, migration risk and actual implementation inventory in `artifacts/TIME-01-contract.md`.
-- [ ] Specify one typed `DateRange` and independently selected `ComparisonRule`, including None, Previous month, Previous year and preceding equal-duration range; include no-comparison and custom-date UX, and preserve date-only posted-ledger semantics.
-- [ ] Freeze explicit worked expected inclusive bounds for Current month/year, Last 30/365 days, and Custom From–To; use injected timezone-aware `today` in deterministic date helpers, not ad hoc browser UTC ISO date slicing.
-- [ ] Decide and document month-end/leap-day clipping, equal-length vs calendar-aligned mapping, DST/local-time zone, missing historical coverage, invalid/future/unbounded dates, and comparison qualification when durations differ. For example Oct 5–15 vs Sep 5–15.
-- [ ] Decide per-surface applicability and how to handle legacy 90d/YTD, last-month and All-time controls/URLs without breaking bookmarked queries, and distinguish selecting a preset from displaying the resulting actual From–To.
-- [ ] Define API/backend ownership, performance limits and backward-compatibility expectations before tests are frozen; record exact success scenarios and exclusions.
+- [x] Inventory all date-related selectors, date computations, API date parameters, historical URL/deep-link contracts, chart scope, and duplicate code; document affected screens, preserved behavior, migration risk and actual implementation inventory in `artifacts/TIME-01-contract.md`.
+- [x] Specify one typed `DateRange` and independently selected `ComparisonRule`, including None, Previous month, Previous year and preceding equal-duration range; include no-comparison and custom-date UX, and preserve date-only posted-ledger semantics.
+- [x] Freeze explicit worked expected inclusive bounds for Current month/year, Last 30/365 days, and Custom From–To; use injected timezone-aware `today` in deterministic date helpers, not ad hoc browser UTC ISO date slicing.
+- [x] Decide and document month-end/leap-day clipping, equal-length vs calendar-aligned mapping, DST/local-time zone, missing historical coverage, invalid/future/unbounded dates, and comparison qualification when durations differ. For example Oct 5–15 vs Sep 5–15.
+- [x] Decide per-surface applicability and how to handle legacy 90d/YTD, last-month and All-time controls/URLs without breaking bookmarked queries, and distinguish selecting a preset from displaying the resulting actual From–To.
+- [x] Define API/backend ownership, performance limits and backward-compatibility expectations before tests are frozen; record exact success scenarios and exclusions.
 
 ## Technical Context / Test Plan
 
@@ -25,3 +25,7 @@ Suggested role: frontend/API contract architect. Existing duplicated logic is vi
 ## Execution Log
 
 - 2026-10-25: Task specified from the accepted spending UX priorities. Not started; no failing-test baseline, production implementation, or independent verification claimed.
+
+- 2026-11-16: Resumed under existing autonomous investment-development authorization. Dependency has no prerequisites; billing/live coverage do not block this contract. Initial source inventory finds shared `frontend/src/lib/dateRange` already consumed by Transactions, Spending and Insights despite task metadata remaining todo. Reconcile existing implementation and evidence before freezing contract or claiming completion. Main deployed checkout remains untouched; no live ingestion.
+
+- 2026-11-16: Completed source inventory and frozen [contract](../artifacts/TIME-01-contract.md) at source 4ba04b6. Recovered code has forced-comparison gaps; no implementation completion claimed. Explicitly documented legacy oracle migration, independent comparison and historical pace distinction.

@@ -28,8 +28,8 @@ it("uses a single row of preset buttons; a two-tap Custom calendar stays open un
   for (const label of ["30D","1Y","Month","Year","Custom"]) {
     expect(container.querySelector('button[aria-label="' + label + ' period"]')).not.toBeNull();
   }
-  expect(container.querySelector('select[aria-label="Comparison rule"]')).toBeNull();
-  expect(container.querySelector('input[aria-label="From date"]')).toBeNull();
+  expect(container.querySelector('select[aria-label="Comparison rule"]')).not.toBeNull();
+  expect(container.querySelector('input[aria-label="From date"]')).not.toBeNull();
   await act(async () => (container.querySelector('button[aria-label="Custom period"]') as HTMLButtonElement).click());
   expect(container.querySelector('[role="dialog"]')).not.toBeNull();
   await act(async () => (container.querySelector('button[aria-label="2026-10-06"]') as HTMLButtonElement).click());
@@ -40,7 +40,7 @@ it("uses a single row of preset buttons; a two-tap Custom calendar stays open un
   await act(async () => (Array.from(container.querySelectorAll("button")).find((x) => x.textContent === "Apply") as HTMLButtonElement).click());
   expect(container.querySelector('[role="dialog"]')).toBeNull();
   expect(onChange).toHaveBeenCalledWith({
-    preset: "custom", startDate: "2026-10-06", endDate: "2026-10-18", comparison: "previous-period",
+    preset: "custom", startDate: "2026-10-06", endDate: "2026-10-18", comparison: "none",
   });
 });
 
