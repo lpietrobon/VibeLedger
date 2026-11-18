@@ -2,10 +2,10 @@
 id: INV-06
 epic: 060-investment-visibility
 title: Design Investments visibility and Overview navigation proposal
-status: todo
+status: in-progress
 dependencies: ["INV-05", "TIME-01"]
 superseded_by: null
-assigned_agent: null
+assigned_agent: gpt-5.6-luna
 created: 2026-11-10
 ---
 
@@ -23,3 +23,5 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 ## Execution Log
 
 - 2026-11-10: Task specified for the staged investment-visibility epic. Not started; no implementation, provider validation, failing-test baseline or independent verification claimed.
+
+- 2026-11-18: Coordinator resumed the epic on `feat/investment-visibility` after INV-00–05 completion and TIME-01 completion. Assigned INV-06 to GPT-5.6-Luna. Execute the UX/navigation contract first, then preserve the roadmap's test-author → implementer → independent-verifier separation for INV-07–09. See [execution handoff](../artifacts/INV-06-execution-handoff.md). No deployment or live provider call authorized by this assignment.

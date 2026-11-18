@@ -1,8 +1,8 @@
 ---
 id: 060-investment-visibility
 title: Investment account visibility and trustworthy performance
-status: planned
-owner: null
+status: in-progress
+owner: charlie
 created: 2026-11-10
 revision: 3
 ---

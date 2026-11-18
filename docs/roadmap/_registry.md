@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-11-17T16:31:54+00:00_
+_Last scan: 2026-11-18T21:33:21+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -14,7 +14,7 @@ dependencies are done; a blank assignment means unassigned.
 | [030-inspectable-aggregates](epics/030-inspectable-aggregates/_epic.md) | Inspectable aggregates | planned | 1 |  |
 | [040-timeline-spike-attribution](epics/040-timeline-spike-attribution/_epic.md) | Timeline spike attribution and direct investigation | planned | 1 |  |
 | [050-shared-date-range-semantics](epics/050-shared-date-range-semantics/_epic.md) | Shared date selection and deterministic comparison semantics | planned | 1 |  |
-| [060-investment-visibility](epics/060-investment-visibility/_epic.md) | Investment account visibility and trustworthy performance | planned | 3 |  |
+| [060-investment-visibility](epics/060-investment-visibility/_epic.md) | Investment account visibility and trustworthy performance | in-progress | 3 | charlie |
 
 ## Tasks
 
@@ -76,7 +76,7 @@ dependencies are done; a blank assignment means unassigned.
 | [SPK-06](epics/040-timeline-spike-attribution/tasks/SPK-06.md) | 040-timeline-spike-attribution | todo | SPK-05 |  | Independently verify spike mathematics, usability and source-point parity |
 | [TIME-01](epics/050-shared-date-range-semantics/tasks/TIME-01.md) | 050-shared-date-range-semantics | done |  | charlie | Inventory date-filtered surfaces and settle an explicit date/comparison contract |
 | [TIME-02](epics/050-shared-date-range-semantics/tasks/TIME-02.md) | 050-shared-date-range-semantics | done | TIME-01 | time_contract_tests | Pin shared date bounds and comparison mapping with failing unit/API tests |
-| [TIME-03](epics/050-shared-date-range-semantics/tasks/TIME-03.md) | 050-shared-date-range-semantics | in-progress | TIME-02 | time03_implementation | Implement shared date engine, typed selector and comparison adapter |
+| [TIME-03](epics/050-shared-date-range-semantics/tasks/TIME-03.md) | 050-shared-date-range-semantics | done | TIME-02 | time03_implementation | Implement shared date engine, typed selector and comparison adapter |
 | [TIME-04](epics/050-shared-date-range-semantics/tasks/TIME-04.md) | 050-shared-date-range-semantics | done | TIME-01, TIME-02 | time04_tests | Pin cross-screen period-selection and monetary-parity behavior with failing integration tests |
 | [TIME-05](epics/050-shared-date-range-semantics/tasks/TIME-05.md) | 050-shared-date-range-semantics | todo | TIME-03, TIME-04 |  | Integrate unified range selection across all applicable views |
 | [TIME-06](epics/050-shared-date-range-semantics/tasks/TIME-06.md) | 050-shared-date-range-semantics | todo | TIME-05 |  | Independently verify date-selection consistency and source evidence |
@@ -86,7 +86,7 @@ dependencies are done; a blank assignment means unassigned.
 | [INV-03](epics/060-investment-visibility/tasks/INV-03.md) | 060-investment-visibility | done | INV-02 | codex | Pin ingestion and spending-isolation regression contracts |
 | [INV-04](epics/060-investment-visibility/tasks/INV-04.md) | 060-investment-visibility | done | INV-03 | codex | Implement isolated investment ingestion and valuation history |
 | [INV-05](epics/060-investment-visibility/tasks/INV-05.md) | 060-investment-visibility | done | INV-04 |  | Independently verify ingestion and spending isolation |
-| [INV-06](epics/060-investment-visibility/tasks/INV-06.md) | 060-investment-visibility | todo | INV-05, TIME-01 |  | Design Investments visibility and Overview navigation proposal |
+| [INV-06](epics/060-investment-visibility/tasks/INV-06.md) | 060-investment-visibility | in-progress | INV-05, TIME-01 | gpt-5.6-luna | Design Investments visibility and Overview navigation proposal |
 | [INV-07](epics/060-investment-visibility/tasks/INV-07.md) | 060-investment-visibility | todo | INV-06 |  | Pin balances and navigation interaction contracts |
 | [INV-08](epics/060-investment-visibility/tasks/INV-08.md) | 060-investment-visibility | todo | INV-07, TIME-03 |  | Build the Investments balances and holdings experience |
 | [INV-09](epics/060-investment-visibility/tasks/INV-09.md) | 060-investment-visibility | todo | INV-08 |  | Independently verify the initial visibility milestone |
