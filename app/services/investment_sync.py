@@ -257,18 +257,23 @@ def investment_summary(db, start_date=None, end_date=None, account_ids=None, tax
     # that provenance visible rather than manufacturing a zero/blank snapshot.
     if accounts and not history:
         for a in query.all():
+            if not tax_matches(a): continue
             latest = db.query(InvestmentValuation).filter_by(account_id=a.id).order_by(InvestmentValuation.as_of_date.desc()).first()
             if latest:
                 history.append({'account_id':a.id, 'date':latest.as_of_date.isoformat(), 'value':float(latest.value) if latest.value is not None else None,
                                 'currency':latest.currency, 'provenance':'observed', 'observed_at':latest.observed_at.isoformat() if latest.observed_at else None})
     state = 'not_connected' if not accounts else 'empty' if not history else 'available'
     currencies = sorted({x['currency'] for x in accounts if x['currency']})
+    observed_dates = [x['date'] for x in history]
     return {'accounts':accounts,'total_value':float(total) if accounts and complete else None,
             'currency': currencies[0] if len(currencies) == 1 else None,
             'holdings':holdings, 'history':history, 'state':state,
             'as_of': {'provenance':'observed' if history else None, 'observed_at':max((x['observed_at'] for x in history), default=None)},
             'effective_range': {'start_date': start_date.isoformat() if start_date else None, 'end_date': end_date.isoformat() if end_date else None},
-            'gain':None, 'history_coverage':'observed_only','duplicate_account_coverage':'unverified'}
+            'gain':None, 'history_coverage':'observed_only','duplicate_account_coverage':'unverified',
+            'completeness':'complete' if complete else 'partial',
+            'first_observed_date':min(observed_dates) if observed_dates else None,
+            'last_observed_date':max(observed_dates) if observed_dates else None}
 
 
 def remove_investment_data(db,item_id,account_ids):
