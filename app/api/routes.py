@@ -2481,9 +2481,15 @@ def transfers_delete(pair_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/investments/summary")
-def investments_summary(db: Session = Depends(get_db)):
+def investments_summary(start_date: date | None = None, end_date: date | None = None,
+                        account_ids: list[int] | None = None, tax_filter: str = 'all',
+                        db: Session = Depends(get_db)):
     from app.services.investment_sync import investment_summary
-    return investment_summary(db)
+    if (start_date is None) != (end_date is None) or (start_date and start_date > end_date):
+        raise HTTPException(status_code=422, detail='investment date bounds must be ordered and supplied together')
+    if tax_filter not in {'all', 'taxable', 'tax-deferred', 'roth'}:
+        raise HTTPException(status_code=422, detail='unsupported investment tax filter')
+    return investment_summary(db, start_date, end_date, account_ids, tax_filter)
 
 
 @router.post("/investments/sync/{item_id}")

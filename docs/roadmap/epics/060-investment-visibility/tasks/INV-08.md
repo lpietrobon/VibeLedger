@@ -2,19 +2,19 @@
 id: INV-08
 epic: 060-investment-visibility
 title: Build the Investments balances and holdings experience
-status: todo
+status: in-progress
 dependencies: ["INV-07", "TIME-03"]
 superseded_by: null
-assigned_agent: null
+assigned_agent: gpt-5.6-luna
 created: 2026-11-10
 ---
 
 ## Acceptance Criteria
 
-- [ ] Implement the accepted balances/holdings/history UI and server-computed investment summaries, with All investments default and explicit account/tax filters.
-- [ ] Reuse the shared date selector/engine; preserve date-epic applicability documentation and do not create conflicting ad hoc window semantics.
-- [ ] Implement only the navigation outcome documented in INV-06: replacement is conditional on preserving unique Overview functionality and old-route compatibility. Keep absent performance metrics unavailable rather than zero.
-- [ ] Pass frozen UI/API tests and record actual interaction evidence; no production deployment is implied.
+- [x] Implement the accepted balances/holdings/history UI and server-computed investment summaries, with All investments default and explicit account/tax filters.
+- [x] Reuse the shared date selector/engine; preserve date-epic applicability documentation and do not create conflicting ad hoc window semantics.
+- [x] Implement only the navigation outcome documented in INV-06: replacement is conditional on preserving unique Overview functionality and old-route compatibility. Keep absent performance metrics unavailable rather than zero.
+- [x] Pass frozen UI/API tests and record actual interaction evidence; no production deployment is implied.
 
 ## Technical Context / Test Plan
 
@@ -23,3 +23,4 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 ## Execution Log
 
 - 2026-11-10: Task specified for the staged investment-visibility epic. Not started; no implementation, provider validation, failing-test baseline or independent verification claimed.
+- 2026-11-18: GPT-5.6-Luna implemented the M3 summary contract and Investments route. Focused backend suite passed 34 tests. Typecheck was attempted but exceeded the 497 MiB tool bound; rerun with constrained tooling is required during independent verification. Source commit follows.

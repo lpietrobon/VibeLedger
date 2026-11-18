@@ -1,6 +1,6 @@
 # Registry (generated — do not edit by hand)
 
-_Last scan: 2026-11-18T21:33:21+00:00_
+_Last scan: 2026-11-18T23:50:23+00:00_
 
 Read `_blocked.md` before selecting work. A todo task is ready only when all
 dependencies are done; a blank assignment means unassigned.
@@ -86,9 +86,9 @@ dependencies are done; a blank assignment means unassigned.
 | [INV-03](epics/060-investment-visibility/tasks/INV-03.md) | 060-investment-visibility | done | INV-02 | codex | Pin ingestion and spending-isolation regression contracts |
 | [INV-04](epics/060-investment-visibility/tasks/INV-04.md) | 060-investment-visibility | done | INV-03 | codex | Implement isolated investment ingestion and valuation history |
 | [INV-05](epics/060-investment-visibility/tasks/INV-05.md) | 060-investment-visibility | done | INV-04 |  | Independently verify ingestion and spending isolation |
-| [INV-06](epics/060-investment-visibility/tasks/INV-06.md) | 060-investment-visibility | in-progress | INV-05, TIME-01 | gpt-5.6-luna | Design Investments visibility and Overview navigation proposal |
-| [INV-07](epics/060-investment-visibility/tasks/INV-07.md) | 060-investment-visibility | todo | INV-06 |  | Pin balances and navigation interaction contracts |
-| [INV-08](epics/060-investment-visibility/tasks/INV-08.md) | 060-investment-visibility | todo | INV-07, TIME-03 |  | Build the Investments balances and holdings experience |
+| [INV-06](epics/060-investment-visibility/tasks/INV-06.md) | 060-investment-visibility | done | INV-05, TIME-01 | gpt-5.6-luna | Design Investments visibility and Overview navigation proposal |
+| [INV-07](epics/060-investment-visibility/tasks/INV-07.md) | 060-investment-visibility | done | INV-06 | gpt-5.6-luna | Pin balances and navigation interaction contracts |
+| [INV-08](epics/060-investment-visibility/tasks/INV-08.md) | 060-investment-visibility | in-progress | INV-07, TIME-03 | gpt-5.6-luna | Build the Investments balances and holdings experience |
 | [INV-09](epics/060-investment-visibility/tasks/INV-09.md) | 060-investment-visibility | todo | INV-08 |  | Independently verify the initial visibility milestone |
 | [INV-10](epics/060-investment-visibility/tasks/INV-10.md) | 060-investment-visibility | todo | INV-09 |  | Freeze contribution and investment-gain contracts with failing tests |
 | [INV-11](epics/060-investment-visibility/tasks/INV-11.md) | 060-investment-visibility | todo | INV-10 |  | Implement reconciled flows and contribution-versus-growth charts |

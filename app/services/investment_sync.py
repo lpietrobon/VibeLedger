@@ -210,9 +210,19 @@ class InvestmentSyncService:
         db.get(InvestmentSyncState,item_id).account_ids_json=encoded(ids)
 
 
-def investment_summary(db):
-    now=utcnow().replace(tzinfo=timezone.utc); accounts=[]; total=Decimal(0); complete=True
-    for a in db.query(Account).filter(Account.type.in_(INVESTMENT_TYPES)).order_by(Account.id):
+def investment_summary(db, start_date=None, end_date=None, account_ids=None, tax_filter='all'):
+    now=utcnow().replace(tzinfo=timezone.utc); accounts=[]; holdings=[]; history=[]; total=Decimal(0); complete=True
+    query = db.query(Account).filter(Account.type.in_(INVESTMENT_TYPES)).order_by(Account.id)
+    if account_ids is not None: query = query.filter(Account.id.in_(account_ids))
+    def tax_matches(a):
+        subtype = (a.subtype or '').lower()
+        if tax_filter == 'all': return True
+        if tax_filter == 'roth': return 'roth' in subtype
+        if tax_filter == 'tax-deferred': return any(x in subtype for x in ('ira','401','403','retirement','deferred')) and 'roth' not in subtype
+        if tax_filter == 'taxable': return not any(x in subtype for x in ('ira','401','403','retirement','roth','deferred'))
+        return False
+    for a in query.all():
+        if not tax_matches(a): continue
         state=db.get(InvestmentSyncState,a.item_id)
         valuation = db.query(InvestmentValuation).filter_by(account_id=a.id).order_by(
             InvestmentValuation.as_of_date.desc(), InvestmentValuation.observed_at.desc()).first()
@@ -234,8 +244,31 @@ def investment_summary(db):
                          'currency':value_currency,'valuation_status':status,'coverage':coverage,
                          'freshness':'fresh' if fresh else 'stale' if observed else 'missing',
                          'observed_at':observed.isoformat() if observed else None})
+        if value is not None:
+            holdings.extend({'account_id':a.id, 'security_id':h.security_id, 'quantity':float(h.quantity) if h.quantity is not None else None,
+                             'value':float(h.value) if h.value is not None else None, 'currency':h.currency, 'observed_at':h.observed_at.isoformat() if h.observed_at else None}
+                            for h in db.query(InvestmentHolding).filter_by(account_id=a.id, is_current=True).all())
+        valuations = db.query(InvestmentValuation).filter_by(account_id=a.id).order_by(InvestmentValuation.as_of_date.asc())
+        for v in valuations:
+            if (start_date is None or v.as_of_date >= start_date) and (end_date is None or v.as_of_date <= end_date):
+                history.append({'account_id':a.id, 'date':v.as_of_date.isoformat(), 'value':float(v.value) if v.value is not None else None,
+                                'currency':v.currency, 'provenance':'observed', 'observed_at':v.observed_at.isoformat() if v.observed_at else None})
+    # A requested transaction window may predate the first observed valuation. Keep
+    # that provenance visible rather than manufacturing a zero/blank snapshot.
+    if accounts and not history:
+        for a in query.all():
+            latest = db.query(InvestmentValuation).filter_by(account_id=a.id).order_by(InvestmentValuation.as_of_date.desc()).first()
+            if latest:
+                history.append({'account_id':a.id, 'date':latest.as_of_date.isoformat(), 'value':float(latest.value) if latest.value is not None else None,
+                                'currency':latest.currency, 'provenance':'observed', 'observed_at':latest.observed_at.isoformat() if latest.observed_at else None})
+    state = 'not_connected' if not accounts else 'empty' if not history else 'available'
+    currencies = sorted({x['currency'] for x in accounts if x['currency']})
     return {'accounts':accounts,'total_value':float(total) if accounts and complete else None,
-            'history_coverage':'observed_only','duplicate_account_coverage':'unverified'}
+            'currency': currencies[0] if len(currencies) == 1 else None,
+            'holdings':holdings, 'history':history, 'state':state,
+            'as_of': {'provenance':'observed' if history else None, 'observed_at':max((x['observed_at'] for x in history), default=None)},
+            'effective_range': {'start_date': start_date.isoformat() if start_date else None, 'end_date': end_date.isoformat() if end_date else None},
+            'gain':None, 'history_coverage':'observed_only','duplicate_account_coverage':'unverified'}
 
 
 def remove_investment_data(db,item_id,account_ids):

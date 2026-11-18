@@ -2,7 +2,7 @@
 id: INV-06
 epic: 060-investment-visibility
 title: Design Investments visibility and Overview navigation proposal
-status: in-progress
+status: done
 dependencies: ["INV-05", "TIME-01"]
 superseded_by: null
 assigned_agent: gpt-5.6-luna

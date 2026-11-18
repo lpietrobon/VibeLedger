@@ -22,6 +22,7 @@ import type {
   ReportingScope,
   DuplicateCorrection,
   DuplicateCorrectionsResponse,
+  InvestmentSummary,
 } from "./types";
 import { CATEGORY_COLORS } from "./theme";
 
@@ -66,6 +67,10 @@ const jsonBody = (method: string, body: unknown): RequestInit => ({
 function apiOrigin() {
   if (/^https?:\/\//.test(API_BASE)) return API_BASE.endsWith("/") ? API_BASE : `${API_BASE}/`;
   return new URL(API_BASE.replace(/^\//, "") + "/", window.location.origin + "/");
+}
+
+export async function getInvestmentSummary(params?: { accountIds?: number[] | null; startDate?: string; endDate?: string; taxFilter?: string }): Promise<InvestmentSummary> {
+  return jsonFetch<InvestmentSummary>("/investments/summary", { account_ids: params?.accountIds ?? undefined, start_date: params?.startDate, end_date: params?.endDate, tax_filter: params?.taxFilter ?? "all" });
 }
 
 // --- Analytics (all computed server-side; the client only fetches + maps) ---

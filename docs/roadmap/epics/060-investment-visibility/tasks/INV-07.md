@@ -2,7 +2,7 @@
 id: INV-07
 epic: 060-investment-visibility
 title: Pin balances and navigation interaction contracts
-status: in-progress
+status: done
 dependencies: ["INV-06"]
 superseded_by: null
 assigned_agent: gpt-5.6-luna
