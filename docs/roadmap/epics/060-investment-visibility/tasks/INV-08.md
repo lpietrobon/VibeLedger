@@ -24,3 +24,4 @@ Read [the epic](../_epic.md) and [its spirit](../spirit.md). Preserve server-sid
 
 - 2026-11-10: Task specified for the staged investment-visibility epic. Not started; no implementation, provider validation, failing-test baseline or independent verification claimed.
 - 2026-11-18: GPT-5.6-Luna implemented the M3 summary contract and Investments route. Focused backend suite passed 34 tests. Typecheck was attempted but exceeded the 497 MiB tool bound; rerun with constrained tooling is required during independent verification. Source commit follows.
+- 2026-11-18: Added native keyboard-reachable tax/account/date filters to the route before independent verification completed; verifier must re-check source commit.

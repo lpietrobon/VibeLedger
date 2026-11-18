@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Section } from "@/components/finance/Section";
 import { KpiCard } from "@/components/finance/KpiCard";
@@ -6,11 +7,16 @@ import { getInvestmentSummary } from "@/lib/api/client";
 import { formatCurrency, formatDate } from "@/lib/format";
 
 export default function InvestmentsPage() {
-  const query = useQuery({ queryKey: ["investments-summary"], queryFn: () => getInvestmentSummary() });
+  const [taxFilter, setTaxFilter] = useState("all");
+  const [accountId, setAccountId] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const query = useQuery({ queryKey: ["investments-summary", taxFilter, accountId], queryFn: () => getInvestmentSummary({ taxFilter, accountIds: accountId ? [Number(accountId)] : null, startDate: startDate || undefined, endDate: endDate || undefined }) });
   const data = query.data;
   return <AppShell>
     <div className="mb-4"><h1 className="text-xl font-semibold tracking-tight">Investments</h1><p className="text-sm text-muted-foreground">Observed account values and holdings. Performance will appear when supported.</p></div>
     {query.isError ? <p role="alert" className="mb-4 rounded-md border border-red-300 bg-red-50 p-3 text-sm">Investment data could not be loaded: {query.error.message}</p> : null}
+    {data ? <div className="mb-4 flex flex-wrap gap-3"><label className="text-sm">Investment scope<select aria-label="Investment tax scope" value={taxFilter} onChange={e => setTaxFilter(e.target.value)} className="ml-2 rounded-md border border-input bg-background px-2 py-1"><option value="all">All investments</option><option value="taxable">Taxable</option><option value="tax-deferred">Tax-deferred</option><option value="roth">Roth</option></select></label><label className="text-sm">Account<select aria-label="Investment account" value={accountId} onChange={e => setAccountId(e.target.value)} className="ml-2 rounded-md border border-input bg-background px-2 py-1"><option value="">All accounts</option>{data.accounts.map(a => <option key={a.account_id} value={a.account_id}>{a.name}</option>)}</select></label><label className="text-sm">From<input aria-label="Investment history start date" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="ml-2 rounded-md border border-input bg-background px-2 py-1" /></label><label className="text-sm">To<input aria-label="Investment history end date" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="ml-2 rounded-md border border-input bg-background px-2 py-1" /></label></div> : null}
     {data?.state === "not_connected" ? <section className="rounded-lg border border-border bg-card p-6"><h2 className="font-semibold">No investment accounts connected</h2><p className="mt-2 text-sm text-muted-foreground">Connect an investment account from Accounts to see observed values.</p><a className="mt-4 inline-block underline" href="/accounts">Go to Accounts</a></section> : null}
     {data?.state === "empty" ? <p className="rounded-lg border border-border bg-card p-6 text-sm">Connected, but no observed valuation is available yet. This is not a zero balance.</p> : null}
     {data?.state === "available" ? <>
