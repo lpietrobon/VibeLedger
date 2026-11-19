@@ -45,3 +45,38 @@
 ## Verdict
 
 **M3 verdict: NOT READY / FAIL.** Backend contracts and spending isolation pass, but the route does not yet expose the frozen scoped/date/coverage contract and the backend no-history fallback has a tax-scope leak. Keep INV-09 **in-progress** and INV-08 unchanged; implementation owner should address the findings, add regression coverage, and request re-verification.
+
+## 2026-11-18 re-verification after filter amendment
+
+**Verifier:** independent-verifier (follow-up)
+
+**Implementation source:** `8d66313` (`Add investment scope and date filters`), parent `babdd3b`; current checkout also contains documentation commit `68d3193`.
+**Fixture policy:** synthetic test fixtures only; no personal holdings or credentials used.
+
+### Commands and results
+
+- `python -m pytest -q tests/test_investment_visibility_tdd.py tests/test_investment_ingestion.py tests/test_investment_ingestion_regressions.py tests/test_investment_isolation.py tests/test_investment_review_regressions.py tests/test_spending_accuracy_invariants.py`
+  - The system Python has no pytest (`/usr/bin/python: No module named pytest`).
+- `/home/skywalker/VibeLedger/.venv/bin/python -m pytest -q tests/test_investment_visibility_tdd.py tests/test_investment_ingestion.py tests/test_investment_ingestion_regressions.py tests/test_investment_isolation.py tests/test_investment_review_regressions.py tests/test_spending_accuracy_invariants.py`
+  - **47 passed**, 1 existing Starlette/httpx deprecation warning, 12.33s.
+- `npm run build` (frontend)
+  - Vite transformed 2,496 modules, then the host terminated the process with `SIGTERM` during chunk rendering under the memory limit; no completed build claim.
+- `npm exec -- vitest run --pool=forks --no-file-parallelism --maxWorkers=1 src/routes/time04-cross-screen.test.tsx`
+  - Host terminated with `SIGTERM` under the memory limit before completion.
+- `npm exec -- tsc --noEmit --pretty false`
+  - Host terminated with `SIGTERM` under the memory limit before completion.
+- Browser/rendered responsive verification
+  - **Unavailable:** no browser-control tool is exposed in this verifier session. No rendered interaction or screenshot evidence is claimed.
+- `/home/skywalker/VibeLedger/.venv/bin/python docs/roadmap/scan.py`
+  - Run after documentation edits; generated roadmap outputs were checked into the verification commit.
+
+### Re-verification evidence
+
+- `app/services/investment_sync.py` now reapplies `tax_matches(a)` in the no-history fallback, and the focused backend suite passes the amended filter/date/isolation contracts.
+- `frontend/src/routes/investments.tsx` now renders keyboard-reachable tax-scope, account, From, and To controls and sends the values to `getInvestmentSummary`.
+- **Release-blocking finding remains:** the React Query key is `['investments-summary', taxFilter, accountId]` and omits `startDate` and `endDate`. The date controls update local state, but changing either date does not invalidate/refetch the query; the visible date filter therefore does not work reliably. This is an implementation finding, not changed by this verification.
+- Source inspection confirms Investments remains separate from Spending and the route retains existing review/net-worth navigation paths. The date-query-key defect prevents passing the complete M3 UI contract.
+
+### Explicit M3 verdict
+
+**M3 verdict: NOT READY / FAIL.** Backend focused verification and spending isolation pass, and the amended tax-scope fallback is fixed. INV-09 remains **in-progress**; do not mark it done until the date values are included in the query key and a verifier can complete rendered responsive interaction evidence (or an approved equivalent environment is supplied).
