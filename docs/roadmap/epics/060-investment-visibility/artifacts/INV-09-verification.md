@@ -46,6 +46,12 @@
 
 **M3 verdict: NOT READY / FAIL.** Backend contracts and spending isolation pass, but the route does not yet expose the frozen scoped/date/coverage contract and the backend no-history fallback has a tax-scope leak. Keep INV-09 **in-progress** and INV-08 unchanged; implementation owner should address the findings, add regression coverage, and request re-verification.
 
+## Final re-verification at date-key fix (independent-verifier, 2026-11-18)
+
+Source `289e2d2` was independently checked. The shared-venv focused backend suite passed 47 tests, including spending isolation; the tax-scoped fallback is fixed and the date controls now participate in the React Query key. Frontend build emitted before host memory termination; tsc/Vitest were terminated by the memory limit. Browser tooling is unavailable in this environment, so no responsive rendered interaction evidence can be claimed.
+
+**Explicit M3 verdict: NOT READY / FAIL.** The remaining blocker is unavailable browser evidence; INV-09 stays in-progress.
+
 ## 2026-11-18 re-verification after filter amendment
 
 **Verifier:** independent-verifier (follow-up)
