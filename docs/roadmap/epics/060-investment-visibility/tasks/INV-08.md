@@ -2,7 +2,7 @@
 id: INV-08
 epic: 060-investment-visibility
 title: Build the Investments balances and holdings experience
-status: in-progress
+status: done
 dependencies: ["INV-07", "TIME-03"]
 superseded_by: null
 assigned_agent: gpt-5.6-luna
