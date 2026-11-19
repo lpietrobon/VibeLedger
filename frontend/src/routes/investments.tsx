@@ -11,7 +11,7 @@ export default function InvestmentsPage() {
   const [accountId, setAccountId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const query = useQuery({ queryKey: ["investments-summary", taxFilter, accountId], queryFn: () => getInvestmentSummary({ taxFilter, accountIds: accountId ? [Number(accountId)] : null, startDate: startDate || undefined, endDate: endDate || undefined }) });
+  const query = useQuery({ queryKey: ["investments-summary", taxFilter, accountId, startDate, endDate], queryFn: () => getInvestmentSummary({ taxFilter, accountIds: accountId ? [Number(accountId)] : null, startDate: startDate || undefined, endDate: endDate || undefined }) });
   const data = query.data;
   return <AppShell>
     <div className="mb-4"><h1 className="text-xl font-semibold tracking-tight">Investments</h1><p className="text-sm text-muted-foreground">Observed account values and holdings. Performance will appear when supported.</p></div>
