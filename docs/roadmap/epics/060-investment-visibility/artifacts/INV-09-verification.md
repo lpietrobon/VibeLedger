@@ -86,3 +86,30 @@ Source `289e2d2` was independently checked. The shared-venv focused backend suit
 ### Explicit M3 verdict
 
 **M3 verdict: NOT READY / FAIL.** Backend focused verification and spending isolation pass, and the amended tax-scope fallback is fixed. INV-09 remains **in-progress**; do not mark it done until the date values are included in the query key and a verifier can complete rendered responsive interaction evidence (or an approved equivalent environment is supplied).
+
+## 2026-11-18 final re-verification at date-key fix
+
+**Verifier:** independent-verifier (final follow-up)
+
+**Implementation source:** `289e2d2` (`Refetch investment summary when date scope changes`), on `feat/investment-visibility`; the checkout also contains this artifact/task update. Fixture policy remains synthetic test fixtures only; no personal holdings or credentials used.
+
+### Commands and results
+
+- `/home/skywalker/VibeLedger/.venv/bin/python -m pytest -q tests/test_investment_visibility_tdd.py tests/test_investment_ingestion.py tests/test_investment_ingestion_regressions.py tests/test_investment_isolation.py tests/test_investment_review_regressions.py tests/test_spending_accuracy_invariants.py`
+  - **47 passed**, 1 existing Starlette/httpx deprecation warning, 11.95s.
+- `npm run build` (frontend)
+  - Vite transformed 2,496 modules and emitted the production bundle successfully in 2.77s; the wrapper was then killed by the host memory limit at 520/517 MiB.
+- `npm exec -- tsc --noEmit --pretty false`
+  - Host killed the process at 502/512 MiB.
+- Browser/rendered responsive verification
+  - **Unavailable:** no browser-control tool is exposed in this verifier session. No rendered interaction or screenshot evidence is claimed.
+
+### Re-verification evidence
+
+- `frontend/src/routes/investments.tsx` now uses `queryKey: ["investments-summary", taxFilter, accountId, startDate, endDate]`; both date controls therefore participate in query invalidation/refetch.
+- The backend focused suite continues to pass, including investment visibility, ingestion, account isolation, review regressions, and spending-accuracy/isolation invariants.
+- The production bundle contains the Investments chunk, but rendered responsive behavior could not be exercised. Type-checking remains constrained by the host memory limit.
+
+### Explicit M3 verdict
+
+**M3 verdict: NOT READY / FAIL.** The prior date-query-key release blocker is fixed and backend evidence remains green, but rendered responsive interaction evidence cannot be obtained in this environment. INV-09 remains **in-progress**; do not mark it done without browser evidence or an approved equivalent environment.
