@@ -9,7 +9,7 @@ import { CategoryComparison } from "@/components/finance/CategoryComparison";
 import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
 import { PriorPeriodsControl } from "@/components/finance/PriorPeriodsControl";
 import { usePriorPeriodCount } from "@/lib/usePriorPeriodCount";
-import { comparisonAlignment, chartComparisonPeriods, initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
+import { comparisonAlignment, chartComparisonPeriods, initialDateSelection, rangeQuery, validateRange, useDateRangeSelection } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
 import type { DateWindowParams } from "@/lib/api/client";
 import {
@@ -39,9 +39,9 @@ export default function SpendingPage() {
   const [accountIds] = useAccountScope();
   const accountScopeQuery = useAccountScopeQuery();
   const queryClient = useQueryClient();
-  const [selectedRange, setSelectedRange] = useState<DateRangeSelection>(() => ({
+  const [selectedRange, setSelectedRange] = useDateRangeSelection({
     ...initialDateSelection("current-month"), comparison: "previous-month",
-  }));
+  });
   const [priorCount, setPriorCount] = usePriorPeriodCount();
   const [selectedPoint, setSelectedPoint] = useState<string | null>(null);
   const [query, setQuery] = useState("");

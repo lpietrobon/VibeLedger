@@ -4,7 +4,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { Section } from "@/components/finance/Section";
 import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
 import { getCashflowSankey, getCategoryMovers, getSpendingTimeline } from "@/lib/api/client";
-import { initialDateSelection, rangeQuery, validateRange } from "@/lib/dateRange";
+import { initialDateSelection, rangeQuery, validateRange, useDateRangeSelection } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
 import type { DateWindowParams } from "@/lib/api/client";
 
@@ -13,9 +13,9 @@ const MoversChart = lazy(() => import("@/components/finance/charts/MoversChart")
 const CalendarHeatmap = lazy(() => import("@/components/finance/charts/CalendarHeatmap"));
 
 export default function InsightsPage() {
-  const [selectedRange, setSelectedRange] = useState<DateRangeSelection>(() => ({
+  const [selectedRange, setSelectedRange] = useDateRangeSelection({
     ...initialDateSelection("last-30"), comparison: "previous-period",
-  }));
+  });
   const [expandedFlow, setExpandedFlow] = useState<string | null>(null);
   const valid = validateRange(selectedRange);
   const bounds = { startDate: selectedRange.startDate, endDate: selectedRange.endDate };

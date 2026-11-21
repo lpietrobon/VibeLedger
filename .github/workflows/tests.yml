@@ -51,6 +51,8 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      TZ: America/Los_Angeles
     defaults:
       run:
         working-directory: frontend
