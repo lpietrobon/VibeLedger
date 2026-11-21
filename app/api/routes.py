@@ -55,6 +55,7 @@ from app.services.security import decrypt_token, encrypt_token
 from app.services.sync_service import SyncInProgressError, SyncService
 from app.services.connect_service import ConnectService
 from app.services import transfer_detector
+from app.services.account_domain import spending_activity, spending_account_ids, spending_transfer_predicate
 from app.services.accounting import (
     comparison_bounds,
     comparison_reporting,
@@ -220,12 +221,41 @@ def create_connect_session(payload: CreateConnectSessionRequest, db: Session = D
     }
 
 
+@router.post("/items/{item_id}/investments/connect")
+def create_investment_update_session(item_id: int, db: Session = Depends(get_db)):
+    if not settings.investment_link_enabled:
+        raise HTTPException(status_code=409, detail="Investment linking is not released yet")
+    item = db.get(Item, item_id)
+    if not item or item.status != "active":
+        raise HTTPException(status_code=404, detail="active item not found")
+    try:
+        link_token = PlaidClient().create_investment_update_token(
+            "default-user", decrypt_token(item.access_token_encrypted)
+        )["link_token"]
+        _run_connect_tunnel("open")
+    except Exception:
+        # Provider exceptions may contain credentials; never reflect their body.
+        raise HTTPException(status_code=502, detail="Unable to prepare investment consent") from None
+    session = ConnectService().create_session(
+        db, link_token=link_token, purpose="investment_update",
+        plaid_item_id=item.plaid_item_id,
+    )
+    return {
+        "session_token": session.session_token,
+        "expires_at": session.expires_at.isoformat(),
+        "connect_url": f"{settings.app_base_url}/connect/start?session={session.session_token}",
+    }
+
+
 @router.get("/connect/start", response_class=HTMLResponse)
 def connect_start(session: str, db: Session = Depends(get_db)):
     svc = ConnectService()
     active = svc.get_active_session(db, session)
     if not active:
         raise HTTPException(status_code=400, detail="invalid or expired session")
+
+    if not active.link_token and active.purpose != "bank":
+        raise HTTPException(status_code=400, detail="missing update token; create a new session")
 
     if not active.link_token:
         client = PlaidClient()
@@ -325,6 +355,30 @@ def connect_complete(payload: ConnectCompleteRequest, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="invalid or expired session")
 
     client = PlaidClient()
+    if active.purpose == "investment_update":
+        item = db.query(Item).filter(Item.plaid_item_id == active.plaid_item_id, Item.status == "active").first()
+        if not item:
+            raise HTTPException(status_code=409, detail="original connection no longer available")
+        try:
+            readiness = client.get_investment_readiness(decrypt_token(item.access_token_encrypted))
+        except Exception:
+            raise HTTPException(status_code=502, detail="Unable to verify investment consent") from None
+        if readiness["investment_products"]["consented_products"] is not True:
+            raise HTTPException(status_code=409, detail="Investment consent not yet confirmed by provider")
+        # A callback is not coverage proof. No exchange, account write or sync.
+        active.status = "completed"
+        active.completed_at = utcnow()
+        db.commit()
+        cleanup_pending = False
+        try:
+            _run_connect_tunnel("close")
+        except RuntimeError:
+            cleanup_pending = True
+            logger.warning("Investment consent completed; tunnel cleanup pending")
+        return {"status": "consented", "item_id": item.plaid_item_id,
+                "coverage_verified": False, "cleanup_pending": cleanup_pending}
+    if not public_token:
+        raise HTTPException(status_code=400, detail="public_token required for a new connection")
     resp = client.exchange_public_token(public_token)
 
     existing = db.query(Item).filter(Item.plaid_item_id == resp["item_id"]).first()
@@ -427,6 +481,9 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
             synchronize_session=False
         )
         db.query(Transaction).filter(Transaction.item_id == item_id).delete(synchronize_session=False)
+
+    from app.services.investment_sync import remove_investment_data
+    remove_investment_data(db, item_id, account_ids)
 
     if account_ids:
         db.query(AccountBalanceSnapshot).filter(AccountBalanceSnapshot.account_id.in_(account_ids)).delete(
@@ -658,7 +715,7 @@ def transaction_search_suggestions(
         db.query(expr.label("value"), func.count(Transaction.id).label("n"))
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
-        .filter(expr.is_not(None))
+        .filter(expr.is_not(None), Transaction.account_id.in_(spending_account_ids()))
         .group_by(expr)
         .order_by(func.count(Transaction.id).desc())
         .all()
@@ -702,7 +759,7 @@ def list_categories(
         db.query(expr.label("value"), func.count(Transaction.id).label("n"))
         .join(Account, Account.id == Transaction.account_id)
         .outerjoin(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
-        .filter(expr.is_not(None))
+        .filter(expr.is_not(None), Transaction.account_id.in_(spending_account_ids()))
         .group_by(expr)
         .all()
     )
@@ -752,6 +809,7 @@ def list_transactions(
         Transaction.id == TransactionAnnotation.transaction_id,
     )
 
+    base = spending_activity(base)
     if start_date:
         base = base.filter(Transaction.date >= start_date)
     if end_date:
@@ -786,6 +844,7 @@ def list_transactions(
         pair_rows = db.query(
             TransferPair.id, TransferPair.txn_out_id, TransferPair.txn_in_id, TransferPair.confirmed
         ).filter(
+            spending_transfer_predicate(TransferPair),
             or_(
                 TransferPair.txn_out_id.in_(page_ids),
                 TransferPair.txn_in_id.in_(page_ids),
@@ -1053,6 +1112,7 @@ def _scoped_transactions_query(db: Session, scope):
         TransactionAnnotation.transaction_id == Transaction.id,
     )
 
+    q = spending_activity(q)
     if scope.start_date:
         q = q.filter(Transaction.date >= scope.start_date)
     if scope.end_date:
@@ -1354,6 +1414,7 @@ def _apply_transfer_exclusion(q, include_transfers: bool):
     fingerprints, so anything carrying it was silently and permanently missing
     from spend and income.
     """
+    q = spending_activity(q)
     return q if include_transfers else exclude_confirmed_transfers(q)
 
 
@@ -1478,14 +1539,21 @@ def cashflow_trend(
 @router.get("/analytics/accounts-summary")
 def accounts_summary(db: Session = Depends(get_db)):
     accounts = db.query(Account).all()
+    from app.services.investment_sync import investment_summary
+    investment_coverage = investment_summary(db)
+    observed = {row['account_id']: row for row in investment_coverage['accounts']}
+    def balance(a):
+        return observed[a.id]['value'] if a.id in observed else a.current_balance
+    def balance_currency(a):
+        return observed[a.id]['currency'] if a.id in observed else a.currency
     reporting = currency_reporting(
-        a.currency.strip().upper() if a.currency and a.currency.strip() else None
-        for a in accounts if a.current_balance is not None
-        and a.type in {"depository", "credit", "loan"}
+        balance_currency(a).strip().upper() if balance_currency(a) and balance_currency(a).strip() else None
+        for a in accounts if balance(a) is not None
+        and a.type in {"depository", "credit", "loan", "investment", "brokerage"}
     )
     by_type: dict[str, list[dict]] = {}
     for a in accounts:
-        bal = float(a.current_balance) if a.current_balance is not None else 0.0
+        bal = float(balance(a)) if balance(a) is not None else 0.0
         by_type.setdefault(a.type or "other", []).append({
             "id": a.id,
             "name": a.name,
@@ -1493,19 +1561,20 @@ def accounts_summary(db: Session = Depends(get_db)):
             "nickname": a.nickname,
             "mask": a.mask,
             "subtype": a.subtype,
-            "current_balance": round(bal, 2),
+            "current_balance": (None if balance(a) is None and a.type in {"investment", "brokerage"} else round(bal, 2)),
             "available_balance": round(float(a.available_balance), 2) if a.available_balance is not None else None,
-            "currency": a.currency,
+            "currency": balance_currency(a),
             "credit_limit": round(float(a.credit_limit), 2) if a.credit_limit is not None else None,
         })
-    assets = sum(x["current_balance"] for x in by_type.get("depository", []))
+    assets = sum(x["current_balance"] for kind in ("depository", "investment", "brokerage") for x in by_type.get(kind, []) if x["current_balance"] is not None)
     liabilities = sum(x["current_balance"] for x in by_type.get("credit", []))
     liabilities += sum(x["current_balance"] for x in by_type.get("loan", []))
+    missing_investment = any(a.type in {"investment", "brokerage"} and balance(a) is None for a in accounts)
     return {
         "reporting": reporting,
-        "assets": round(assets, 2),
+        "assets": None if missing_investment else round(assets, 2),
         "liabilities": round(liabilities, 2),
-        "net_worth": round(assets - liabilities, 2),
+        "net_worth": None if missing_investment else round(assets - liabilities, 2),
         "groups": by_type,
         # Provider IDs are authoritative for a single link, but two provider
         # IDs can still describe the same real-world account.  Do not guess
@@ -1513,6 +1582,10 @@ def accounts_summary(db: Session = Depends(get_db)):
         "coverage": {
             "duplicate_account_coverage": "unverified",
             "history_coverage": "unverified",
+            **({"investment_accounts": [
+                {key: row[key] for key in ("account_id", "freshness", "coverage", "valuation_status", "observed_at")}
+                for row in investment_coverage["accounts"]
+            ]} if investment_coverage["accounts"] else {}),
         },
     }
 
@@ -1623,10 +1696,10 @@ def analytics_overview(
         .join(TransactionAnnotation, Transaction.id == TransactionAnnotation.transaction_id)
         .filter(TransactionAnnotation.refund_status == "likely")
     )
-    likely_refunds = _apply_account_filter(likely_refunds_q, account_ids).scalar() or 0
+    likely_refunds = _apply_account_filter(spending_activity(likely_refunds_q), account_ids).scalar() or 0
     transfer_pending = (
         db.query(func.count(TransferPair.id))
-        .filter(TransferPair.confirmed == False)  # noqa: E712
+        .filter(TransferPair.confirmed == False, spending_transfer_predicate(TransferPair))  # noqa: E712
         .scalar()
     ) or 0
 
@@ -2336,14 +2409,14 @@ def transfers_list(
 ):
     """Pairs, newest first. `pending` is a whole-table count, not a page count:
     the client must not derive it by filtering `items`, which is truncated."""
-    base = db.query(TransferPair)
+    base = db.query(TransferPair).filter(spending_transfer_predicate(TransferPair))
     if confirmed is not None:
         base = base.filter(TransferPair.confirmed == confirmed)
 
     total = base.with_entities(func.count(TransferPair.id)).scalar() or 0
     pending = (
         db.query(func.count(TransferPair.id))
-        .filter(TransferPair.confirmed == False)  # noqa: E712
+        .filter(TransferPair.confirmed == False, spending_transfer_predicate(TransferPair))  # noqa: E712
         .scalar()
     ) or 0
     rows = base.order_by(TransferPair.id.desc()).limit(limit).offset(offset).all()
@@ -2405,3 +2478,30 @@ def transfers_delete(pair_id: int, db: Session = Depends(get_db)):
     db.delete(pair)
     db.commit()
     return {"status": "unpaired", "remembered": True}
+
+
+@router.get("/investments/summary")
+def investments_summary(start_date: date | None = None, end_date: date | None = None,
+                        account_ids: list[int] | None = None, tax_filter: str = 'all',
+                        db: Session = Depends(get_db)):
+    from app.services.investment_sync import investment_summary
+    if (start_date is None) != (end_date is None) or (start_date and start_date > end_date):
+        raise HTTPException(status_code=422, detail='investment date bounds must be ordered and supplied together')
+    if tax_filter not in {'all', 'taxable', 'tax-deferred', 'roth'}:
+        raise HTTPException(status_code=422, detail='unsupported investment tax filter')
+    return investment_summary(db, start_date, end_date, account_ids, tax_filter)
+
+
+@router.post("/investments/sync/{item_id}")
+def investments_sync(item_id: int, start_date: date, end_date: date, db: Session = Depends(get_db)):
+    if not settings.investment_sync_enabled:
+        raise HTTPException(status_code=409, detail="Investment data sync is not released yet")
+    from app.services.investment_sync import InvestmentSyncService, validate_window
+    try:
+        validate_window(start_date, end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    try:
+        return InvestmentSyncService().sync_item(db, item_id, start_date, end_date)
+    except Exception:
+        raise HTTPException(status_code=502, detail="Investment sync failed; last-good data preserved") from None

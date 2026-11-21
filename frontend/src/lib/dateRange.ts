@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 /** Canonical date-only reporting ranges. No monetary calculations run in the browser. */
 export type DatePreset = "current-month" | "current-year" | "last-30" | "last-365" | "custom" | "all";
 export type ComparisonRule = "none" | "previous-month" | "previous-year" | "previous-period";
@@ -119,9 +121,9 @@ export function comparisonPeriods(selection: DateRangeSelection, count: number):
   return periods;
 }
 
-/** KPI comparison always uses one prior window, even if no historical lines are drawn. */
+/** Explicit KPI rule is independent of historical chart overlays. */
 export function defaultComparison(selection: DateRangeSelection): DateRange | null {
-  return selection.preset === "all" ? null : comparisonPeriods(selection, 1)[0];
+  return selection.preset === "all" ? null : comparisonBounds(selection, selection.comparison);
 }
 
 export function presetComparison(preset: DatePreset): ComparisonRule {
@@ -131,6 +133,35 @@ export function presetComparison(preset: DatePreset): ComparisonRule {
 }
 
 /** Centralized chart resolution. A selected month plots daily rather than a single month bucket. */
+function selectionFromLocation(fallback: DateRangeSelection): DateRangeSelection {
+  const params = new URLSearchParams(window.location.search);
+  const startDate = params.get("startDate");
+  const endDate = params.get("endDate");
+  if (startDate === null && endDate === null) return fallback;
+  const comparison = params.get("comparison");
+  const rule: ComparisonRule = comparison === "previous-month" || comparison === "previous-year" || comparison === "previous-period" ? comparison : "none";
+  return { preset: "custom", startDate: startDate ?? "", endDate: endDate ?? "", comparison: rule };
+}
+
+export function useDateRangeSelection(fallback: DateRangeSelection): [DateRangeSelection, (next: DateRangeSelection) => void] {
+  const [selection, setSelection] = useState(() => selectionFromLocation(fallback));
+  useEffect(() => {
+    const onPopState = () => setSelection(selectionFromLocation(fallback));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [fallback]);
+  const update = (next: DateRangeSelection) => {
+    setSelection(next);
+    const params = new URLSearchParams(window.location.search);
+    if (next.preset === "all") { params.delete("startDate"); params.delete("endDate"); params.delete("comparison"); }
+    else if (validateRange(next)) {
+      params.set("startDate", next.startDate); params.set("endDate", next.endDate); params.set("comparison", next.comparison);
+    }
+    window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? "?" + params : ""}`);
+  };
+  return [selection, update];
+}
+
 export function trendGranularity(range: DateRange): "daily" | "monthly" {
   if (!validateRange(range)) return "monthly";
   const days = Math.round((parseDay(range.endDate).getTime() - parseDay(range.startDate).getTime()) / 86400000) + 1;

@@ -151,6 +151,19 @@ it("requests full prior years for Year while retaining YTD summary bounds", asyn
       {startDate: "2024-01-01", endDate: "2024-12-31"},
     ],
   }));
+  // TIME-01: a range preset preserves the independently selected KPI rule.
+  // The page starts with previous-month; historical chart overlays remain full years.
+  expect(api.getSpendingSummary).toHaveBeenLastCalledWith(expect.objectContaining({
+    startDate: "2026-01-01", endDate: "2026-10-25",
+    compareStartDate: "2025-12-01", compareEndDate: "2026-09-25",
+  }));
+  const comparison = container.querySelector('select[aria-label="Comparison rule"]') as HTMLSelectElement;
+  expect(comparison.value).toBe("previous-month");
+  await act(async () => {
+    comparison.value = "previous-year";
+    comparison.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await settled(); await settled();
   expect(api.getSpendingSummary).toHaveBeenLastCalledWith(expect.objectContaining({
     compareStartDate: "2025-01-01", compareEndDate: "2025-10-25",
   }));

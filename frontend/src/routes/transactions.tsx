@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { ArrowDownUp, Edit3, X } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
-import { initialDateSelection, validateRange } from "@/lib/dateRange";
+import { initialDateSelection, validateRange, useDateRangeSelection } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
 import { Section } from "@/components/finance/Section";
 import { SearchBar, SearchChips } from "@/components/finance/SearchBar";
@@ -59,14 +59,7 @@ export default function TransactionsPage() {
   const comparison = urlParams.get("comparison");
   const [query, setQuery] = useState(urlParams.get("query") ?? "");
   const [category, setCategory] = useState(urlParams.get("category") ?? "All");
-  const [dateRange, setDateRange] = useState<DateRangeSelection>(() => {
-    const startDate = urlParams.get("startDate");
-    const endDate = urlParams.get("endDate");
-    if (startDate !== null || endDate !== null) {
-      return { preset: "custom", comparison: "none", startDate: startDate ?? "", endDate: endDate ?? "" };
-    }
-    return initialDateSelection("all");
-  });
+  const [dateRange, setDateRange] = useDateRangeSelection(initialDateSelection("all"));
   const startDate = dateRange.startDate;
   const endDate = dateRange.endDate;
   const [sort, setSort] = useState(urlParams.get("sort") ?? "date");
@@ -81,7 +74,7 @@ export default function TransactionsPage() {
   const [duplicateFeedback, setDuplicateFeedback] = useState<string | null>(null);
   const [onlyUnreviewed, setOnlyUnreviewed] = useState(false);
   const accountScopeQuery = useAccountScopeQuery();
-  const limit = filter || startDate || endDate || category !== "All" || query || accountScopeQuery ? 500 : 100;
+  const limit = filter || startDate || endDate || category !== "All" || query || accountScopeQuery ? 2000 : 100;
   const serverQuery = [filter ? FILTER_QUERY[filter] : "", accountScopeQuery, query]
     .filter(Boolean)
     .join(" ");

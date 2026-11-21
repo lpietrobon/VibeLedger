@@ -10,7 +10,16 @@ explicit cross-epic dependencies recorded in task metadata. The two new spending
 UX epics decompose the [October 2026 priorities](spending-ux-priorities-2026-10-25.md)
 into separately assigned test-first, implementation and independent-verification
 slices. They are planned, not implemented. Read an
-epic's `spirit.md` before choosing an implementation. The
+epic's `spirit.md` before choosing an implementation.
+
+[Investment account visibility and trustworthy performance](epics/060-investment-visibility/_epic.md)
+is planned from provider coverage through isolated ingestion, balances, contribution/growth
+charts, pooled allocation and returns. Investment activity must remain outside spending
+analytics. Its navigation scope evaluates replacing Overview while preserving unique
+review/net-worth workflows; no tab has been removed. See the epic for staged release
+gates and dependencies on the shared date contract/implementation.
+
+The
 [earlier feature backlog](../finance-intelligence-roadmap.md) is preserved and
 deferred; it is not the current execution queue.
 

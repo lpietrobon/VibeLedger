@@ -32,7 +32,7 @@ def _seed():
         item = Item(plaid_item_id="i-cat", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id="a-cat", item_id=item.id, name="Checking")
+        account = Account(type="depository", plaid_account_id="a-cat", item_id=item.id, name="Checking")
         db.add(account)
         db.flush()
 

@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import date
 import hashlib
 from typing import Any
@@ -44,7 +45,94 @@ class PlaidClient:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Plaid SDK client: {e}") from e
 
+    @staticmethod
+    def _investment_payload(response):
+        return response.to_dict() if hasattr(response, "to_dict") else response
+
+    def get_investment_holdings(self, access_token: str) -> dict:
+        if self._mock:
+            return {"accounts": [], "securities": [], "holdings": []}
+        from plaid.model.investments_holdings_get_request import InvestmentsHoldingsGetRequest
+        return self._investment_payload(self._client.investments_holdings_get(
+            InvestmentsHoldingsGetRequest(access_token=access_token)))
+
+    def get_investment_transactions(self, access_token: str, start_date: date, end_date: date) -> dict:
+        from app.services.investment_sync import validate_window
+        validate_window(start_date, end_date)
+        if self._mock:
+            return {"investment_transactions": [], "securities": []}
+        from plaid.model.investments_transactions_get_request import InvestmentsTransactionsGetRequest
+        from plaid.model.investments_transactions_get_request_options import InvestmentsTransactionsGetRequestOptions
+        rows, securities, seen = [], {}, set()
+        expected = None
+        while True:
+            request = InvestmentsTransactionsGetRequest(access_token=access_token,
+                start_date=start_date, end_date=end_date,
+                options=InvestmentsTransactionsGetRequestOptions(count=500, offset=len(rows)))
+            page = self._investment_payload(self._client.investments_transactions_get(request))
+            total = page.get("total_investment_transactions")
+            batch = page.get("investment_transactions")
+            if not isinstance(total, int) or total < 0 or not isinstance(batch, list):
+                raise ValueError("incomplete investment page")
+            if expected is None: expected = total
+            if total != expected or len(rows)+len(batch) > total:
+                raise ValueError("unstable investment pagination")
+            for row in batch:
+                key = row.get("investment_transaction_id")
+                if not key or key in seen: raise ValueError("duplicate investment page identity")
+                seen.add(key)
+            rows.extend(batch)
+            if not isinstance(page.get("securities"), list):
+                raise ValueError("incomplete investment securities page")
+            for security in page["securities"]:
+                key = security.get("security_id")
+                if not key or (key in securities and securities[key] != security):
+                    raise ValueError("unstable investment security metadata")
+                securities[key] = security
+            if len(rows) == total: break
+            if not batch: raise ValueError("incomplete investment pagination")
+        return {"investment_transactions": rows, "securities": list(securities.values())}
+
+    def create_investment_link_token(self, user_id: str) -> dict:
+        """Prepare NEW investment connections only; not wired to public routes.
+
+        Calling this against production requires entitlement/billing clearance.
+        Existing Items must use a separately verified update-mode flow instead.
+        No token exchange, account ingestion, or bank sync occurs here.
+        """
+        if self._mock:
+            return {"link_token": f"mock-investment-link-{user_id}"}
+        return self._create_link_token(user_id, ["investments"])
+
+    def create_investment_update_token(self, user_id: str, access_token: str) -> dict:
+        """Collect additional consent on an existing Item, without initializing data."""
+        if self._mock:
+            return {"link_token": f"mock-investment-update-{user_id}"}
+        from plaid.model.country_code import CountryCode
+        from plaid.model.link_token_create_request import LinkTokenCreateRequest
+        from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+        from plaid.model.link_token_create_request_update import LinkTokenCreateRequestUpdate
+        from plaid.model.products import Products
+
+        kwargs = dict(
+            user=LinkTokenCreateRequestUser(client_user_id=user_id),
+            client_name="VibeLedger", language="en",
+            country_codes=[CountryCode(c.strip()) for c in settings.plaid_country_codes.split(",") if c.strip()],
+            access_token=access_token,
+            additional_consented_products=[Products("investments")],
+            update=LinkTokenCreateRequestUpdate(account_selection_enabled=True),
+        )
+        if settings.plaid_redirect_uri:
+            kwargs["redirect_uri"] = settings.plaid_redirect_uri
+        response = self._client.link_token_create(LinkTokenCreateRequest(**kwargs))
+        return {"link_token": response["link_token"]}
+
     def create_link_token(self, user_id: str) -> dict:
+        return self._create_link_token(
+            user_id, [p.strip() for p in settings.plaid_products.split(",") if p.strip()]
+        )
+
+    def _create_link_token(self, user_id: str, product_names: list[str]) -> dict:
         if self._mock:
             return {"link_token": f"mock-link-token-{user_id}"}
 
@@ -54,7 +142,7 @@ class PlaidClient:
         from plaid.model.link_token_transactions import LinkTokenTransactions
         from plaid.model.products import Products
 
-        products = [Products(p.strip()) for p in settings.plaid_products.split(",") if p.strip()]
+        products = [Products(p) for p in product_names]
         country_codes = [CountryCode(c.strip()) for c in settings.plaid_country_codes.split(",") if c.strip()]
 
         req_kwargs: dict[str, Any] = {
@@ -132,6 +220,44 @@ class PlaidClient:
                 }
             )
         return out
+
+    def get_investment_readiness(self, access_token: str) -> dict[str, Any]:
+        """Read existing Item metadata without initializing Investments.
+
+        This is a coverage-spike diagnostic, not an entitlement check or a
+        successful holdings/activity sync. Product availability, billing and
+        consent are separate signals; absent metadata means unknown. The
+        allowlisted summary deliberately omits account identity and balances.
+        No Link, refresh, investment endpoint, or database write is performed.
+        Provider failures propagate rather than producing partial success.
+        """
+        item: Any = {}
+        if not self._mock:
+            from plaid.model.item_get_request import ItemGetRequest
+
+            response = self._client.item_get(ItemGetRequest(access_token=access_token))
+            item = response["item"]
+
+        accounts = self.get_accounts(access_token)
+        counts = Counter(
+            (account.get("type") or "unknown", account.get("subtype") or "unknown")
+            for account in accounts
+        )
+        product_flags = {}
+        for field in ("available_products", "billed_products", "consented_products"):
+            products = item.get(field)
+            product_flags[field] = (
+                None if products is None else any(str(product) == "investments" for product in products)
+            )
+        return {
+            "source": "mock" if self._mock else "provider_metadata",
+            "coverage_verified": False,
+            "investment_products": product_flags,
+            "account_types": [
+                {"type": account_type, "subtype": subtype, "count": count}
+                for (account_type, subtype), count in sorted(counts.items())
+            ],
+        }
 
     def sync_transactions(self, access_token: str, cursor: str | None = None) -> dict:
         if self._mock:

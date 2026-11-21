@@ -28,7 +28,7 @@ class CreateConnectSessionRequest(BaseModel):
 
 class ConnectCompleteRequest(BaseModel):
     session_token: str
-    public_token: str
+    public_token: str | None = None
 
 
 class PatchAnnotationRequest(BaseModel):

@@ -22,7 +22,7 @@ def add_row(db, key, amount=10, currency="USD", when=date(2024, 2, 10), *, pendi
         item = Item(plaid_item_id="reporting-item", access_token_encrypted=encrypt_token("t"))
         db.add(item)
         db.flush()
-    account = Account(plaid_account_id=f"account-{key}", item_id=item.id, name=key, currency=currency)
+    account = Account(type="depository", plaid_account_id=f"account-{key}", item_id=item.id, name=key, currency=currency)
     db.add(account)
     db.flush()
     tx = Transaction(plaid_transaction_id=key, account_id=account.id, item_id=item.id,

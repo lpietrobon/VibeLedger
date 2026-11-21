@@ -21,7 +21,7 @@ def _seed():
         item = Item(plaid_item_id="i-mob", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(currency="USD", plaid_account_id="a-mob", item_id=item.id, name="Checking")
+        account = Account(type="depository", currency="USD", plaid_account_id="a-mob", item_id=item.id, name="Checking")
         db.add(account)
         db.flush()
 
@@ -56,7 +56,7 @@ def _seed_two_accounts():
         item = Item(plaid_item_id="i-mob2", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(currency="USD", plaid_account_id="a-mob2", item_id=item.id, name="Savings")
+        account = Account(type="depository", currency="USD", plaid_account_id="a-mob2", item_id=item.id, name="Savings")
         db.add(account)
         db.flush()
 

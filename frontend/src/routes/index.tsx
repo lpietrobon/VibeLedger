@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { DateRangeSelector } from "@/components/finance/DateRangeSelector";
-import { initialDateSelection, rangeQuery, trendGranularity, validateRange } from "@/lib/dateRange";
+import { initialDateSelection, rangeQuery, trendGranularity, validateRange, useDateRangeSelection } from "@/lib/dateRange";
 import type { DateRangeSelection } from "@/lib/dateRange";
 import type { DateWindowParams } from "@/lib/api/client";
 import { KpiCard } from "@/components/finance/KpiCard";
@@ -34,9 +34,9 @@ function appHref(path: string) {
 export default function OverviewPage() {
   const [accountIds] = useAccountScope();
   const accountScopeQuery = useAccountScopeQuery();
-  const [dateRange, setDateRange] = useState<DateRangeSelection>(() => ({
+  const [dateRange, setDateRange] = useDateRangeSelection({
     ...initialDateSelection("current-month"), comparison: "previous-month",
-  }));
+  });
   const dates: DateWindowParams = { ...rangeQuery(dateRange), accountIds };
   const key = [accountIds, dates.startDate, dates.endDate, dates.compareStartDate, dates.compareEndDate];
   const valid = validateRange(dateRange);

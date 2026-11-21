@@ -1,0 +1,689 @@
+
+ RUN  v4.1.10 /home/skywalker/VibeLedger-investments/frontend
+
+ ❯ src/routes/time04-cross-screen.test.tsx (56 tests | 36 failed) 8203ms
+     × restores literal legacy bookmarked bounds and unrelated query parameters 498ms
+     × responds to browser back/forward navigation while already mounted 139ms
+     × does not request an invalid bookmark startDate=2020-03-05 184ms
+     × does not request an invalid bookmark startDate=2020-03-17&endDate=2020-03-05 91ms
+     × does not request an invalid bookmark startDate=2023-02-29&endDate=2023-03-04 89ms
+     × persists keyboard-editable custom bounds across remount 140ms
+     × restores literal legacy bookmarked bounds and unrelated query parameters 98ms
+     × responds to browser back/forward navigation while already mounted 96ms
+     × does not request an invalid bookmark startDate=2020-03-05 76ms
+     × does not request an invalid bookmark startDate=2020-03-17&endDate=2020-03-05 79ms
+     × does not request an invalid bookmark startDate=2023-02-29&endDate=2023-03-04 77ms
+     × persists keyboard-editable custom bounds across remount 121ms
+     × restores literal legacy bookmarked bounds and unrelated query parameters 47ms
+     × responds to browser back/forward navigation while already mounted 67ms
+     × does not request an invalid bookmark startDate=2020-03-05 48ms
+     × does not request an invalid bookmark startDate=2020-03-17&endDate=2020-03-05 46ms
+     × does not request an invalid bookmark startDate=2023-02-29&endDate=2023-03-04 59ms
+     × persists keyboard-editable custom bounds across remount 77ms
+     × responds to browser back/forward navigation while already mounted 100ms
+     × persists keyboard-editable custom bounds across remount 98ms
+   × Insights None suppresses movers and preserves Sankey/heatmap bounds 49ms
+   × Spending shares exact dates across summary, category, pace, timeline and Activity 74ms
+   × Overview restores independent previous-month comparison with literal inclusive bounds 61ms
+   × Overview restores independent previous-year comparison with literal inclusive bounds 62ms
+   × Overview restores independent previous-period comparison with literal inclusive bounds 61ms
+   × Spending restores independent previous-month comparison with literal inclusive bounds 60ms
+   × Spending restores independent previous-year comparison with literal inclusive bounds 64ms
+   × Spending restores independent previous-period comparison with literal inclusive bounds 63ms
+   × Insights restores independent previous-month comparison with literal inclusive bounds 26ms
+   × Insights restores independent previous-year comparison with literal inclusive bounds 46ms
+   × Insights restores independent previous-period comparison with literal inclusive bounds 25ms
+   × Activity can reach evidence beyond the first 500 matching rows without losing date scope 3492ms
+   × Overview persists independent comparator choice without changing selected dates 81ms
+   × Spending persists independent comparator choice without changing selected dates 79ms
+   × Insights persists independent comparator choice without changing selected dates 43ms
+   × Overview selected flow and evidence requests share exact dates while current snapshot remains separate 54ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 36 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview > restores literal legacy bookmarked bounds and unrelated query parameters
+AssertionError: expected { startDate: '2026-10-01', …(4) } to match object { startDate: '2020-03-05', …(1) }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:53:32
+     51|   window.history.replaceState({}, "", `${base}${page.path}?startDate=2…
+     52|   await mount(page.Component);
+     53|   expect(params(page.request)).toMatchObject({ startDate: "2020-03-05"…
+       |                                ^
+     54|   expect(new URLSearchParams(location.search).get("source")).toBe("leg…
+     55|   expect(host.textContent).toContain("2020-03-05");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview > responds to browser back/forward navigation while already mounted
+AssertionError: expected { startDate: '2026-10-01', …(4) } to match object { startDate: '2024-02-29', …(1) }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "endDate": "2024-03-04",
+-   "startDate": "2024-02-29",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:67:32
+     65|   });
+     66|   await settle();
+     67|   expect(params(page.request)).toMatchObject({ startDate: "2024-02-29"…
+       |                                ^
+     68|  });
+     69|  it.each(["startDate=2020-03-05", "startDate=2020-03-17&endDate=2020-0…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview > does not request an invalid bookmark startDate=2020-03-05
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview > does not request an invalid bookmark startDate=2020-03-17&endDate=2020-03-05
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview > does not request an invalid bookmark startDate=2023-02-29&endDate=2023-03-04
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "accountIds": Array [],
+        "compareEndDate": "2026-09-25",
+        "compareStartDate": "2026-09-01",
+        "endDate": "2026-10-25",
+        "startDate": "2026-10-01",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/routes/time04-cross-screen.test.tsx:71:28
+     69|  it.each(["startDate=2020-03-05", "startDate=2020-03-17&endDate=2020-0…
+     70|   window.history.replaceState({}, "", `${base}${page.path}?${query}`);…
+     71|   expect(page.request).not.toHaveBeenCalled();
+       |                            ^
+     72|  });
+     73|  it("persists keyboard-editable custom bounds across remount", async (…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview > persists keyboard-editable custom bounds across remount
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending > persists keyboard-editable custom bounds across remount
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights > persists keyboard-editable custom bounds across remount
+ FAIL  src/routes/time04-cross-screen.test.tsx > Activity > persists keyboard-editable custom bounds across remount
+AssertionError: expected null to be '2020-03-05' // Object.is equality
+
+- Expected:
+"2020-03-05"
+
++ Received:
+null
+
+ ❯ src/routes/time04-cross-screen.test.tsx:77:32
+     75|   change('input[aria-label="From date"]', "2020-03-05"); change('input…
+     76|   const url = new URLSearchParams(location.search);
+     77|   expect(url.get("startDate")).toBe("2020-03-05"); expect(url.get("end…
+       |                                ^
+     78|   act(() => root.unmount()); await mount(page.Component);
+     79|   expect(params(page.request)).toMatchObject({ startDate: "2020-03-05"…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending > restores literal legacy bookmarked bounds and unrelated query parameters
+AssertionError: expected { granularity: 'monthly', …(5) } to match object { startDate: '2020-03-05', …(1) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:53:32
+     51|   window.history.replaceState({}, "", `${base}${page.path}?startDate=2…
+     52|   await mount(page.Component);
+     53|   expect(params(page.request)).toMatchObject({ startDate: "2020-03-05"…
+       |                                ^
+     54|   expect(new URLSearchParams(location.search).get("source")).toBe("leg…
+     55|   expect(host.textContent).toContain("2020-03-05");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending > responds to browser back/forward navigation while already mounted
+AssertionError: expected { granularity: 'monthly', …(5) } to match object { startDate: '2024-02-29', …(1) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "endDate": "2024-03-04",
+-   "startDate": "2024-02-29",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:67:32
+     65|   });
+     66|   await settle();
+     67|   expect(params(page.request)).toMatchObject({ startDate: "2024-02-29"…
+       |                                ^
+     68|  });
+     69|  it.each(["startDate=2020-03-05", "startDate=2020-03-17&endDate=2020-0…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending > does not request an invalid bookmark startDate=2020-03-05
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending > does not request an invalid bookmark startDate=2020-03-17&endDate=2020-03-05
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending > does not request an invalid bookmark startDate=2023-02-29&endDate=2023-03-04
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "accountIds": Array [],
+        "compareEndDate": "2026-09-25",
+        "compareStartDate": "2026-09-01",
+        "endDate": "2026-10-25",
+        "granularity": "monthly",
+        "startDate": "2026-10-01",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/routes/time04-cross-screen.test.tsx:71:28
+     69|  it.each(["startDate=2020-03-05", "startDate=2020-03-17&endDate=2020-0…
+     70|   window.history.replaceState({}, "", `${base}${page.path}?${query}`);…
+     71|   expect(page.request).not.toHaveBeenCalled();
+       |                            ^
+     72|  });
+     73|  it("persists keyboard-editable custom bounds across remount", async (…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights > restores literal legacy bookmarked bounds and unrelated query parameters
+AssertionError: expected { startDate: '2026-09-26', …(1) } to match object { startDate: '2020-03-05', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "endDate": "2026-10-25",
++   "startDate": "2026-09-26",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:53:32
+     51|   window.history.replaceState({}, "", `${base}${page.path}?startDate=2…
+     52|   await mount(page.Component);
+     53|   expect(params(page.request)).toMatchObject({ startDate: "2020-03-05"…
+       |                                ^
+     54|   expect(new URLSearchParams(location.search).get("source")).toBe("leg…
+     55|   expect(host.textContent).toContain("2020-03-05");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights > responds to browser back/forward navigation while already mounted
+AssertionError: expected { startDate: '2026-09-26', …(1) } to match object { startDate: '2024-02-29', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "endDate": "2024-03-04",
+-   "startDate": "2024-02-29",
++   "endDate": "2026-10-25",
++   "startDate": "2026-09-26",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:67:32
+     65|   });
+     66|   await settle();
+     67|   expect(params(page.request)).toMatchObject({ startDate: "2024-02-29"…
+       |                                ^
+     68|  });
+     69|  it.each(["startDate=2020-03-05", "startDate=2020-03-17&endDate=2020-0…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights > does not request an invalid bookmark startDate=2020-03-05
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights > does not request an invalid bookmark startDate=2020-03-17&endDate=2020-03-05
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights > does not request an invalid bookmark startDate=2023-02-29&endDate=2023-03-04
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "endDate": "2026-10-25",
+        "startDate": "2026-09-26",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/routes/time04-cross-screen.test.tsx:71:28
+     69|  it.each(["startDate=2020-03-05", "startDate=2020-03-17&endDate=2020-0…
+     70|   window.history.replaceState({}, "", `${base}${page.path}?${query}`);…
+     71|   expect(page.request).not.toHaveBeenCalled();
+       |                            ^
+     72|  });
+     73|  it("persists keyboard-editable custom bounds across remount", async (…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Activity > responds to browser back/forward navigation while already mounted
+AssertionError: expected { query: '', category: 'All', …(5) } to match object { startDate: '2024-02-29', …(1) }
+(5 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "endDate": "2024-03-04",
+-   "startDate": "2024-02-29",
++   "endDate": "2020-03-17",
++   "startDate": "2020-03-05",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:67:32
+     65|   });
+     66|   await settle();
+     67|   expect(params(page.request)).toMatchObject({ startDate: "2024-02-29"…
+       |                                ^
+     68|  });
+     69|  it.each(["startDate=2020-03-05", "startDate=2020-03-17&endDate=2020-0…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights None suppresses movers and preserves Sankey/heatmap bounds
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "compareEndDate": "2026-09-25",
+        "compareStartDate": "2026-08-27",
+        "endDate": "2026-10-25",
+        "startDate": "2026-09-26",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/routes/time04-cross-screen.test.tsx:84:36
+     82| it("Insights None suppresses movers and preserves Sankey/heatmap bound…
+     83|  window.history.replaceState({}, "", `${base}/insights?startDate=2020-…
+     84|  expect(api.getCategoryMovers).not.toHaveBeenCalled();
+       |                                    ^
+     85|  for (const request of [api.getCashflowSankey, api.getSpendingTimeline…
+     86| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending shares exact dates across summary, category, pace, timeline and Activity
+AssertionError: expected { granularity: 'monthly', …(5) } to match object { startDate: '2020-03-05', …(1) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:89:147
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview restores independent previous-month comparison with literal inclusive bounds
+AssertionError: expected { startDate: '2026-10-01', …(4) } to match object { startDate: '2020-03-05', …(3) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2020-02-17",
+-   "compareStartDate": "2020-02-05",
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "compareEndDate": "2026-09-25",
++   "compareStartDate": "2026-09-01",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:116:27
+    114|   await mount(page.Component);
+    115|   const request = page.name === "Insights" ? api.getCategoryMovers : p…
+    116|   expect(params(request)).toMatchObject({ startDate: "2020-03-05", end…
+       |                           ^
+    117|   expect(host.textContent).toContain(compareStartDate); expect(host.te…
+    118|  });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview restores independent previous-year comparison with literal inclusive bounds
+AssertionError: expected { startDate: '2026-10-01', …(4) } to match object { startDate: '2020-03-05', …(3) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2019-03-17",
+-   "compareStartDate": "2019-03-05",
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "compareEndDate": "2026-09-25",
++   "compareStartDate": "2026-09-01",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:116:27
+    114|   await mount(page.Component);
+    115|   const request = page.name === "Insights" ? api.getCategoryMovers : p…
+    116|   expect(params(request)).toMatchObject({ startDate: "2020-03-05", end…
+       |                           ^
+    117|   expect(host.textContent).toContain(compareStartDate); expect(host.te…
+    118|  });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview restores independent previous-period comparison with literal inclusive bounds
+AssertionError: expected { startDate: '2026-10-01', …(4) } to match object { startDate: '2020-03-05', …(3) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2020-03-04",
+-   "compareStartDate": "2020-02-21",
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "compareEndDate": "2026-09-25",
++   "compareStartDate": "2026-09-01",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:116:27
+    114|   await mount(page.Component);
+    115|   const request = page.name === "Insights" ? api.getCategoryMovers : p…
+    116|   expect(params(request)).toMatchObject({ startDate: "2020-03-05", end…
+       |                           ^
+    117|   expect(host.textContent).toContain(compareStartDate); expect(host.te…
+    118|  });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending restores independent previous-month comparison with literal inclusive bounds
+AssertionError: expected { granularity: 'monthly', …(5) } to match object { startDate: '2020-03-05', …(3) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2020-02-17",
+-   "compareStartDate": "2020-02-05",
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "compareEndDate": "2026-09-25",
++   "compareStartDate": "2026-09-01",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:116:27
+    114|   await mount(page.Component);
+    115|   const request = page.name === "Insights" ? api.getCategoryMovers : p…
+    116|   expect(params(request)).toMatchObject({ startDate: "2020-03-05", end…
+       |                           ^
+    117|   expect(host.textContent).toContain(compareStartDate); expect(host.te…
+    118|  });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending restores independent previous-year comparison with literal inclusive bounds
+AssertionError: expected { granularity: 'monthly', …(5) } to match object { startDate: '2020-03-05', …(3) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2019-03-17",
+-   "compareStartDate": "2019-03-05",
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "compareEndDate": "2026-09-25",
++   "compareStartDate": "2026-09-01",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:116:27
+    114|   await mount(page.Component);
+    115|   const request = page.name === "Insights" ? api.getCategoryMovers : p…
+    116|   expect(params(request)).toMatchObject({ startDate: "2020-03-05", end…
+       |                           ^
+    117|   expect(host.textContent).toContain(compareStartDate); expect(host.te…
+    118|  });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending restores independent previous-period comparison with literal inclusive bounds
+AssertionError: expected { granularity: 'monthly', …(5) } to match object { startDate: '2020-03-05', …(3) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2020-03-04",
+-   "compareStartDate": "2020-02-21",
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "compareEndDate": "2026-09-25",
++   "compareStartDate": "2026-09-01",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:116:27
+    114|   await mount(page.Component);
+    115|   const request = page.name === "Insights" ? api.getCategoryMovers : p…
+    116|   expect(params(request)).toMatchObject({ startDate: "2020-03-05", end…
+       |                           ^
+    117|   expect(host.textContent).toContain(compareStartDate); expect(host.te…
+    118|  });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights restores independent previous-month comparison with literal inclusive bounds
+AssertionError: expected { startDate: '2026-09-26', …(3) } to match object { startDate: '2020-03-05', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2020-02-17",
+-   "compareStartDate": "2020-02-05",
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "compareEndDate": "2026-09-25",
++   "compareStartDate": "2026-08-27",
++   "endDate": "2026-10-25",
++   "startDate": "2026-09-26",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:116:27
+    114|   await mount(page.Component);
+    115|   const request = page.name === "Insights" ? api.getCategoryMovers : p…
+    116|   expect(params(request)).toMatchObject({ startDate: "2020-03-05", end…
+       |                           ^
+    117|   expect(host.textContent).toContain(compareStartDate); expect(host.te…
+    118|  });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights restores independent previous-year comparison with literal inclusive bounds
+AssertionError: expected { startDate: '2026-09-26', …(3) } to match object { startDate: '2020-03-05', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2019-03-17",
+-   "compareStartDate": "2019-03-05",
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "compareEndDate": "2026-09-25",
++   "compareStartDate": "2026-08-27",
++   "endDate": "2026-10-25",
++   "startDate": "2026-09-26",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:116:27
+    114|   await mount(page.Component);
+    115|   const request = page.name === "Insights" ? api.getCategoryMovers : p…
+    116|   expect(params(request)).toMatchObject({ startDate: "2020-03-05", end…
+       |                           ^
+    117|   expect(host.textContent).toContain(compareStartDate); expect(host.te…
+    118|  });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights restores independent previous-period comparison with literal inclusive bounds
+AssertionError: expected { startDate: '2026-09-26', …(3) } to match object { startDate: '2020-03-05', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2020-03-04",
+-   "compareStartDate": "2020-02-21",
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "compareEndDate": "2026-09-25",
++   "compareStartDate": "2026-08-27",
++   "endDate": "2026-10-25",
++   "startDate": "2026-09-26",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:116:27
+    114|   await mount(page.Component);
+    115|   const request = page.name === "Insights" ? api.getCategoryMovers : p…
+    116|   expect(params(request)).toMatchObject({ startDate: "2020-03-05", end…
+       |                           ^
+    117|   expect(host.textContent).toContain(compareStartDate); expect(host.te…
+    118|  });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Activity can reach evidence beyond the first 500 matching rows without losing date scope
+AssertionError: expected 'Transactions500 shown · 501 totalAll …' to contain 'TIME04 final evidence'
+
+- Expected
++ Received
+
+- TIME04 final evidence
++ Transactions500 shown · 501 totalAll activityAll categoriesHOUSINGHOUSING/RENT_AND_UTILITIESHOUSING/UTILITIESFOODFOOD/GROCERIESFOOD/DININGFOOD/COFFEEFOOD/OTHERTRANSPORTTRANSPORT/RIDESHARETRANSPORT/FUELTRANSPORT/PARKINGTRANSPORT/OTHERSHOPPINGSHOPPING/GENERALSHOPPING/CLOTHINGSHOPPING/HOMESHOPPING/ELECTRONICSFUNFUN/ENTERTAINMENTFUN/TRAVELFUN/EVENTSHEALTHHEALTH/MEDICALHEALTH/PERSONAL_CAREHEALTH/FITNESSFINANCEFINANCE/LOANSFINANCE/FEESFINANCE/INVESTINGINCOMEINCOME/SALARYINCOME/INTERESTINCOME/REFUNDINCOME/OTHERSERVICES/GENERALSUBSCRIPTIONSUNCATEGORIZED30D1YMonthYearCustomAllFrom To 2020-03-05 – 2020-03-17NewestOldestHighest priceLowest priceNeeds reviewspendClear allSelect all shown0 selectedMark as duplicatesEdit selectedClearEVEvidence 0FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 1FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 2FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 3FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 4FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 5FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 6FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 7FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 8FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 9FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 10FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 11FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 12FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 13FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 14FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 15FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 16FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 17FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 18FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 19FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 20FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 21FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 22FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 23FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 24FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 25FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 26FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 27FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 28FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 29FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 30FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 31FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 32FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 33FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 34FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 35FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 36FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 37FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 38FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 39FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 40FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 41FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 42FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 43FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 44FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 45FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 46FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 47FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 48FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 49FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 50FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 51FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 52FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 53FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 54FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 55FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 56FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 57FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 58FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 59FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 60FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 61FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 62FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 63FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 64FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 65FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 66FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 67FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 68FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 69FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 70FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 71FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 72FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 73FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 74FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 75FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 76FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 77FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 78FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 79FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 80FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 81FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 82FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 83FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 84FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 85FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 86FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 87FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 88FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 89FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 90FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 91FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 92FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 93FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 94FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 95FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 96FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 97FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 98FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 99FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 100FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 101FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 102FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 103FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 104FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 105FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 106FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 107FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 108FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 109FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 110FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 111FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 112FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 113FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 114FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 115FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 116FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 117FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 118FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 119FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 120FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 121FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 122FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 123FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 124FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 125FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 126FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 127FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 128FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 129FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 130FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 131FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 132FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 133FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 134FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 135FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 136FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 137FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 138FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 139FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 140FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 141FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 142FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 143FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 144FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 145FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 146FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 147FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 148FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 149FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 150FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 151FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 152FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 153FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 154FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 155FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 156FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 157FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 158FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 159FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 160FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 161FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 162FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 163FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 164FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 165FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 166FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 167FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 168FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 169FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 170FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 171FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 172FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 173FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 174FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 175FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 176FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 177FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 178FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 179FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 180FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 181FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 182FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 183FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 184FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 185FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 186FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 187FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 188FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 189FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 190FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 191FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 192FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 193FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 194FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 195FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 196FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 197FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 198FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 199FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 200FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 201FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 202FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 203FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 204FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 205FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 206FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 207FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 208FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 209FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 210FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 211FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 212FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 213FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 214FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 215FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 216FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 217FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 218FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 219FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 220FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 221FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 222FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 223FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 224FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 225FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 226FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 227FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 228FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 229FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 230FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 231FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 232FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 233FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 234FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 235FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 236FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 237FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 238FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 239FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 240FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 241FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 242FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 243FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 244FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 245FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 246FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 247FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 248FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 249FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 250FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 251FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 252FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 253FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 254FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 255FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 256FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 257FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 258FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 259FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 260FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 261FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 262FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 263FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 264FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 265FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 266FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 267FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 268FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 269FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 270FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 271FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 272FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 273FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 274FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 275FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 276FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 277FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 278FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 279FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 280FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 281FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 282FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 283FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 284FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 285FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 286FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 287FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 288FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 289FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 290FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 291FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 292FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 293FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 294FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 295FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 296FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 297FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 298FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 299FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 300FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 301FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 302FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 303FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 304FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 305FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 306FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 307FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 308FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 309FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 310FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 311FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 312FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 313FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 314FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 315FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 316FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 317FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 318FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 319FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 320FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 321FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 322FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 323FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 324FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 325FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 326FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 327FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 328FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 329FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 330FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 331FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 332FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 333FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 334FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 335FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 336FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 337FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 338FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 339FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 340FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 341FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 342FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 343FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 344FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 345FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 346FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 347FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 348FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 349FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 350FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 351FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 352FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 353FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 354FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 355FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 356FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 357FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 358FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 359FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 360FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 361FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 362FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 363FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 364FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 365FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 366FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 367FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 368FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 369FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 370FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 371FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 372FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 373FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 374FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 375FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 376FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 377FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 378FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 379FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 380FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 381FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 382FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 383FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 384FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 385FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 386FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 387FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 388FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 389FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 390FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 391FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 392FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 393FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 394FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 395FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 396FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 397FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 398FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 399FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 400FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 401FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 402FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 403FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 404FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 405FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 406FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 407FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 408FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 409FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 410FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 411FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 412FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 413FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 414FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 415FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 416FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 417FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 418FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 419FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 420FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 421FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 422FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 423FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 424FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 425FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 426FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 427FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 428FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 429FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 430FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 431FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 432FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 433FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 434FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 435FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 436FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 437FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 438FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 439FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 440FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 441FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 442FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 443FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 444FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 445FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 446FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 447FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 448FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 449FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 450FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 451FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 452FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 453FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 454FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 455FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 456FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 457FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 458FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 459FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 460FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 461FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 462FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 463FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 464FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 465FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 466FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 467FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 468FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 469FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 470FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 471FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 472FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 473FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 474FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 475FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 476FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 477FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 478FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 479FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 480FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 481FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 482FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 483FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 484FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 485FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 486FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 487FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 488FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 489FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 490FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 491FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 492FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 493FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 494FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 495FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 496FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 497FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 498FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00EVEvidence 499FOOD/OTHER·Synthetic checking·10 Mar, 2020$1.00DateMerchantCategoryAccountSourceAmountStatus10 Mar, 2020Evidence 0FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 1FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 2FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 3FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 4FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 5FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 6FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 7FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 8FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 9FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 10FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 11FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 12FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 13FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 14FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 15FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 16FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 17FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 18FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 19FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 20FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 21FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 22FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 23FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 24FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 25FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 26FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 27FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 28FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 29FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 30FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 31FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 32FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 33FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 34FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 35FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 36FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 37FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 38FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 39FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 40FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 41FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 42FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 43FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 44FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 45FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 46FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 47FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 48FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 49FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 50FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 51FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 52FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 53FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 54FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 55FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 56FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 57FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 58FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 59FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 60FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 61FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 62FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 63FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 64FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 65FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 66FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 67FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 68FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 69FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 70FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 71FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 72FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 73FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 74FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 75FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 76FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 77FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 78FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 79FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 80FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 81FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 82FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 83FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 84FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 85FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 86FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 87FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 88FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 89FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 90FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 91FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 92FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 93FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 94FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 95FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 96FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 97FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 98FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 99FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 100FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 101FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 102FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 103FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 104FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 105FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 106FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 107FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 108FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 109FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 110FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 111FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 112FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 113FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 114FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 115FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 116FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 117FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 118FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 119FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 120FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 121FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 122FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 123FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 124FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 125FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 126FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 127FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 128FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 129FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 130FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 131FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 132FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 133FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 134FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 135FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 136FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 137FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 138FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 139FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 140FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 141FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 142FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 143FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 144FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 145FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 146FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 147FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 148FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 149FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 150FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 151FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 152FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 153FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 154FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 155FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 156FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 157FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 158FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 159FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 160FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 161FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 162FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 163FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 164FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 165FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 166FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 167FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 168FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 169FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 170FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 171FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 172FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 173FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 174FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 175FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 176FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 177FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 178FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 179FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 180FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 181FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 182FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 183FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 184FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 185FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 186FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 187FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 188FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 189FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 190FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 191FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 192FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 193FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 194FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 195FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 196FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 197FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 198FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 199FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 200FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 201FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 202FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 203FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 204FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 205FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 206FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 207FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 208FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 209FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 210FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 211FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 212FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 213FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 214FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 215FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 216FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 217FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 218FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 219FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 220FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 221FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 222FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 223FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 224FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 225FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 226FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 227FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 228FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 229FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 230FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 231FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 232FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 233FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 234FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 235FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 236FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 237FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 238FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 239FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 240FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 241FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 242FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 243FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 244FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 245FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 246FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 247FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 248FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 249FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 250FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 251FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 252FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 253FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 254FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 255FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 256FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 257FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 258FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 259FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 260FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 261FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 262FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 263FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 264FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 265FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 266FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 267FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 268FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 269FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 270FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 271FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 272FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 273FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 274FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 275FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 276FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 277FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 278FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 279FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 280FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 281FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 282FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 283FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 284FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 285FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 286FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 287FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 288FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 289FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 290FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 291FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 292FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 293FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 294FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 295FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 296FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 297FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 298FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 299FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 300FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 301FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 302FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 303FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 304FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 305FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 306FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 307FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 308FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 309FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 310FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 311FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 312FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 313FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 314FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 315FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 316FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 317FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 318FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 319FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 320FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 321FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 322FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 323FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 324FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 325FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 326FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 327FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 328FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 329FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 330FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 331FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 332FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 333FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 334FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 335FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 336FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 337FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 338FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 339FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 340FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 341FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 342FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 343FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 344FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 345FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 346FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 347FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 348FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 349FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 350FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 351FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 352FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 353FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 354FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 355FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 356FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 357FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 358FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 359FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 360FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 361FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 362FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 363FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 364FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 365FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 366FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 367FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 368FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 369FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 370FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 371FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 372FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 373FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 374FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 375FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 376FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 377FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 378FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 379FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 380FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 381FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 382FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 383FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 384FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 385FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 386FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 387FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 388FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 389FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 390FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 391FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 392FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 393FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 394FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 395FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 396FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 397FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 398FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 399FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 400FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 401FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 402FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 403FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 404FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 405FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 406FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 407FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 408FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 409FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 410FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 411FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 412FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 413FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 414FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 415FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 416FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 417FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 418FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 419FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 420FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 421FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 422FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 423FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 424FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 425FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 426FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 427FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 428FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 429FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 430FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 431FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 432FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 433FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 434FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 435FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 436FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 437FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 438FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 439FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 440FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 441FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 442FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 443FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 444FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 445FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 446FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 447FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 448FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 449FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 450FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 451FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 452FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 453FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 454FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 455FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 456FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 457FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 458FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 459FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 460FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 461FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 462FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 463FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 464FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 465FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 466FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 467FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 468FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 469FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 470FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 471FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 472FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 473FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 474FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 475FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 476FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 477FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 478FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 479FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 480FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 481FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 482FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 483FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 484FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 485FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 486FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 487FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 488FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 489FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 490FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 491FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 492FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 493FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 494FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 495FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 496FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 497FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 498FOOD/OTHERSynthetic checking$1.00Reviewed10 Mar, 2020Evidence 499FOOD/OTHERSynthetic checking$1.00Reviewed
+
+ ❯ src/routes/time04-cross-screen.test.tsx:138:27
+    136|   act(() => next.click()); await settle(); await settle();
+    137|  }
+    138|  expect(host.textContent).toContain("TIME04 final evidence");
+       |                           ^
+    139|  expect(vi.mocked(api.getTransactions).mock.calls.every(([query]) => q…
+    140| }, 30000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview persists independent comparator choice without changing selected dates
+ FAIL  src/routes/time04-cross-screen.test.tsx > Spending persists independent comparator choice without changing selected dates
+ FAIL  src/routes/time04-cross-screen.test.tsx > Insights persists independent comparator choice without changing selected dates
+AssertionError: expected 'none' to be 'previous-year' // Object.is equality
+
+Expected: "previous-year"
+Received: "none"
+
+ ❯ src/routes/time04-cross-screen.test.tsx:147:65
+    145|  expect(select).not.toBeNull();
+    146|  act(() => { select.value = "previous-year"; select.dispatchEvent(new …
+    147|  expect(new URLSearchParams(location.search).get("comparison")).toBe("…
+       |                                                                 ^
+    148|  expect(params(page.request)).toMatchObject({startDate:"2020-03-05",en…
+    149| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/36]⎯
+
+ FAIL  src/routes/time04-cross-screen.test.tsx > Overview selected flow and evidence requests share exact dates while current snapshot remains separate
+AssertionError: expected { startDate: '2026-10-01', …(4) } to match object { startDate: '2020-03-05', …(1) }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "endDate": "2020-03-17",
+-   "startDate": "2020-03-05",
++   "endDate": "2026-10-25",
++   "startDate": "2026-10-01",
+  }
+
+ ❯ src/routes/time04-cross-screen.test.tsx:152:117
+    150| it("Overview selected flow and evidence requests share exact dates whi…
+    151|  window.history.replaceState({}, "", `${base}/?startDate=2020-03-05&en…
+    152|  for (const request of [api.getOverviewSummary, api.getCashflowTrend, …
+       |                                                                                                                     ^
+    153|  expect(vi.mocked(api.getCategoryComparison).mock.calls.at(-1)?.[1]).t…
+    154| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/36]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  36 failed | 20 passed (56)
+   Start at  07:57:28
+   Duration  12.22s (transform 1.10s, setup 0ms, import 1.66s, tests 8.20s, environment 1.83s)
+

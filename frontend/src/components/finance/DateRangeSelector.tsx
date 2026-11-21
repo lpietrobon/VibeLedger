@@ -1,6 +1,6 @@
-import { useState } from "react";
-import type { DatePreset, DateRangeSelection } from "@/lib/dateRange";
-import { RANGE_PRESETS, localToday, presetBounds, presetComparison, validateRange } from "@/lib/dateRange";
+import { useEffect, useState } from "react";
+import type { ComparisonRule, DatePreset, DateRangeSelection } from "@/lib/dateRange";
+import { RANGE_PRESETS, localToday, presetBounds, COMPARISON_RULES, comparisonBounds, validateRange } from "@/lib/dateRange";
 
 function addMonths(day: string, months: number): string {
   const [y, m] = day.split("-").map(Number);
@@ -16,17 +16,28 @@ function monthGrid(month: string): Array<string | null> {
     ...Array.from({ length: days }, (_, i) => month + "-" + String(i + 1).padStart(2, "0"))];
 }
 
-export function DateRangeSelector({ value, onChange, allowAll = false }: {
+export function DateRangeSelector({ value, onChange, allowAll = false, allowComparison = true }: {
   value: DateRangeSelection;
   onChange: (next: DateRangeSelection) => void;
   allowAll?: boolean;
-  /** Comparison selection is derived from the preset, not displayed as another dropdown. */
+  /** Hide comparison controls on non-comparative Activity views. */
   allowComparison?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState(() => (value.endDate || localToday()).slice(0, 7));
   const [from, setFrom] = useState<string | null>(null);
   const [to, setTo] = useState<string | null>(null);
+
+  const [draft, setDraft] = useState({ startDate: value.startDate, endDate: value.endDate });
+  useEffect(() => { setDraft({ startDate: value.startDate, endDate: value.endDate }); }, [value.startDate, value.endDate]);
+  const editDate = (field: "startDate" | "endDate", day: string) => {
+    const next = { ...draft, [field]: day };
+    setDraft(next);
+    if (validateRange(next)) onChange({ ...value, ...next, preset: "custom" });
+  };
+  const prior = comparisonBounds(value, value.comparison);
+  const days = (start: string, end: string) => Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1;
+  const dayLabel = (n: number) => n + (n === 1 ? " day" : " days");
 
   const selectPreset = (preset: DatePreset) => {
     if (preset === "custom") {
@@ -36,7 +47,7 @@ export function DateRangeSelector({ value, onChange, allowAll = false }: {
       setOpen(true);
       return;
     }
-    onChange({ ...value, preset, ...presetBounds(preset), comparison: presetComparison(preset) });
+    onChange({ ...value, preset, ...presetBounds(preset), comparison: preset === "all" ? "none" : value.comparison });
   };
   const pick = (day: string) => {
     if (!from || to) { setFrom(day); setTo(null); return; }
@@ -46,7 +57,7 @@ export function DateRangeSelector({ value, onChange, allowAll = false }: {
     if (!from || !to) return;
     const next: DateRangeSelection = {
       preset: "custom", startDate: from, endDate: to,
-      comparison: "previous-period",
+      comparison: value.comparison,
     };
     if (!validateRange(next)) return;
     onChange(next);
@@ -73,6 +84,25 @@ export function DateRangeSelector({ value, onChange, allowAll = false }: {
           All
         </button> : null}
       </div>
+      <div className="flex flex-wrap gap-3">
+        <label>From <input type="date" aria-label="From date" value={draft.startDate}
+          onChange={(event) => editDate("startDate", event.target.value)} /></label>
+        <label>To <input type="date" aria-label="To date" value={draft.endDate}
+          onChange={(event) => editDate("endDate", event.target.value)} /></label>
+        {allowComparison ? <label>Comparison <select aria-label="Comparison rule"
+          value={value.comparison} disabled={value.preset === "all"}
+          onChange={(event) => onChange({ ...value, comparison: event.target.value as ComparisonRule })}>
+          {COMPARISON_RULES.map(rule => <option key={rule.value} value={rule.value}>{rule.label}</option>)}
+        </select></label> : null}
+      </div>
+      {!validateRange(draft, value.preset === "all") ? <p role="status">Enter a valid From–To range.</p> : null}
+      <p className="text-xs text-muted-foreground">
+        {value.preset === "all" ? "All time" : value.startDate + " – " + value.endDate}
+        {allowComparison && prior ? <>; comparison {prior.startDate} – {prior.endDate}
+          {days(value.startDate, value.endDate) !== days(prior.startDate, prior.endDate)
+            ? " (unequal duration: " + dayLabel(days(value.startDate, value.endDate)) + " vs " + dayLabel(days(prior.startDate, prior.endDate)) + ")" : null}
+        </> : null}
+      </p>
       {open ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 p-0 sm:items-center sm:p-4"
           onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>

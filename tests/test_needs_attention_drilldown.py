@@ -80,8 +80,8 @@ def _seed_ledger() -> None:
         item = Item(plaid_item_id="i-attention", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        checking = Account(plaid_account_id="a-chk-att", item_id=item.id, name="Checking", mask="1111")
-        savings = Account(plaid_account_id="a-sav-att", item_id=item.id, name="Savings", mask="2222")
+        checking = Account(type="depository", plaid_account_id="a-chk-att", item_id=item.id, name="Checking", mask="1111")
+        savings = Account(type="depository", plaid_account_id="a-sav-att", item_id=item.id, name="Savings", mask="2222")
         db.add_all([checking, savings])
         db.flush()
 
@@ -269,7 +269,7 @@ def test_schema_patches_purge_orphaned_rejected_transfer_pairs():
         item = Item(plaid_item_id="orphan-rejection", access_token_encrypted=encrypt_token("t"))
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id="orphan-rejection-account", item_id=item.id, name="Checking")
+        account = Account(type="depository", plaid_account_id="orphan-rejection-account", item_id=item.id, name="Checking")
         db.add(account)
         db.flush()
         doomed = Transaction(

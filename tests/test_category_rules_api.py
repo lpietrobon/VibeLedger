@@ -14,7 +14,7 @@ def _seed_tx(item_suffix: str, account_name: str, plaid_txn_id: str, amount: flo
         item = Item(plaid_item_id=f"item-{item_suffix}", access_token_encrypted=encrypt_token("tok"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id=f"acct-{item_suffix}", item_id=item.id, name=account_name)
+        account = Account(type="depository", plaid_account_id=f"acct-{item_suffix}", item_id=item.id, name=account_name)
         db.add(account)
         db.flush()
         tx = Transaction(
@@ -174,7 +174,7 @@ def test_apply_batch_performance_sanity_on_fixture_dataset():
         item = Item(plaid_item_id="item-batch", access_token_encrypted=encrypt_token("tok"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id="acct-batch", item_id=item.id, name="Batch Card")
+        account = Account(type="depository", plaid_account_id="acct-batch", item_id=item.id, name="Batch Card")
         db.add(account)
         db.flush()
 

@@ -1,0 +1,304 @@
+
+ RUN  v4.1.10 /home/skywalker/VibeLedger-investments/frontend
+
+ ❯ src/components/finance/time-02-selector.test.tsx (5 tests | 5 failed) 296ms
+   × exposes independent four-rule control and literal From/To 175ms
+   × changing preset preserves None 58ms
+   × Activity suppresses comparator, not custom bounds 19ms
+   × labels mapped bounds and unequal inclusive durations 21ms
+   × independent comparison choice leaves selected dates untouched 19ms
+ ❯ src/components/finance/date-controls-ux.test.tsx (2 tests | 1 failed) 229ms
+   × uses a single row of preset buttons; a two-tap Custom calendar stays open until both dates 182ms
+ ❯ src/lib/time-02-contract.test.ts (21 tests | 9 failed) 137ms
+   × serializes independently selected previous-month 42ms
+   × serializes independently selected previous-year 6ms
+   × does not infer comparison from current-month 5ms
+   × does not infer comparison from current-year 4ms
+   × does not infer comparison from last-30 3ms
+   × does not infer comparison from last-365 3ms
+   × does not infer comparison from custom 3ms
+   × maps none to HTTP bounds with empty history 16ms
+   × maps previous-month to HTTP bounds with empty history 9ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 15 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/time-02-contract.test.ts > serializes independently selected previous-month
+AssertionError: expected { startDate: '2026-10-05', …(3) } to deeply equal { startDate: '2026-10-05', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2026-09-15",
+-   "compareStartDate": "2026-09-05",
++   "compareEndDate": "2026-10-04",
++   "compareStartDate": "2026-09-24",
+    "endDate": "2026-10-15",
+    "startDate": "2026-10-05",
+  }
+
+ ❯ src/lib/time-02-contract.test.ts:25:3
+     23| ] as const)("serializes independently selected %s", (comparison, compa…
+     24|  expect(rangeQuery({ preset: "custom", startDate: "2026-10-05", endDat…
+     25|  .toEqual({ startDate: "2026-10-05", endDate: "2026-10-15", compareSta…
+       |   ^
+     26| });
+     27| it.each(["current-month", "current-year", "last-30", "last-365", "cust…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/15]⎯
+
+ FAIL  src/lib/time-02-contract.test.ts > serializes independently selected previous-year
+AssertionError: expected { startDate: '2026-10-05', …(3) } to deeply equal { startDate: '2026-10-05', …(3) }
+
+- Expected
++ Received
+
+  {
+-   "compareEndDate": "2025-10-15",
+-   "compareStartDate": "2025-10-05",
++   "compareEndDate": "2026-10-04",
++   "compareStartDate": "2026-09-24",
+    "endDate": "2026-10-15",
+    "startDate": "2026-10-05",
+  }
+
+ ❯ src/lib/time-02-contract.test.ts:25:3
+     23| ] as const)("serializes independently selected %s", (comparison, compa…
+     24|  expect(rangeQuery({ preset: "custom", startDate: "2026-10-05", endDat…
+     25|  .toEqual({ startDate: "2026-10-05", endDate: "2026-10-15", compareSta…
+       |   ^
+     26| });
+     27| it.each(["current-month", "current-year", "last-30", "last-365", "cust…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/15]⎯
+
+ FAIL  src/lib/time-02-contract.test.ts > does not infer comparison from current-month
+AssertionError: expected '2026-09-01' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"2026-09-01"
+
+ ❯ src/lib/time-02-contract.test.ts:29:50
+     27| it.each(["current-month", "current-year", "last-30", "last-365", "cust…
+     28|  const selection = initialDateSelection(preset, "2026-10-25");
+     29|  expect(rangeQuery(selection)?.compareStartDate).toBeUndefined();
+       |                                                  ^
+     30|  expect(rangeQuery(selection)?.compareEndDate).toBeUndefined();
+     31| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/15]⎯
+
+ FAIL  src/lib/time-02-contract.test.ts > does not infer comparison from current-year
+AssertionError: expected '2025-01-01' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"2025-01-01"
+
+ ❯ src/lib/time-02-contract.test.ts:29:50
+     27| it.each(["current-month", "current-year", "last-30", "last-365", "cust…
+     28|  const selection = initialDateSelection(preset, "2026-10-25");
+     29|  expect(rangeQuery(selection)?.compareStartDate).toBeUndefined();
+       |                                                  ^
+     30|  expect(rangeQuery(selection)?.compareEndDate).toBeUndefined();
+     31| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/15]⎯
+
+ FAIL  src/lib/time-02-contract.test.ts > does not infer comparison from last-30
+AssertionError: expected '2026-08-27' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"2026-08-27"
+
+ ❯ src/lib/time-02-contract.test.ts:29:50
+     27| it.each(["current-month", "current-year", "last-30", "last-365", "cust…
+     28|  const selection = initialDateSelection(preset, "2026-10-25");
+     29|  expect(rangeQuery(selection)?.compareStartDate).toBeUndefined();
+       |                                                  ^
+     30|  expect(rangeQuery(selection)?.compareEndDate).toBeUndefined();
+     31| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/15]⎯
+
+ FAIL  src/lib/time-02-contract.test.ts > does not infer comparison from last-365
+AssertionError: expected '2024-10-26' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"2024-10-26"
+
+ ❯ src/lib/time-02-contract.test.ts:29:50
+     27| it.each(["current-month", "current-year", "last-30", "last-365", "cust…
+     28|  const selection = initialDateSelection(preset, "2026-10-25");
+     29|  expect(rangeQuery(selection)?.compareStartDate).toBeUndefined();
+       |                                                  ^
+     30|  expect(rangeQuery(selection)?.compareEndDate).toBeUndefined();
+     31| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/15]⎯
+
+ FAIL  src/lib/time-02-contract.test.ts > does not infer comparison from custom
+AssertionError: expected '2026-10-24' to be undefined
+
+- Expected:
+undefined
+
++ Received:
+"2026-10-24"
+
+ ❯ src/lib/time-02-contract.test.ts:29:50
+     27| it.each(["current-month", "current-year", "last-30", "last-365", "cust…
+     28|  const selection = initialDateSelection(preset, "2026-10-25");
+     29|  expect(rangeQuery(selection)?.compareStartDate).toBeUndefined();
+       |                                                  ^
+     30|  expect(rangeQuery(selection)?.compareEndDate).toBeUndefined();
+     31| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/15]⎯
+
+ FAIL  src/lib/time-02-contract.test.ts > maps none to HTTP bounds with empty history
+AssertionError: expected '2026-09-24' to be null // Object.is equality
+
+- Expected:
+null
+
++ Received:
+"2026-09-24"
+
+ ❯ src/lib/time-02-contract.test.ts:51:53
+     49|  expect(url.searchParams.get("start_date")).toBe("2026-10-05");
+     50|  expect(url.searchParams.get("end_date")).toBe("2026-10-15");
+     51|  expect(url.searchParams.get("compare_start_date")).toBe(comparison ==…
+       |                                                     ^
+     52|  expect(url.searchParams.get("compare_end_date")).toBe(comparison === …
+     53|  expect(result.items).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/15]⎯
+
+ FAIL  src/lib/time-02-contract.test.ts > maps previous-month to HTTP bounds with empty history
+AssertionError: expected '2026-09-24' to be '2026-09-05' // Object.is equality
+
+Expected: "2026-09-05"
+Received: "2026-09-24"
+
+ ❯ src/lib/time-02-contract.test.ts:51:53
+     49|  expect(url.searchParams.get("start_date")).toBe("2026-10-05");
+     50|  expect(url.searchParams.get("end_date")).toBe("2026-10-15");
+     51|  expect(url.searchParams.get("compare_start_date")).toBe(comparison ==…
+       |                                                     ^
+     52|  expect(url.searchParams.get("compare_end_date")).toBe(comparison === …
+     53|  expect(result.items).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/15]⎯
+
+ FAIL  src/components/finance/date-controls-ux.test.tsx > uses a single row of preset buttons; a two-tap Custom calendar stays open until both dates
+AssertionError: expected null not to be null
+ ❯ src/components/finance/date-controls-ux.test.tsx:31:79
+     29|     expect(container.querySelector('button[aria-label="' + label + ' p…
+     30|   }
+     31|   expect(container.querySelector('select[aria-label="Comparison rule"]…
+       |                                                                               ^
+     32|   expect(container.querySelector('input[aria-label="From date"]')).not…
+     33|   await act(async () => (container.querySelector('button[aria-label="C…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/15]⎯
+
+ FAIL  src/components/finance/time-02-selector.test.tsx > exposes independent four-rule control and literal From/To
+AssertionError: expected null not to be null
+ ❯ src/components/finance/time-02-selector.test.tsx:17:21
+     15|  act(() => root.render(<DateRangeSelector value={initialDateSelection(…
+     16|  const select = container.querySelector('select[aria-label="Comparison…
+     17|  expect(select).not.toBeNull();
+       |                     ^
+     18|  expect(Array.from(select.options).map(o => o.value)).toEqual(["none",…
+     19|  expect((container.querySelector('input[aria-label="From date"]') as H…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/15]⎯
+
+ FAIL  src/components/finance/time-02-selector.test.tsx > changing preset preserves None
+AssertionError: expected "vi.fn()" to be called with arguments: [ { preset: 'last-365', …(3) } ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
+-     "comparison": "none",
++     "comparison": "previous-period",
+      "endDate": "2026-10-25",
+      "preset": "last-365",
+      "startDate": "2025-10-26",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/components/finance/time-02-selector.test.tsx:26:19
+     24|  act(() => root.render(<DateRangeSelector value={initialDateSelection(…
+     25|  act(() => (container.querySelector('button[aria-label="1Y period"]') …
+     26|  expect(onChange).toHaveBeenCalledWith({ preset: "last-365", startDate…
+       |                   ^
+     27| });
+     28| it("Activity suppresses comparator, not custom bounds", () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/15]⎯
+
+ FAIL  src/components/finance/time-02-selector.test.tsx > Activity suppresses comparator, not custom bounds
+AssertionError: expected null not to be null
+ ❯ src/components/finance/time-02-selector.test.tsx:31:71
+     29|  act(() => root.render(<DateRangeSelector value={initialDateSelection(…
+     30|  expect(container.querySelector('select[aria-label="Comparison rule"]'…
+     31|  expect(container.querySelector('input[aria-label="From date"]')).not.…
+       |                                                                       ^
+     32|  expect(container.querySelector('input[aria-label="To date"]')).not.to…
+     33| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/15]⎯
+
+ FAIL  src/components/finance/time-02-selector.test.tsx > labels mapped bounds and unequal inclusive durations
+AssertionError: expected '30D1YMonthYearCustom' to contain '2026-03-29'
+
+Expected: "2026-03-29"
+Received: "30D1YMonthYearCustom"
+
+ ❯ src/components/finance/time-02-selector.test.tsx:36:32
+     34| it("labels mapped bounds and unequal inclusive durations", () => {
+     35|  act(() => root.render(<DateRangeSelector value={{ preset: "custom", s…
+     36|  expect(container.textContent).toContain("2026-03-29");
+       |                                ^
+     37|  expect(container.textContent).toContain("2026-03-31");
+     38|  expect(container.textContent).toContain("2026-02-28");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/15]⎯
+
+ FAIL  src/components/finance/time-02-selector.test.tsx > independent comparison choice leaves selected dates untouched
+AssertionError: expected null not to be null
+ ❯ src/components/finance/time-02-selector.test.tsx:45:21
+     43|  act(() => root.render(<DateRangeSelector value={{ preset: "custom", s…
+     44|  const select = container.querySelector('select[aria-label="Comparison…
+     45|  expect(select).not.toBeNull();
+       |                     ^
+     46|  act(() => { select.value = "previous-year"; select.dispatchEvent(new …
+     47|  expect(onChange).toHaveBeenCalledWith({ preset: "custom", startDate: …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/15]⎯
+
+
+ Test Files  3 failed | 1 passed (4)
+      Tests  15 failed | 21 passed (36)
+   Start at  20:26:36
+   Duration  13.15s (transform 462ms, setup 0ms, import 976ms, tests 699ms, environment 9.51s)
+

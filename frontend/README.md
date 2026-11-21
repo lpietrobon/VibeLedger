@@ -69,3 +69,24 @@ replace CI when local memory pressure prevents a clean frontend toolchain run.
 - The frontend preview service builds the app, serves `/vibeledger/frontend/`, and
   proxies API calls to the local FastAPI service without exposing the bearer token
   to the browser.
+
+## Shared reporting dates
+
+Use `DateRangeSelection` and `rangeQuery` from `src/lib/dateRange.ts` for
+inclusive date-only request bounds. An explicit `comparison` rule controls KPI
+comparison independently of the preset and historical pace overlays. `none`
+omits comparison bounds. `initialDateSelection` defaults to None; pages may
+explicitly choose an initial rule. `defaultComparison` is a compatibility name
+for the selected rule, not an inferred preset default. `presetComparison` remains
+available for callers intentionally choosing an initial default only.
+
+`DateRangeSelector` preserves the comparison when presets or custom dates change,
+except All-time clears it. Native From/To fields keep invalid intermediate edits
+local, without emitting a new request selection. `allowComparison={false}` hides
+the rule for Activity; `allowAll` enables unbounded Activity dates. It labels
+literal bounds and unequal mapped durations. Backend reporting metadata, not the
+selector, owns coverage qualification. URL persistence and page-level parity are
+tracked separately by TIME-04/05.
+
+Run date tests with `TZ=America/Los_Angeles npm test` for the explicit local-clock
+fixtures; pure date arithmetic uses UTC calendar components, not instant slicing.

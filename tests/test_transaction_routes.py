@@ -26,7 +26,7 @@ def _seed_transaction(
         db.add(item)
         db.flush()
 
-        account = Account(plaid_account_id=account_plaid_id, item_id=item.id, name="Test Account")
+        account = Account(type="depository", plaid_account_id=account_plaid_id, item_id=item.id, name="Test Account")
         db.add(account)
         db.flush()
 

@@ -1,5 +1,22 @@
 export type Money = number;
 
+export type InvestmentSummary = {
+  accounts: Array<{ account_id: number; name: string; subtype?: string | null; value: Money | null; currency: string | null; valuation_status: string; coverage: string; freshness: string; observed_at: string | null }>;
+  total_value: Money | null;
+  currency: string | null;
+  holdings: Array<{ account_id: number; security_id: string; quantity: number | null; value: Money | null; currency: string | null; observed_at: string | null }>;
+  history: Array<{ account_id: number; date: string; value: Money | null; currency: string | null; provenance: string; observed_at: string | null }>;
+  state: "not_connected" | "empty" | "available";
+  as_of: { provenance: string | null; observed_at: string | null };
+  effective_range: { start_date: string | null; end_date: string | null };
+  gain: Money | null;
+  history_coverage: string;
+  duplicate_account_coverage: string;
+  completeness: string;
+  first_observed_date: string | null;
+  last_observed_date: string | null;
+};
+
 export type ReportingScope = {
   currency: string | null;
   currencyStatus: "empty" | "unknown" | "mixed" | "single";

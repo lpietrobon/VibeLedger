@@ -67,7 +67,7 @@ def test_unapplied_fingerprints_include_ones_whose_transaction_is_gone():
         item = Item(plaid_item_id="i-fp", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        account = Account(plaid_account_id="a-fp", item_id=item.id, name="Checking", mask="9999")
+        account = Account(type="depository", plaid_account_id="a-fp", item_id=item.id, name="Checking", mask="9999")
         db.add(account)
         db.flush()
 
@@ -138,8 +138,8 @@ def test_remove_item_leaves_no_rows_pointing_at_deleted_transactions():
         keeper = Item(plaid_item_id="i-keep", access_token_encrypted=encrypt_token("t"), status="active")
         db.add_all([item, keeper])
         db.flush()
-        account = Account(plaid_account_id="a-rm", item_id=item.id, name="Checking", mask="4444")
-        kept_account = Account(plaid_account_id="a-keep", item_id=keeper.id, name="Savings", mask="5555")
+        account = Account(type="depository", plaid_account_id="a-rm", item_id=item.id, name="Checking", mask="4444")
+        kept_account = Account(type="depository", plaid_account_id="a-keep", item_id=keeper.id, name="Savings", mask="5555")
         db.add_all([account, kept_account])
         db.flush()
 
@@ -219,8 +219,8 @@ def test_item_removal_cleans_rejections_and_detaches_retained_fingerprint():
         other_item = Item(plaid_item_id="remove-other", access_token_encrypted=encrypt_token("other"), status="active")
         db.add_all([old_item, other_item])
         db.flush()
-        old_account = Account(plaid_account_id="remove-old-account", item_id=old_item.id, name="Old")
-        other_account = Account(plaid_account_id="remove-other-account", item_id=other_item.id, name="Other")
+        old_account = Account(type="depository", plaid_account_id="remove-old-account", item_id=old_item.id, name="Old")
+        other_account = Account(type="depository", plaid_account_id="remove-other-account", item_id=other_item.id, name="Other")
         db.add_all([old_account, other_account])
         db.flush()
         doomed = Transaction(

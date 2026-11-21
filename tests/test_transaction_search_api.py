@@ -15,8 +15,8 @@ def _seed():
         item = Item(plaid_item_id="i-search", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        checking = Account(plaid_account_id="a-chk", item_id=item.id, name="Chase Checking", mask="1111")
-        card = Account(plaid_account_id="a-cc", item_id=item.id, name="Amex Card", mask="2222")
+        checking = Account(type="depository", plaid_account_id="a-chk", item_id=item.id, name="Chase Checking", mask="1111")
+        card = Account(type="depository", plaid_account_id="a-cc", item_id=item.id, name="Amex Card", mask="2222")
         db.add_all([checking, card])
         db.flush()
 

@@ -12,7 +12,7 @@ def _seed_account():
     item = Item(plaid_item_id="refund-item", access_token_encrypted=encrypt_token("t"), status="active")
     db.add(item)
     db.flush()
-    account = Account(plaid_account_id="refund-account", item_id=item.id, name="Card")
+    account = Account(type="depository", plaid_account_id="refund-account", item_id=item.id, name="Card")
     db.add(account)
     db.flush()
     return db, item, account

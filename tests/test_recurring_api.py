@@ -34,8 +34,8 @@ def _seed():
         item = Item(plaid_item_id="i-rec", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        checking = Account(currency="USD", plaid_account_id="a-rec-chk", item_id=item.id, name="Checking")
-        credit = Account(currency="USD", plaid_account_id="a-rec-cc", item_id=item.id, name="Card")
+        checking = Account(type="depository", currency="USD", plaid_account_id="a-rec-chk", item_id=item.id, name="Checking")
+        credit = Account(type="depository", currency="USD", plaid_account_id="a-rec-cc", item_id=item.id, name="Card")
         db.add_all([checking, credit])
         db.flush()
 
@@ -102,7 +102,7 @@ def _seed_noisy_descriptors():
         item = Item(plaid_item_id="i-zelle", access_token_encrypted=encrypt_token("t"), status="active")
         db.add(item)
         db.flush()
-        checking = Account(
+        checking = Account(type="depository",
             plaid_account_id="a-zelle-chk",
             item_id=item.id,
             name="Checking",

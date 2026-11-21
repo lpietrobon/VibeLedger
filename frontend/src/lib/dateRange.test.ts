@@ -18,8 +18,8 @@ describe("date-only range contract (TIME-02)", () => {
     expect(comparisonBounds({ startDate: "2026-01-02", endDate: "2026-01-04" }, "previous-period"))
       .toEqual({ startDate: "2025-12-30", endDate: "2026-01-01" });
   });
-  it("provides the preset's implicit comparison and rejects invalid day ranges", () => {
-    expect(rangeQuery(initialDateSelection("last-30", "2026-10-25"))).toEqual({
+  it("provides the explicitly selected comparison and rejects invalid day ranges", () => {
+    expect(rangeQuery({ ...initialDateSelection("last-30", "2026-10-25"), comparison: "previous-period" })).toEqual({
       startDate: "2026-09-26", endDate: "2026-10-25",
       compareStartDate: "2026-08-27", compareEndDate: "2026-09-25",
     });
@@ -31,7 +31,7 @@ describe("date-only range contract (TIME-02)", () => {
 
 describe("unified multi-period chart contract", () => {
   it("maps three previous months from the original dates, not recursively clipped prior dates", () => {
-    const selection = initialDateSelection("current-month", "2026-03-31");
+    const selection = { ...initialDateSelection("current-month", "2026-03-31"), comparison: "previous-month" as const };
     expect(comparisonPeriods(selection, 3)).toEqual([
       { startDate: "2026-02-01", endDate: "2026-02-28" },
       { startDate: "2026-01-01", endDate: "2026-01-31" },
@@ -65,7 +65,7 @@ describe("unified multi-period chart contract", () => {
 });
 
 it("shows full historical months on the pace chart without changing MTD KPIs", () => {
-  const selection = initialDateSelection("current-month", "2026-11-04");
+  const selection = { ...initialDateSelection("current-month", "2026-11-04"), comparison: "previous-month" as const };
   expect(chartComparisonPeriods(selection, 3)).toEqual([
     { startDate: "2026-10-01", endDate: "2026-10-31" },
     { startDate: "2026-09-01", endDate: "2026-09-30" },
@@ -79,7 +79,7 @@ it("shows full historical months on the pace chart without changing MTD KPIs", (
 
 
 it("shows full historical years without changing YTD KPIs or rolling years", () => {
-  const selection = initialDateSelection("current-year", "2024-02-29");
+  const selection = { ...initialDateSelection("current-year", "2024-02-29"), comparison: "previous-year" as const };
   expect(chartComparisonPeriods(selection, 3)).toEqual([
     { startDate: "2023-01-01", endDate: "2023-12-31" },
     { startDate: "2022-01-01", endDate: "2022-12-31" },

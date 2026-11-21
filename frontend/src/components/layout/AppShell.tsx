@@ -17,7 +17,7 @@ import { invalidateLedger } from "@/lib/api/cache";
 
 const NAV = [
   { to: "/", label: "Spending", short: "Spending", icon: TrendingDown },
-  { to: "/overview", label: "Overview", short: "Overview", icon: LayoutDashboard },
+  { to: "/investments", label: "Investments", short: "Investments", icon: LayoutDashboard },
   { to: "/recurring", label: "Recurring", short: "Recurring", icon: Repeat },
   { to: "/transactions", label: "Transactions", short: "Activity", icon: Receipt },
   { to: "/accounts", label: "Accounts", short: "Accounts", icon: Wallet },

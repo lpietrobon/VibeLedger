@@ -12,6 +12,7 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
+from app.services.account_domain import spending_activity, is_spending_account
 from app.models.models import Transaction, TransactionAnnotation, TransferPair
 from app.services.duplicate_corrections import active_duplicate_ids
 from app.services.category_resolver import detailed_category, friendly_category
@@ -62,7 +63,7 @@ def classify_refunds(db: Session, lookback_days: int = 540) -> dict:
 
     active_duplicates = active_duplicate_ids(db)
     transactions = (
-        db.query(Transaction)
+        spending_activity(db.query(Transaction))
         .filter(Transaction.pending == False)  # noqa: E712
         .order_by(Transaction.date.asc(), Transaction.id.asc())
         .all()

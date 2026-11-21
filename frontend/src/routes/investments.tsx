@@ -1,0 +1,29 @@
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { AppShell } from "@/components/layout/AppShell";
+import { Section } from "@/components/finance/Section";
+import { KpiCard } from "@/components/finance/KpiCard";
+import { getInvestmentSummary } from "@/lib/api/client";
+import { formatCurrency, formatDate } from "@/lib/format";
+
+export default function InvestmentsPage() {
+  const [taxFilter, setTaxFilter] = useState("all");
+  const [accountId, setAccountId] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const query = useQuery({ queryKey: ["investments-summary", taxFilter, accountId, startDate, endDate], queryFn: () => getInvestmentSummary({ taxFilter, accountIds: accountId ? [Number(accountId)] : null, startDate: startDate || undefined, endDate: endDate || undefined }) });
+  const data = query.data;
+  return <AppShell>
+    <div className="mb-4"><h1 className="text-xl font-semibold tracking-tight">Investments</h1><p className="text-sm text-muted-foreground">Observed account values and holdings. Performance will appear when supported.</p></div>
+    {query.isError ? <p role="alert" className="mb-4 rounded-md border border-red-300 bg-red-50 p-3 text-sm">Investment data could not be loaded: {query.error.message}</p> : null}
+    {data ? <div className="mb-4 flex flex-wrap gap-3"><label className="text-sm">Investment scope<select aria-label="Investment tax scope" value={taxFilter} onChange={e => setTaxFilter(e.target.value)} className="ml-2 rounded-md border border-input bg-background px-2 py-1"><option value="all">All investments</option><option value="taxable">Taxable</option><option value="tax-deferred">Tax-deferred</option><option value="roth">Roth</option></select></label><label className="text-sm">Account<select aria-label="Investment account" value={accountId} onChange={e => setAccountId(e.target.value)} className="ml-2 rounded-md border border-input bg-background px-2 py-1"><option value="">All accounts</option>{data.accounts.map(a => <option key={a.account_id} value={a.account_id}>{a.name}</option>)}</select></label><label className="text-sm">From<input aria-label="Investment history start date" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="ml-2 rounded-md border border-input bg-background px-2 py-1" /></label><label className="text-sm">To<input aria-label="Investment history end date" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="ml-2 rounded-md border border-input bg-background px-2 py-1" /></label></div> : null}
+    {data?.state === "not_connected" ? <section className="rounded-lg border border-border bg-card p-6"><h2 className="font-semibold">No investment accounts connected</h2><p className="mt-2 text-sm text-muted-foreground">Connect an investment account from Accounts to see observed values.</p><a className="mt-4 inline-block underline" href="/accounts">Go to Accounts</a></section> : null}
+    {data?.state === "empty" ? <p className="rounded-lg border border-border bg-card p-6 text-sm">Connected, but no observed valuation is available yet. This is not a zero balance.</p> : null}
+    {data?.state === "available" ? <>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3"><KpiCard label="Total observed value" value={data.total_value == null ? "Unavailable" : formatCurrency(data.total_value, { compact: true })} tone="net" /><KpiCard label="Gain" value={data.gain == null ? "Not available" : formatCurrency(data.gain, { compact: true })} tone="income" /></div>
+      <p className="mt-3 text-xs text-muted-foreground">As of {data.as_of.observed_at ? formatDate(data.as_of.observed_at.slice(0, 10)) : "unknown"} · {data.as_of.provenance ?? "missing"} · {data.completeness} · {data.history_coverage} · effective {data.effective_range.start_date ?? "since tracked"} to {data.effective_range.end_date ?? "latest"} · observed {data.first_observed_date ?? "unknown"} to {data.last_observed_date ?? "unknown"}</p>
+      <div className="mt-4 grid gap-4 md:grid-cols-2"><Section title="Accounts"><ul className="divide-y divide-border">{data.accounts.map(a => <li key={a.account_id} className="flex justify-between gap-3 py-3"><span><span className="block text-sm font-medium">{a.name}</span><span className="text-xs text-muted-foreground">{a.subtype ?? "investment"} · {a.freshness} · {a.coverage}</span></span><span className="text-sm font-semibold">{a.value == null ? "Unavailable" : formatCurrency(a.value)}</span></li>)}</ul></Section><Section title="Holdings"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">Observed investment holdings</caption><thead><tr><th className="py-2">Security</th><th className="py-2">Value</th><th className="py-2">Observed</th></tr></thead><tbody>{data.holdings.map(h => <tr key={`${h.account_id}-${h.security_id}`} className="border-t border-border"><td className="py-2">{h.security_id}</td><td className="py-2">{h.value == null ? "Unavailable" : formatCurrency(h.value)}</td><td className="py-2">{h.observed_at ? formatDate(h.observed_at.slice(0, 10)) : "—"}</td></tr>)}</tbody></table></div></Section></div>
+      <Section title="Observed value history" className="mt-4"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">Observed value history; exact dates and provenance</caption><thead><tr><th className="py-2">Date</th><th className="py-2">Value</th><th className="py-2">Provenance</th></tr></thead><tbody>{data.history.map((h, i) => <tr key={`${h.account_id}-${h.date}-${i}`} className="border-t border-border"><td className="py-2">{h.date}</td><td className="py-2">{h.value == null ? "Unavailable" : formatCurrency(h.value)}</td><td className="py-2">{h.provenance}</td></tr>)}</tbody></table></div></Section>
+    </> : null}
+  </AppShell>;
+}

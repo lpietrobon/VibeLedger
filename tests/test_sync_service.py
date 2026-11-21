@@ -539,7 +539,7 @@ def test_historical_counterpart_is_reconciliable_and_visible_without_rebuild():
         item = Item(plaid_item_id="item-history-counterpart", access_token_encrypted=encrypt_token("tok"), status="active")
         db.add(item)
         db.flush()
-        checking = Account(plaid_account_id="acct-100", item_id=item.id, name="Checking", currency="USD")
+        checking = Account(type="depository", plaid_account_id="acct-100", item_id=item.id, name="Checking", currency="USD")
         db.add(checking)
         db.flush()
         db.add(Transaction(
@@ -799,7 +799,7 @@ def test_source_update_invalidates_derived_matches_but_keeps_notes():
         item = _lifecycle_item(db)
         service.sync_item(db, item.id)
         tx = db.query(Transaction).one()
-        account = Account(plaid_account_id="lifecycle-counterparty", item_id=item.id, name="Card")
+        account = Account(type="depository", plaid_account_id="lifecycle-counterparty", item_id=item.id, name="Card")
         db.add(account)
         db.flush()
         counterparty = Transaction(
