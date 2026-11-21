@@ -52,6 +52,12 @@ npm run test        # vitest (client mapping contracts)
 npm run build       # vite build
 ```
 
+GitHub Actions is the authoritative validation environment for these gates. The
+`Tests / frontend` job runs all three checks on every push and pull request and
+retains the production `dist/` artifact for seven days. Homepi deployment smoke
+checks confirm that an already-validated build starts and renders; they do not
+replace CI when local memory pressure prevents a clean frontend toolchain run.
+
 ## Current State
 
 - Uses real VibeLedger data through the same-origin `/vibeledger/api` proxy.
