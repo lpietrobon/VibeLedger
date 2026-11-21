@@ -258,7 +258,7 @@ describe("PI-13 frozen category drilldown contract", () => {
       category: CATEGORY,
       startDate: BOUNDS.startDate,
       endDate: "2032-04-15",
-      limit: 500,
+      limit: 2000,
       sort: "date",
       order: "desc",
     });
